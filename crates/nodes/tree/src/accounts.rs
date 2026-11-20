@@ -9,8 +9,12 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::path::Path;
 
 const NAME: &str = "gaia.tree.accounts";
-/// Ids not given are the lowest free from here.
-const FIRST_ID: u32 = 1000;
+/// Ids not given are the lowest free in this range: Buildroot's mkusers
+/// range for system users, which every user a component states is (a
+/// daemon's, with no login). The base's ids are taken first, so an id is
+/// the same on every build of the same base and set of declarations.
+const FIRST_ID: u32 = 100;
+const LAST_ID: u32 = 999;
 const FILES: [(&str, u32); 3] = [
     ("etc/passwd", 0o644),
     ("etc/group", 0o644),
@@ -21,7 +25,8 @@ const FILES: [(&str, u32); 3] = [
 /// does not remake it.
 ///
 /// The layer `accounts` that replaces the base's `/etc/passwd`,
-/// `/etc/group` and `/etc/shadow` with them plus `users` and `groups`.
+/// `/etc/group` and `/etc/shadow` with them plus `users` and `groups`
+/// (JSON lists of [`Account`] and [`AccountGroup`]).
 #[node(
     id = "gaia.tree.accounts",
     inputs(store, base, users, groups),
@@ -30,15 +35,25 @@ const FILES: [(&str, u32); 3] = [
 pub fn tree_accounts(
     store: &str,
     base: Tree,
-    users: Vec<Account>,
-    groups: Vec<AccountGroup>,
+    users: &str,
+    groups: &str,
     cx: &Ctx,
 ) -> Result<Layer, StepError> {
+    let users: Vec<Account> = serde_json::from_str(users)
+        .map_err(|e| StepError::body(NAME, format!("the users are not a list of users: {e}")))?;
+    let groups: Vec<AccountGroup> = serde_json::from_str(groups)
+        .map_err(|e| StepError::body(NAME, format!("the groups are not a list of groups: {e}")))?;
     let store = Store::open(store).map_err(StepError::store(NAME))?;
     let root = base
         .object
         .path_in(&store)
         .ok_or_else(|| StepError::body(NAME, "the base tree is not in the store"))?;
+    if root.join("etc/gshadow").exists() {
+        return Err(StepError::body(
+            NAME,
+            "the base has /etc/gshadow, which components' groups are not added to",
+        ));
+    }
     let read = |name: &str| std::fs::read_to_string(root.join(name)).unwrap_or_default();
     let (passwd, group, shadow) = (read("etc/passwd"), read("etc/group"), read("etc/shadow"));
     let files =
@@ -103,6 +118,10 @@ fn plan(
         let uid = fields.get(2).and_then(|u| u.parse().ok());
         base_users.insert(fields[0].to_string(), uid.unwrap_or(u32::MAX));
     }
+    let base_uids: BTreeMap<u32, &str> = base_users
+        .iter()
+        .map(|(name, uid)| (*uid, name.as_str()))
+        .collect();
     let mut lines: Vec<GroupLine> = Vec::new();
     for line in group.lines().filter(|l| !l.trim().is_empty()) {
         let fields: Vec<&str> = line.split(':').collect();
@@ -156,7 +175,42 @@ fn plan(
         }
     }
 
-    // Ids in use, then each new group and user.
+    // A fixed id is its name's alone: not the base's for another name,
+    // not another declaration's.
+    let mut fixed_gids: BTreeMap<u32, &AccountGroup> = BTreeMap::new();
+    for g in wanted_groups.values() {
+        let Some(gid) = g.gid else { continue };
+        if let Some(line) = lines.iter().find(|l| l.gid == gid && l.name != g.name) {
+            return Err(format!(
+                "group {} in {}: gid {gid} is the base's group {}",
+                g.name, g.owner, line.name
+            ));
+        }
+        if let Some(other) = fixed_gids.insert(gid, g) {
+            return Err(format!(
+                "gid {gid}: group {} in {} and group {} in {}",
+                other.name, other.owner, g.name, g.owner
+            ));
+        }
+    }
+    let mut fixed_uids: BTreeMap<u32, &Account> = BTreeMap::new();
+    for u in wanted_users.values() {
+        let Some(uid) = u.uid else { continue };
+        if let Some(other) = base_uids.get(&uid).filter(|other| **other != u.name) {
+            return Err(format!(
+                "user {} in {}: uid {uid} is the base's user {other}",
+                u.name, u.owner
+            ));
+        }
+        if let Some(other) = fixed_uids.insert(uid, u) {
+            return Err(format!(
+                "uid {uid}: user {} in {} and user {} in {}",
+                other.name, other.owner, u.name, u.owner
+            ));
+        }
+    }
+
+    // Ids in use, then each new group and user, in name order.
     let mut gids: BTreeSet<u32> = lines.iter().map(|l| l.gid).collect();
     let mut uids: BTreeSet<u32> = base_users.values().copied().collect();
     uids.extend(wanted_users.values().filter_map(|u| u.uid));
@@ -172,9 +226,10 @@ fn plan(
                     _ => Ok(()),
                 };
             }
-            let gid = gid
-                .or(own.filter(|id| !gids.contains(id)))
-                .unwrap_or_else(|| free(&gids));
+            let gid = match gid.or(own.filter(|id| !gids.contains(id))) {
+                Some(gid) => gid,
+                None => free(&gids).ok_or_else(|| format!("group {name}: {FULL}"))?,
+            };
             gids.insert(gid);
             lines.push(GroupLine {
                 name: name.to_string(),
@@ -197,7 +252,10 @@ fn plan(
                 ));
             }
         } else {
-            let uid = u.uid.unwrap_or_else(|| free(&uids));
+            let uid = match u.uid {
+                Some(uid) => uid,
+                None => free(&uids).ok_or_else(|| format!("user {}: {FULL}", u.name))?,
+            };
             uids.insert(uid);
             new_users.push((*u, uid));
         }
@@ -225,7 +283,8 @@ fn plan(
         let home = u.home.as_deref().unwrap_or("/");
         let shell = u.shell.as_deref().unwrap_or("/bin/false");
         passwd_out.push_str(&format!("{}:x:{uid}:{gid}::{home}:{shell}\n", u.name));
-        shadow_out.push_str(&format!("{}:!:1::::::\n", u.name));
+        // As mkusers writes a package's system user: no password can match.
+        shadow_out.push_str(&format!("{}:*:::::::\n", u.name));
     }
     for u in wanted_users.values() {
         for name in &u.groups {
@@ -253,9 +312,10 @@ fn plan(
     Ok([passwd_out, group_out, shadow_out])
 }
 
-/// The lowest id from [`FIRST_ID`] not in `used`.
-fn free(used: &BTreeSet<u32>) -> u32 {
-    (FIRST_ID..)
-        .find(|id| !used.contains(id))
-        .unwrap_or(u32::MAX)
+/// Why an id could not be given.
+const FULL: &str = "no id from 100 to 999 is free";
+
+/// The lowest id from [`FIRST_ID`] to [`LAST_ID`] not in `used`.
+fn free(used: &BTreeSet<u32>) -> Option<u32> {
+    (FIRST_ID..=LAST_ID).find(|id| !used.contains(id))
 }

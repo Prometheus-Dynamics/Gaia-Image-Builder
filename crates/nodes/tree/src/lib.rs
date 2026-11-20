@@ -7,11 +7,16 @@
 //!   image with their modes and owners. Gives the component's
 //!   [`Layer`](gaia_types::Layer).
 //! - **`gaia.tree.accounts`**: the users and groups components need, added
-//!   to the base's `/etc/passwd`, `/etc/group` and `/etc/shadow`. Ids not
-//!   given are the lowest free from 1000, in name order. Gives a layer that
-//!   replaces those three files.
-//! - **`gaia.tree.services`**: a component's enabled units as the links
-//!   `systemctl enable` makes, read from each unit's `[Install]` section.
+//!   to the base's `/etc/passwd`, `/etc/group` and `/etc/shadow` (a locked
+//!   `*` shadow entry each, as mkusers writes a system user's). Ids not
+//!   given are the lowest free from 100 to 999 (mkusers' system range)
+//!   after the base's and the fixed ones: groups by name, then users by
+//!   name, a user's own group taking its uid when that is free. A fixed id
+//!   another name has, a missing group, or a name declared two ways is an
+//!   error naming both. Gives a layer that replaces those three files.
+//! - **`gaia.tree.services`**: the units components enable, as the links
+//!   `systemctl enable` makes, read from each unit's `[Install]` section in
+//!   the tree the other layers merge into.
 //! - **`gaia.tree.merge`**: layers into one tree, in order. The node takes
 //!   them as a fan-in (`layers0`, `layers1`, ...), one edge per layer;
 //!   [`merge_layers`] takes a slice. Two layers
@@ -61,7 +66,7 @@ pub use overlay::{
 pub use pick::tree_pick;
 pub use place::tree_place;
 pub use role::tree_role;
-pub use services::tree_services;
+pub use services::{enable_units, tree_services, undeclared};
 pub use under::tree_under;
 
 use daedalus::prelude::*;

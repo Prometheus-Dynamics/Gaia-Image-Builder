@@ -2099,6 +2099,106 @@ fn image_os(
             g, at, component, build, host_ports, inputs,
         )?);
     }
+    // The users, groups and enabled units the components state: the base's
+    // account files with theirs added, and the links `systemctl enable`
+    // makes, read from the tree the layers before merge into. Both are in
+    // the root filesystem and the slot's tree alike.
+    let users: Vec<gaia_types::Account> = at
+        .members
+        .iter()
+        .flat_map(|component| {
+            component.users.iter().map(|user| gaia_types::Account {
+                owner: component.name.clone(),
+                name: user.name.clone(),
+                uid: user.uid,
+                group: user.group.clone(),
+                groups: user.groups.clone(),
+                home: user.home.clone(),
+                shell: user.shell.clone(),
+            })
+        })
+        .collect();
+    let groups: Vec<gaia_types::AccountGroup> = at
+        .members
+        .iter()
+        .flat_map(|component| {
+            component
+                .groups
+                .iter()
+                .map(|group| gaia_types::AccountGroup {
+                    owner: component.name.clone(),
+                    name: group.name.clone(),
+                    gid: group.gid,
+                })
+        })
+        .collect();
+    let units: Vec<(String, String)> = at
+        .members
+        .iter()
+        .flat_map(|component| {
+            component
+                .services
+                .iter()
+                .filter(|service| service.enable)
+                .map(|service| (component.name.clone(), service.unit.clone()))
+        })
+        .collect();
+    // The services step also warns when a component ships a sysusers.d or
+    // preset file its declarations do not match, so it runs for those too.
+    let ships_config = at.members.iter().any(|component| {
+        component.install.iter().any(|install| {
+            ["sysusers.d", "system-preset"].iter().any(|dir| {
+                install.to.contains(&format!("/{dir}/")) || install.to.ends_with(&format!("/{dir}"))
+            })
+        })
+    });
+    if !(units.is_empty() && users.is_empty() && groups.is_empty() && !ships_config) {
+        let node = g.add(
+            "gaia.tree.services",
+            format!("{}.services", at.image.name),
+            file,
+            &key,
+        )?;
+        g.set(
+            node,
+            "units",
+            Lit::Str(serde_json::to_string(&units).unwrap_or_default()),
+        );
+        g.set(
+            node,
+            "users",
+            Lit::Str(serde_json::to_string(&users).unwrap_or_default()),
+        );
+        g.set(
+            node,
+            "groups",
+            Lit::Str(serde_json::to_string(&groups).unwrap_or_default()),
+        );
+        for (k, layer) in layers.iter().enumerate() {
+            g.edge((*layer, "layer"), (node, &format!("layers{k}")));
+        }
+        layers.push(node);
+    }
+    if !(users.is_empty() && groups.is_empty()) {
+        let node = g.add(
+            "gaia.tree.accounts",
+            format!("{}.accounts", at.image.name),
+            file,
+            &key,
+        )?;
+        g.set(
+            node,
+            "users",
+            Lit::Str(serde_json::to_string(&users).unwrap_or_default()),
+        );
+        g.set(
+            node,
+            "groups",
+            Lit::Str(serde_json::to_string(&groups).unwrap_or_default()),
+        );
+        g.edge((os, "rootfs"), (node, "base"));
+        layers.push(node);
+    }
     let merge = g.add(
         "gaia.tree.merge",
         format!("{}.rootfs", at.image.name),

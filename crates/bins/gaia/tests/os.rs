@@ -2142,3 +2142,73 @@ fn a_kernel_module_is_built_against_the_image_kernel() {
         "hello-module is a kernel module, and the board generic-test of the image zero-3e-demo has no kernel build of its own",
     );
 }
+
+/// The users, groups and units a component states reach what ships: the
+/// accounts and services layers are in the slot's tree, the EROFS's input,
+/// as in the root filesystem's; the services read the tree of the layers
+/// before them, and the accounts the OS's.
+#[test]
+fn a_components_users_and_services_are_in_the_tree_that_ships() {
+    let dir = project();
+    let component = dir
+        .path()
+        .join("examples/components/usb-gadget-network/component.toml");
+    let mut text = std::fs::read_to_string(&component).expect("read");
+    text.push_str(
+        "\n[[groups]]\nname = \"gadget\"\n\n[[users]]\nname = \"gadget\"\ngroup = \"gadget\"\ngroups = [\"dialout\"]\n\n[[services]]\nunit = \"usb-gadget.service\"\n\n[[services]]\nunit = \"left-off.service\"\nenable = false\n",
+    );
+    std::fs::write(&component, text).expect("write");
+    let out = plan(dir.path(), &[]);
+    assert!(out.status.success());
+    let text = String::from_utf8_lossy(&out.stdout);
+    for line in [
+        "zero-3e-demo.os.rootfs -> zero-3e-demo.accounts.base",
+        "zero-3e-demo.os.layer.layer -> zero-3e-demo.services.layers0",
+        "zero-3e-demo.usb-gadget-network.place0.layer -> zero-3e-demo.services.layers2",
+        "zero-3e-demo.services.layer -> zero-3e-demo.rootfs.layers",
+        "zero-3e-demo.accounts.layer -> zero-3e-demo.rootfs.layers",
+        "zero-3e-demo.services.layer -> zero-3e-demo.system.layers",
+        "zero-3e-demo.accounts.layer -> zero-3e-demo.system.layers",
+        "zero-3e-demo.system.tree -> zero-3e-demo::erofs.tree",
+    ] {
+        assert!(text.contains(line), "the plan has no line {line:?}");
+    }
+    // What each node is given: the enabled units by component, and the
+    // users and groups with the component that states them.
+    let out = plan(dir.path(), &["--json"]);
+    assert!(out.status.success());
+    let json: serde_json::Value = serde_json::from_slice(&out.stdout).expect("json");
+    let consts = |label: &str| {
+        json["graph"]["graph"]["nodes"]
+            .as_array()
+            .expect("nodes")
+            .iter()
+            .find(|n| n["label"] == label)
+            .unwrap_or_else(|| panic!("no node {label}"))["consts"]
+            .clone()
+    };
+    assert_eq!(
+        consts("zero-3e-demo.services")["units"]["value"],
+        r#"[["usb-gadget-network","usb-gadget.service"]]"#
+    );
+    let accounts = consts("zero-3e-demo.accounts");
+    let users: serde_json::Value =
+        serde_json::from_str(accounts["users"]["value"].as_str().expect("users")).expect("json");
+    assert_eq!(users[0]["owner"], "usb-gadget-network");
+    assert_eq!(users[0]["groups"][0], "dialout");
+    assert_eq!(
+        accounts["groups"]["value"],
+        r#"[{"owner":"usb-gadget-network","name":"gadget","gid":null}]"#
+    );
+}
+
+/// An image whose components state none has neither layer.
+#[test]
+fn without_users_or_services_there_is_no_accounts_or_services_layer() {
+    let dir = project();
+    let out = plan(dir.path(), &[]);
+    assert!(out.status.success());
+    let text = String::from_utf8_lossy(&out.stdout);
+    assert!(!text.contains("zero-3e-demo.accounts"));
+    assert!(!text.contains("zero-3e-demo.services"));
+}

@@ -2,7 +2,7 @@
 
 use gaia_step::Ctx;
 use gaia_store::{Store, tree_digest};
-use gaia_tree::{merge_layers, tree_accounts, tree_place, tree_services};
+use gaia_tree::{enable_units, merge_layers, tree_accounts, tree_place, undeclared};
 use gaia_types::{
     Account, AccountGroup, FileEntry, Layer, Owned, Placement, Placements, Tree, owned_digest,
 };
@@ -302,37 +302,98 @@ fn walk(dir: &Path, prefix: &str, out: &mut Vec<String>) {
     }
 }
 
+/// `stored`, with `links` (path, target) as symbolic links.
+fn stored_with_links(
+    f: &Fixture,
+    name: &str,
+    files: &[(&str, &str)],
+    links: &[(&str, &str)],
+) -> Tree {
+    let dir = f.root.join("src").join(name);
+    for (path, to) in links {
+        let path = dir.join(path);
+        std::fs::create_dir_all(path.parent().expect("parent")).expect("mkdir");
+        std::os::unix::fs::symlink(to, &path).expect("link");
+    }
+    stored(f, name, files)
+}
+
+fn layer(owner: &str, tree: Tree) -> Layer {
+    Layer {
+        owner: owner.into(),
+        tree,
+        replaces: Vec::new(),
+    }
+}
+
+fn user(
+    owner: &str,
+    name: &str,
+    uid: Option<u32>,
+    group: Option<&str>,
+    groups: &[&str],
+) -> Account {
+    Account {
+        owner: owner.into(),
+        name: name.into(),
+        uid,
+        group: group.map(str::to_string),
+        groups: groups.iter().map(|g| g.to_string()).collect(),
+        home: None,
+        shell: None,
+    }
+}
+
+fn group(owner: &str, name: &str, gid: Option<u32>) -> AccountGroup {
+    AccountGroup {
+        owner: owner.into(),
+        name: name.into(),
+        gid,
+    }
+}
+
+fn accounts(
+    f: &Fixture,
+    base: &Layer,
+    users: &[Account],
+    groups: &[AccountGroup],
+) -> Result<Layer, String> {
+    tree_accounts(
+        &f.store,
+        base.tree.clone(),
+        &serde_json::to_string(users).expect("json"),
+        &serde_json::to_string(groups).expect("json"),
+        &Ctx::new(),
+    )
+    .map_err(|e| e.to_string())
+}
+
+fn units(pairs: &[(&str, &str)]) -> Vec<(String, String)> {
+    pairs
+        .iter()
+        .map(|(o, u)| (o.to_string(), u.to_string()))
+        .collect()
+}
+
+/// A merged tree's file.
+fn read_in(f: &Fixture, tree: &Tree, path: &str) -> String {
+    let store = Store::open(&f.store).expect("store");
+    let dir = tree.object.path_in(&store).expect("in");
+    std::fs::read_to_string(dir.join(path)).expect(path)
+}
+
 #[test]
 fn accounts_and_services_are_generated_from_descriptions() {
     let f = fixture();
     let os = base(&f);
+    let mut camera_user = user("camera", "camera", None, None, &["dialout", "video"]);
+    camera_user.home = Some("/var/lib/camera".into());
     let users = vec![
-        Account {
-            owner: "camera".into(),
-            name: "camera".into(),
-            uid: None,
-            group: None,
-            groups: vec!["dialout".into(), "video".into()],
-            home: Some("/var/lib/camera".into()),
-            shell: None,
-        },
-        Account {
-            owner: "web".into(),
-            name: "www".into(),
-            uid: Some(1500),
-            group: Some("video".into()),
-            groups: vec![],
-            home: None,
-            shell: None,
-        },
+        camera_user,
+        user("web", "www", Some(1500), Some("video"), &[]),
     ];
-    let groups = vec![AccountGroup {
-        owner: "camera".into(),
-        name: "video".into(),
-        gid: None,
-    }];
-    let accounts =
-        tree_accounts(&f.store, os.tree.clone(), users, groups, &Ctx::new()).expect("accounts");
+    let groups = vec![group("camera", "video", None)];
+    let accounts = accounts(&f, &os, &users, &groups).expect("accounts");
     let unit = "[Unit]\nDescription=camera\n[Service]\nExecStart=/usr/bin/camera\n[Install]\nWantedBy=multi-user.target\n";
     let camera = place(
         &f,
@@ -348,40 +409,40 @@ fn accounts_and_services_are_generated_from_descriptions() {
             ("camera", "/usr/bin/camera", Some(0o755), 0),
         ],
     );
-    let services = tree_services(
+    let services = enable_units(
         &f.store,
-        "camera",
-        camera.tree.clone(),
-        vec!["camera.service".into()],
+        &[os.clone(), camera.clone()],
+        &units(&[("camera", "camera.service")]),
         &Ctx::new(),
     )
     .expect("services");
     let (tree, _) =
         merge_layers(&f.store, &[os, camera, services, accounts], &Ctx::new()).expect("merges");
-    let store = Store::open(&f.store).expect("store");
-    let dir = tree.object.path_in(&store).expect("in");
-    let read = |p: &str| std::fs::read_to_string(dir.join(p)).expect(p);
+    let read = |p: &str| read_in(&f, &tree, p);
     println!(
         "--- passwd\n{}--- group\n{}--- shadow\n{}",
         read("etc/passwd"),
         read("etc/group"),
         read("etc/shadow")
     );
+    // Groups by name, then users by name, from 100: video 100, camera's
+    // uid 100, its own group 101 (100 is video's).
     assert_eq!(
         read("etc/passwd"),
-        "root:x:0:0:root:/root:/bin/sh\ncamera:x:1000:1001::/var/lib/camera:/bin/false\nwww:x:1500:1000::/:/bin/false\n"
+        "root:x:0:0:root:/root:/bin/sh\ncamera:x:100:101::/var/lib/camera:/bin/false\nwww:x:1500:100::/:/bin/false\n"
     );
     assert_eq!(
         read("etc/group"),
-        "root:x:0:\ndialout:x:20:camera\nvideo:x:1000:camera\ncamera:x:1001:\n"
+        "root:x:0:\ndialout:x:20:camera\nvideo:x:100:camera\ncamera:x:101:\n"
     );
+    assert_eq!(
+        read("etc/shadow"),
+        "root:::::::\ncamera:*:::::::\nwww:*:::::::\n"
+    );
+    let store = Store::open(&f.store).expect("store");
+    let dir = tree.object.path_in(&store).expect("in");
     let link = dir.join("etc/systemd/system/multi-user.target.wants/camera.service");
     let target = std::fs::read_link(&link).expect("link");
-    println!(
-        "{} -> {}",
-        link.strip_prefix(&dir).expect("in").display(),
-        target.display()
-    );
     assert_eq!(target, Path::new("/usr/lib/systemd/system/camera.service"));
     let shadow = tree
         .entries
@@ -391,44 +452,338 @@ fn accounts_and_services_are_generated_from_descriptions() {
     assert_eq!(shadow.mode, 0o600);
 }
 
+/// The ids do not depend on the order components are listed in.
 #[test]
-fn a_unit_without_an_install_section_cannot_be_enabled() {
+fn ids_are_the_same_in_any_order() {
     let f = fixture();
-    let tree = stored(
-        &f,
-        "units",
-        &[(
-            "usr/lib/systemd/system/oneshot.service",
-            "[Service]\nExecStart=/bin/true\n",
-        )],
+    let os = base(&f);
+    let users = vec![
+        user("b", "zeta", None, None, &["shared"]),
+        user("a", "alpha", None, Some("shared"), &[]),
+        user("c", "mid", Some(901), None, &[]),
+    ];
+    let groups = vec![group("a", "shared", None), group("c", "late", Some(950))];
+    let files = |users: &[Account], groups: &[AccountGroup]| {
+        let layer = accounts(&f, &os, users, groups).expect("accounts");
+        ["etc/passwd", "etc/group", "etc/shadow"].map(|p| read_in(&f, &layer.tree, p))
+    };
+    let forward = files(&users, &groups);
+    let mut users_back = users.clone();
+    users_back.reverse();
+    let mut groups_back = groups.clone();
+    groups_back.reverse();
+    assert_eq!(forward, files(&users_back, &groups_back));
+    println!("{}{}", forward[0], forward[1]);
+    assert_eq!(
+        forward[0],
+        "root:x:0:0:root:/root:/bin/sh\nalpha:x:100:100::/:/bin/false\nmid:x:901:901::/:/bin/false\nzeta:x:101:101::/:/bin/false\n"
     );
-    let error = tree_services(
+}
+
+#[test]
+fn a_fixed_id_another_name_has_or_a_missing_group_is_refused() {
+    let f = fixture();
+    let os = base(&f);
+    for (users, groups, want) in [
+        (
+            vec![user("a", "svc", Some(0), None, &[])],
+            vec![],
+            "user svc in a: uid 0 is the base's user root",
+        ),
+        (
+            vec![
+                user("a", "one", Some(900), None, &[]),
+                user("b", "two", Some(900), None, &[]),
+            ],
+            vec![],
+            "uid 900: user one in a and user two in b",
+        ),
+        (
+            vec![],
+            vec![group("a", "serial", Some(20))],
+            "group serial in a: gid 20 is the base's group dialout",
+        ),
+        (
+            vec![],
+            vec![group("a", "one", Some(905)), group("b", "two", Some(905))],
+            "gid 905: group one in a and group two in b",
+        ),
+        (
+            vec![user("a", "svc", None, None, &["nosuch"])],
+            vec![],
+            "user svc in a: no group nosuch",
+        ),
+        (
+            vec![user("a", "svc", None, Some("nosuch"), &[])],
+            vec![],
+            "user svc in a: no group nosuch",
+        ),
+        (
+            vec![
+                user("a", "svc", Some(901), None, &[]),
+                user("b", "svc", Some(902), None, &[]),
+            ],
+            vec![],
+            "user svc: declared differently by a and b",
+        ),
+    ] {
+        let error = accounts(&f, &os, &users, &groups).expect_err(want);
+        assert!(error.contains(want), "{error}");
+    }
+    let gshadow = layer(
+        "os",
+        stored(
+            &f,
+            "gshadow",
+            &[
+                ("etc/passwd", "root:x:0:0::/:/bin/sh\n"),
+                ("etc/gshadow", "root:*::\n"),
+            ],
+        ),
+    );
+    let error = accounts(&f, &gshadow, &[], &[group("a", "g", None)]).expect_err("gshadow");
+    assert!(error.contains("/etc/gshadow"), "{error}");
+}
+
+const SYSTEM: &str = "usr/lib/systemd/system";
+
+/// `Alias=`, `Also=` and instances, a link the OS's presets made already,
+/// two components enabling one unit, and a unit reached through an
+/// absolute link that is the tree's, not the host's.
+#[test]
+fn enabling_follows_install_like_systemctl() {
+    let f = fixture();
+    let os = layer(
+        "os",
+        stored_with_links(
+            &f,
+            "units",
+            &[
+                (
+                    &format!("{SYSTEM}/net.service"),
+                    "[Service]\nExecStart=/bin/net\n[Install]\nWantedBy=multi-user.target\nAlias=net-alias.service\n# Also=ignored.service\nAlso=net.socket\n",
+                ),
+                (
+                    &format!("{SYSTEM}/net.socket"),
+                    "[Install]\nWantedBy=sockets.target\n",
+                ),
+                (
+                    &format!("{SYSTEM}/getty@.service"),
+                    "[Install]\nWantedBy=getty.target\n",
+                ),
+                (
+                    "opt/units/far.service",
+                    "[Install]\nRequiredBy=far.target\nUpheldBy=up.target\n",
+                ),
+            ],
+            &[
+                (
+                    "etc/systemd/system/sockets.target.wants/net.socket",
+                    "/usr/lib/systemd/system/net.socket",
+                ),
+                (
+                    &format!("{SYSTEM}/far.service"),
+                    "/opt/gaia-test-not-on-the-host/../units/far.service",
+                ),
+            ],
+        ),
+    );
+    let layer = enable_units(
         &f.store,
-        "boot",
-        tree.clone(),
-        vec!["oneshot.service".into()],
+        std::slice::from_ref(&os),
+        &units(&[
+            ("a", "net.service"),
+            ("b", "getty@ttyGS0.service"),
+            ("b", "net.service"),
+            ("c", "far.service"),
+        ]),
         &Ctx::new(),
     )
-    .expect_err("no install");
-    assert!(
-        error
-            .to_string()
-            .contains("oneshot.service has no WantedBy"),
-        "{error}"
+    .expect("enables");
+    let mut found = Vec::new();
+    let store = Store::open(&f.store).expect("store");
+    let dir = layer.tree.object.path_in(&store).expect("in");
+    walk(&dir, "", &mut found);
+    let links: Vec<String> = found
+        .iter()
+        .filter_map(|p| {
+            let to = std::fs::read_link(dir.join(p)).ok()?;
+            Some(format!("{p} -> {}", to.display()))
+        })
+        .collect();
+    println!("{links:#?}");
+    assert_eq!(
+        links,
+        [
+            "etc/systemd/system/far.target.requires/far.service -> /usr/lib/systemd/system/far.service",
+            "etc/systemd/system/getty.target.wants/getty@ttyGS0.service -> /usr/lib/systemd/system/getty@.service",
+            "etc/systemd/system/multi-user.target.wants/net.service -> /usr/lib/systemd/system/net.service",
+            "etc/systemd/system/net-alias.service -> /usr/lib/systemd/system/net.service",
+            "etc/systemd/system/up.target.upholds/far.service -> /usr/lib/systemd/system/far.service",
+        ]
     );
-    let error = tree_services(
+    merge_layers(&f.store, &[os, layer], &Ctx::new()).expect("merges");
+
+    // A directory on the way that is an absolute link: from the tree's
+    // root, so the unit is found where the image will have it.
+    let moved = self::layer(
+        "os",
+        stored_with_links(
+            &f,
+            "moved",
+            &[(
+                "opt/sd/system/deep.service",
+                "[Install]\nWantedBy=multi-user.target\n",
+            )],
+            &[("usr/lib/systemd", "/opt/sd")],
+        ),
+    );
+    let deep = enable_units(
         &f.store,
-        "boot",
-        tree,
-        vec!["missing.service".into()],
+        &[moved],
+        &units(&[("d", "deep.service")]),
         &Ctx::new(),
     )
-    .expect_err("missing");
-    assert!(
-        error
-            .to_string()
-            .contains("boot: no unit file for missing.service"),
-        "{error}"
+    .expect("enables through the link");
+    let dir = deep.tree.object.path_in(&store).expect("in");
+    assert_eq!(
+        std::fs::read_link(dir.join("etc/systemd/system/multi-user.target.wants/deep.service"))
+            .expect("link"),
+        Path::new("/usr/lib/systemd/system/deep.service")
+    );
+}
+
+#[test]
+fn masked_absent_and_installless_units_are_refused() {
+    let f = fixture();
+    let os = layer(
+        "os",
+        stored_with_links(
+            &f,
+            "refused",
+            &[
+                (
+                    &format!("{SYSTEM}/masked.service"),
+                    "[Install]\nWantedBy=multi-user.target\n",
+                ),
+                (
+                    &format!("{SYSTEM}/oneshot.service"),
+                    "[Service]\nExecStart=/bin/true\n",
+                ),
+                (
+                    &format!("{SYSTEM}/taken.service"),
+                    "[Install]\nWantedBy=multi-user.target\n",
+                ),
+                (
+                    &format!("{SYSTEM}/spec@.service"),
+                    "[Install]\nWantedBy=%i.target\n",
+                ),
+                (
+                    &format!("{SYSTEM}/tmpl@.service"),
+                    "[Install]\nWantedBy=multi-user.target\n",
+                ),
+            ],
+            &[
+                ("etc/systemd/system/masked.service", "/dev/null"),
+                (
+                    "etc/systemd/system/multi-user.target.wants/taken.service",
+                    "/usr/lib/systemd/system/other.service",
+                ),
+            ],
+        ),
+    );
+    for (unit, want) in [
+        (
+            "masked.service",
+            "a: masked.service is masked: /etc/systemd/system/masked.service is a link to /dev/null",
+        ),
+        (
+            "missing.service",
+            "a: missing.service has no unit file in the tree",
+        ),
+        (
+            "oneshot.service",
+            "a: oneshot.service has no [Install] entry",
+        ),
+        (
+            "taken.service",
+            "taken.service: /etc/systemd/system/multi-user.target.wants/taken.service is already in the tree, a link to /usr/lib/systemd/system/other.service",
+        ),
+        (
+            "spec@x.service",
+            "a: spec@x.service has WantedBy=%i.target, a specifier",
+        ),
+        ("tmpl@.service", "a: tmpl@.service is a template"),
+        ("../x.service", "a: ../x.service is not a unit name"),
+    ] {
+        let error = enable_units(
+            &f.store,
+            std::slice::from_ref(&os),
+            &units(&[("a", unit)]),
+            &Ctx::new(),
+        )
+        .expect_err(unit)
+        .to_string();
+        assert!(error.contains(want), "{error}");
+    }
+}
+
+/// A component's sysusers.d and preset files against what the components
+/// state: each gap a warning line; the OS's own files are not read.
+#[test]
+fn sysusers_and_presets_no_component_states_are_named() {
+    let f = fixture();
+    let os = layer(
+        "os",
+        stored(
+            &f,
+            "os-presets",
+            &[
+                ("usr/lib/sysusers.d/dbus.conf", "u dbus - -\n"),
+                (
+                    "usr/lib/systemd/system-preset/90-systemd.preset",
+                    "enable getty@.service\nenable foo.service\n",
+                ),
+            ],
+        ),
+    );
+    let app = layer(
+        "app",
+        stored(
+            &f,
+            "app-presets",
+            &[
+                (
+                    "usr/lib/sysusers.d/app.conf",
+                    "# a comment\nu app 901 \"App\" /var/lib/app\nu! ghost -\ng appgroup -\ng nogroup -\nm app dialout\nm app video\nr - 500-900\n",
+                ),
+                (
+                    "usr/lib/systemd/system-preset/80-app.preset",
+                    "enable app.service\nenable missing.service\nenable glob-*.service\ndisable other.service\n",
+                ),
+            ],
+        ),
+    );
+    let mut app_user = user("app", "app", Some(902), None, &["dialout"]);
+    app_user.home = Some("/var/lib/app".into());
+    let gaps = undeclared(
+        &f.store,
+        &[os, app],
+        &units(&[("app", "app.service")]),
+        &[app_user],
+        &[group("app", "appgroup", None)],
+    )
+    .expect("reads");
+    println!("{gaps:#?}");
+    assert_eq!(
+        gaps,
+        [
+            "app: /usr/lib/sysusers.d/app.conf gives user app uid 901, and app's [[users]] 902",
+            "app: /usr/lib/sysusers.d/app.conf has user ghost, which no component's [[users]] states",
+            "app: /usr/lib/sysusers.d/app.conf has group nogroup, which no component's [[groups]] or [[users]] states",
+            "app: /usr/lib/sysusers.d/app.conf puts app in group video, which no component's [[users]] does",
+            "app: /usr/lib/systemd/system-preset/80-app.preset enables missing.service, which no component's [[services]] enables",
+        ]
     );
 }
 
