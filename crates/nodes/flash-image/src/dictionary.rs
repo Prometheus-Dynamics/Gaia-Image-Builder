@@ -10,12 +10,16 @@
 
 use std::fs::File;
 use std::io::{Read, Seek, SeekFrom};
+use std::os::unix::fs::FileExt;
 use std::path::Path;
 
 /// The largest dictionary a board takes: 8 MiB.
 pub const LIMIT: u64 = 8 * 1024 * 1024;
 /// The most blocks a board takes in the image's stream.
 pub const MAX_BLOCKS: u64 = 8192;
+/// The most streams a board takes in a first-flash file: the image's, then
+/// the signature record's.
+pub const MAX_STREAMS: u64 = 2;
 /// The stream flags' check id for CRC64.
 const CHECK_CRC64: u8 = 0x04;
 const STREAM_FOOTER_LEN: u64 = 12;
@@ -202,4 +206,71 @@ pub fn read_back_all(path: &Path) -> Result<Declared, String> {
         dictionary,
         sized,
     })
+}
+
+/// How many xz streams the file in `path` holds, counted from its end: each
+/// stream's footer gives its index, the index its blocks, and so where the
+/// stream starts, which must be a stream header; stream padding (zero
+/// 4-byte groups) between streams is passed over. Refused: anything that is
+/// not whole xz streams back to the file's first byte.
+pub fn stream_count(path: &Path) -> Result<u64, String> {
+    let io = |e: std::io::Error| format!("count streams: {e}");
+    let file = File::open(path).map_err(io)?;
+    let mut end = file.metadata().map_err(io)?.len();
+    let mut count = 0;
+    loop {
+        let mut group = [0_u8; 4];
+        while end >= 4 {
+            file.read_exact_at(&mut group, end - 4).map_err(io)?;
+            if group != [0; 4] {
+                break;
+            }
+            end -= 4;
+        }
+        if end == 0 {
+            break;
+        }
+        if end < STREAM_HEADER_LEN as u64 + STREAM_FOOTER_LEN {
+            return Err("bytes before the first stream that are not one".into());
+        }
+        let mut foot = [0_u8; STREAM_FOOTER_LEN as usize];
+        file.read_exact_at(&mut foot, end - STREAM_FOOTER_LEN)
+            .map_err(io)?;
+        if foot[10..] != FOOTER_MAGIC {
+            return Err("a stream that does not end with an xz stream footer".into());
+        }
+        let index_len =
+            (u64::from(u32::from_le_bytes([foot[4], foot[5], foot[6], foot[7]])) + 1) * 4;
+        let index_at = (end - STREAM_FOOTER_LEN)
+            .checked_sub(index_len)
+            .ok_or("an xz index larger than the file")?;
+        let mut index = vec![0_u8; index_len as usize];
+        file.read_exact_at(&mut index, index_at).map_err(io)?;
+        if index.first() != Some(&0) {
+            return Err("an xz index that does not start with its indicator".into());
+        }
+        let mut pos = 1;
+        let blocks = varint(&index, &mut pos)?;
+        let mut size = 0_u64;
+        for _ in 0..blocks {
+            let unpadded = varint(&index, &mut pos)?;
+            varint(&index, &mut pos)?;
+            size = size.saturating_add(unpadded.div_ceil(4) * 4);
+        }
+        let start = index_at
+            .checked_sub(size)
+            .and_then(|at| at.checked_sub(STREAM_HEADER_LEN as u64))
+            .ok_or("an xz index whose blocks do not fit the file")?;
+        let mut head = [0_u8; MAGIC.len()];
+        file.read_exact_at(&mut head, start).map_err(io)?;
+        if head != MAGIC {
+            return Err("an xz index whose stream does not start with a stream header".into());
+        }
+        count += 1;
+        end = start;
+    }
+    if count == 0 {
+        return Err("no xz stream".into());
+    }
+    Ok(count)
 }

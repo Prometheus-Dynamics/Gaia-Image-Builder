@@ -203,6 +203,7 @@ pub fn flash_image_with(
                     }
                 }
             }
+            check_streams(&out).map_err(fail)?;
             Ok(())
         },
     )?;
@@ -339,6 +340,19 @@ fn check_declared(declared: dictionary::Declared) -> Result<(), String> {
             declared.blocks,
             dictionary::MAX_BLOCKS,
             dictionary::MAX_BLOCKS * BLOCK / (1 << 30)
+        ));
+    }
+    Ok(())
+}
+
+/// The file a board flashes holds at most the image's stream and the
+/// signature record's, counted from its bytes.
+fn check_streams(file: &Path) -> Result<(), String> {
+    let streams = dictionary::stream_count(file)?;
+    if streams > dictionary::MAX_STREAMS {
+        return Err(format!(
+            "the file has {streams} xz streams, over the limit of {}: the image's and the signature record's",
+            dictionary::MAX_STREAMS
         ));
     }
     Ok(())
@@ -688,5 +702,34 @@ mod tests {
         // Not xz at all.
         std::fs::write(&bad, vec![0_u8; 64]).expect("write");
         assert!(dictionary::read_back_all(&bad).is_err());
+    }
+
+    /// Streams are counted from the bytes: one, two (with stream padding
+    /// between them) and three, the last refused by the flash step's check;
+    /// bytes that are not whole streams are refused.
+    #[test]
+    fn the_streams_in_a_file_are_counted_and_a_third_is_refused() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let image = dir.path().join("small.img");
+        std::fs::write(&image, vec![7_u8; 100_000]).expect("write");
+        let one = dir.path().join("one.xz");
+        encode(&image, &one, 2).expect("encodes");
+        let good = std::fs::read(&one).expect("read");
+        assert_eq!(dictionary::stream_count(&one), Ok(1));
+        check_streams(&one).expect("one stream");
+        let file = dir.path().join("many.xz");
+        std::fs::write(&file, [&good[..], &[0; 8], &good[..]].concat()).expect("write");
+        assert_eq!(dictionary::stream_count(&file), Ok(2));
+        check_streams(&file).expect("two streams");
+        std::fs::write(&file, [&good[..], &good[..], &good[..]].concat()).expect("write");
+        assert_eq!(dictionary::stream_count(&file), Ok(3));
+        let refused = check_streams(&file).expect_err("three streams");
+        assert!(refused.contains("3 xz streams"), "{refused}");
+        // Junk before the first stream.
+        std::fs::write(&file, [&[1_u8; 12][..], &good[..]].concat()).expect("write");
+        assert!(dictionary::stream_count(&file).is_err());
+        // A cut stream.
+        std::fs::write(&file, &good[4..]).expect("write");
+        assert!(dictionary::stream_count(&file).is_err());
     }
 }
