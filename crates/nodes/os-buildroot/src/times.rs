@@ -14,6 +14,11 @@
 //! the `install-*` steps, which are summed as `install`. A step that starts
 //! and never ends (a make that failed inside it) is the package's open
 //! phase: it is named, and its time is not counted.
+//!
+//! The same lines are also kept as a timeline, the `package-timeline`
+//! detail: every step of every package with its start and end in seconds
+//! from the make's first line, so what ran beside what, and what waited,
+//! can be read from the record.
 
 use gaia_step::Work;
 use serde_json::{Map, Value, json};
@@ -25,6 +30,8 @@ use std::path::Path;
 const LOG: &str = "build/build-time.log";
 /// The detail the record keeps the packages under.
 pub(crate) const DETAIL: &str = "packages";
+/// The detail the record keeps the timeline under.
+pub(crate) const TIMELINE: &str = "package-timeline";
 
 /// One package's time in one make.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -159,6 +166,43 @@ pub fn packages_json(packages: &[PackageTime]) -> Value {
     )
 }
 
+/// Every step of every package in `log`, in the order the steps started:
+/// `{start_ns, spans: [{package, step, start_s, end_s}]}`, `start_ns` the
+/// first line's time (epoch nanoseconds) and the spans' times in seconds
+/// from it, to the millisecond. The step is Buildroot's own name
+/// (`install-target`, not `install`). A step begun and never ended has an
+/// `end_s` of null. `None` for a log with no line.
+pub fn timeline(log: &str) -> Option<Value> {
+    let lines: Vec<Line> = log.lines().filter_map(parse_line).collect();
+    let first = lines.iter().map(|line| line.at_ns).min()?;
+    let since = |at: u64| seconds(at.saturating_sub(first));
+    let mut spans: Vec<(u64, String, String, Option<u64>)> = Vec::new();
+    // The span each begun step is at, by package and step.
+    let mut begun: BTreeMap<(String, String), usize> = BTreeMap::new();
+    for line in lines {
+        let key = (line.name, line.step);
+        if line.start {
+            begun.insert(key.clone(), spans.len());
+            spans.push((line.at_ns, key.0, key.1, None));
+        } else if let Some(at) = begun.remove(&key) {
+            spans[at].3 = Some(line.at_ns);
+        }
+    }
+    spans.sort_by_key(|span| span.0);
+    let spans: Vec<Value> = spans
+        .into_iter()
+        .map(|(start, package, step, end)| {
+            json!({
+                "package": package,
+                "step": step,
+                "start_s": since(start),
+                "end_s": end.map(since),
+            })
+        })
+        .collect();
+    Some(json!({ "start_ns": first, "spans": spans }))
+}
+
 /// Records the packages of the make that ran in `out` (a Buildroot output
 /// directory) in `work`'s record, with the job count the make was given.
 /// A missing log records nothing but the job count.
@@ -170,6 +214,9 @@ pub(crate) fn record(work: &mut Work<'_>, out: &Path, jobs: u32) {
     let packages = package_times(&log);
     if !packages.is_empty() {
         work.detail(DETAIL, packages_json(&packages));
+    }
+    if let Some(timeline) = timeline(&log) {
+        work.detail(TIMELINE, timeline);
     }
 }
 
@@ -272,6 +319,86 @@ not a line
         let ok = package(&all, "ok");
         assert_eq!(ok.phases["patch"], 500_000_000);
         assert_eq!(package(&all, "orphan").total_ns(), 0);
+    }
+
+    /// The timeline keeps every step with its own name, in start order
+    /// (parallel makes may write a start late), from the first line; a step
+    /// never ended has no end.
+    #[test]
+    fn the_timeline_has_every_step_from_the_first_line() {
+        let log = "\
+100.000000000:start:download            : a
+101.500000000:end  :download            : a
+101.500000000:start:install-target      : a
+101.000000000:start:configure           : b
+104.000000000:end  :install-target      : a
+103.250000000:end  :configure           : b
+104.000000000:start:build               : b
+";
+        let made = timeline(log).expect("a timeline");
+        assert_eq!(made["start_ns"], 100_000_000_000_u64);
+        assert_eq!(
+            made["spans"],
+            json!([
+                { "package": "a", "step": "download", "start_s": 0.0, "end_s": 1.5 },
+                { "package": "b", "step": "configure", "start_s": 1.0, "end_s": 3.25 },
+                { "package": "a", "step": "install-target", "start_s": 1.5, "end_s": 4.0 },
+                { "package": "b", "step": "build", "start_s": 4.0, "end_s": null },
+            ])
+        );
+        assert_eq!(timeline("no line here\n"), None);
+    }
+
+    /// The fixture's timeline agrees with its totals: glibc's build span is
+    /// the time its build phase has.
+    #[test]
+    fn the_fixtures_timeline_agrees_with_its_totals() {
+        let timeline = timeline(FIXTURE).expect("a timeline");
+        let spans = timeline["spans"].as_array().expect("spans");
+        let build = spans
+            .iter()
+            .find(|s| s["package"] == "glibc" && s["step"] == "build")
+            .expect("glibc's build");
+        let span =
+            build["end_s"].as_f64().expect("ended") - build["start_s"].as_f64().expect("a start");
+        let total = package(&package_times(FIXTURE), "glibc").phases["build"] as f64 / 1e9;
+        assert!((span - total).abs() < 0.002, "{span} and {total}");
+        assert!(
+            spans
+                .windows(2)
+                .all(|pair| pair[0]["start_s"].as_f64() <= pair[1]["start_s"].as_f64()),
+            "in start order"
+        );
+    }
+
+    /// A make's log reaches the step's record: the job count, the packages
+    /// and the timeline.
+    #[test]
+    fn a_makes_log_is_recorded_in_its_step() {
+        use gaia_step::{Ctx, Digest, Step, StepKey, Store};
+        let dir = tempfile::tempdir().expect("tempdir");
+        let store = Store::open(dir.path().join("store")).expect("store");
+        let cx = Ctx::new();
+        let key = StepKey(Digest::of_bytes(b"times record"));
+        Step::new(&store, &cx, "gaia.test.times", key)
+            .look_up_or_make(&[("out", Path::new("out"))], |work| {
+                let out = work.dir().join("out");
+                fs::create_dir_all(out.join("build")).expect("mkdir");
+                fs::write(out.join(LOG), FIXTURE).expect("log");
+                record(work, &out, 3);
+                Ok(())
+            })
+            .expect("made");
+        let records = gaia_step::step_records(&gaia_step::logs_dir(&store));
+        let report = &records.last().expect("a record").report;
+        assert_eq!(report.jobs, Some(3));
+        assert_eq!(report.details[DETAIL][0]["name"], "linux-headers");
+        let spans = report.details[TIMELINE]["spans"].as_array().expect("spans");
+        assert_eq!(
+            spans.len(),
+            FIXTURE.lines().filter(|l| l.contains(":start:")).count(),
+            "a span for every start"
+        );
     }
 
     #[test]
