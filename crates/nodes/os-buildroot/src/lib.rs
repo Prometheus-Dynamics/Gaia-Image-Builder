@@ -1146,6 +1146,12 @@ fn arguments(
     if !shared {
         args.push(format!("-j{}", host.jobs));
     }
+    // What Buildroot gives the builds that take a job count of their own
+    // (`cmake --build -j`, Go's `-p`, waf's `-j`) instead of the jobserver.
+    // Left to Buildroot it is the machine's processor count plus one, not
+    // the CPUs this build may use, and such a build left the pool with it
+    // (host-ninja ran `-j33` beside a pool of 26).
+    args.push(format!("PARALLEL_JOBS={}", host.jobs));
     args.push(format!("O={}", out.display()));
     args.push(format!("BR2_DL_DIR={}", host.download_dir));
     // Command-line variables, not config lines: a path is then in no
@@ -1501,6 +1507,7 @@ mod bound_tests {
                 "/usr/bin/make",
                 "--no-print-directory",
                 "-j13",
+                "PARALLEL_JOBS=13",
                 "O=/out",
                 "BR2_DL_DIR=/dl",
                 "world"
@@ -1618,6 +1625,11 @@ mod bound_tests {
             !shared.iter().any(|arg| arg.starts_with("-j")),
             "{shared:?}"
         );
+        // The builds that take a job count of their own get this build's,
+        // with the pool or without.
+        for args in [&plain, &shared] {
+            assert!(args.contains(&"PARALLEL_JOBS=13".to_string()), "{args:?}");
+        }
     }
 
     /// The plant: a pool make that cannot open its jobserver (here a fifo
