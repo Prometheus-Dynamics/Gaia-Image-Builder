@@ -82,6 +82,7 @@ mod out;
 mod patches;
 mod perms;
 mod place;
+mod pool;
 mod ppd;
 mod progress;
 mod times;
@@ -858,7 +859,10 @@ fn build_steps(
 
     let installed = Arc::new(Mutex::new(BTreeSet::new()));
     let sink = installed.clone();
+    let jobs = pool::Shared::default();
+    let jobs_sink = jobs.clone();
     let build = make_tool(host, src, &out, vars, &[], &slot).on_line(move |_, line| {
+        pool::feed(&jobs_sink, line);
         if let Some(name) = progress::installed_to_target(line)
             && let Ok(mut set) = sink.lock()
         {
@@ -866,6 +870,7 @@ fn build_steps(
         }
     });
     let made = work.run(&build);
+    pool::record(work, &jobs);
     // The planted host tools are links every seeded package shares: one
     // written in place through any of them fails the build (see `ppd`).
     // Checked when make failed too: the write may be why it failed, and a

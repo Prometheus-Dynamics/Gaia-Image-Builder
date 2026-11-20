@@ -11,6 +11,40 @@ pub const TOP: usize = 10;
 /// The step detail that names a Buildroot make's packages. The packages
 /// are items of their own in the table.
 const PACKAGES: &str = "packages";
+/// The step detail of a Buildroot make's job pool: `left` lists the
+/// packages whose make ran a pool of its own beside the shared one.
+const JOB_POOL: &str = "job-pool";
+
+/// One line for the build: how many packages' makes left the shared job
+/// pool, and which, each with the job count it forced (for example
+/// `1 package left the job pool (host-ninja -j26)`). `None` when no step
+/// recorded its job pool.
+pub fn pool_summary(steps: &[Step]) -> Option<String> {
+    let mut seen = false;
+    let mut left = BTreeSet::new();
+    for step in steps {
+        let Some(pool) = step.details.get(JOB_POOL) else {
+            continue;
+        };
+        seen = true;
+        for entry in pool["left"].as_array().into_iter().flatten() {
+            let package = entry["package"].as_str().unwrap_or("?");
+            let jobs = entry["jobs"].as_u64().unwrap_or(0);
+            left.insert(format!("{package} -j{jobs}"));
+        }
+    }
+    if !seen {
+        return None;
+    }
+    let names: Vec<String> = left.into_iter().collect();
+    let count = names.len();
+    let noun = if count == 1 { "package" } else { "packages" };
+    Some(if names.is_empty() {
+        format!("{count} {noun} left the job pool")
+    } else {
+        format!("{count} {noun} left the job pool ({})", names.join(", "))
+    })
+}
 
 /// The graph the steps came from: every node's id, and the ids of the nodes
 /// it takes from directly.
@@ -354,6 +388,45 @@ mod tests {
         let mut old = step("a", 0, 1);
         old.end_ns = 0;
         assert!(critical_path(&[old], &graph).is_empty());
+    }
+
+    /// The packages that left the pool, over every Buildroot step; none is
+    /// still a line when a step recorded its pool, and no line without one.
+    #[test]
+    fn the_pool_summary_names_the_packages_that_left() {
+        let mut host = step("gaia.os.buildroot.host", 0, 10);
+        host.details.insert(
+            JOB_POOL.into(),
+            serde_json::json!({
+                "left": [{ "package": "host-ninja", "jobs": 26, "times": 1 }],
+                "serial": [{ "package": "host-libzlib", "jobs": 1, "times": 2 }],
+            }),
+        );
+        let mut os = step("gaia.os.buildroot", 10, 20);
+        os.details.insert(
+            JOB_POOL.into(),
+            serde_json::json!({
+                "left": [{ "package": "host-cmake-thing", "jobs": 26, "times": 2 }],
+                "serial": [],
+            }),
+        );
+        assert_eq!(
+            pool_summary(&[host.clone(), os]).as_deref(),
+            Some("2 packages left the job pool (host-cmake-thing -j26, host-ninja -j26)")
+        );
+        assert_eq!(
+            pool_summary(std::slice::from_ref(&host)).as_deref(),
+            Some("1 package left the job pool (host-ninja -j26)")
+        );
+        host.details.insert(
+            JOB_POOL.into(),
+            serde_json::json!({ "left": [], "serial": [] }),
+        );
+        assert_eq!(
+            pool_summary(&[host]).as_deref(),
+            Some("0 packages left the job pool")
+        );
+        assert_eq!(pool_summary(&[step("gaia.fs.erofs", 0, 1)]), None);
     }
 
     #[test]

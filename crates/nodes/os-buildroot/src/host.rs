@@ -496,7 +496,14 @@ fn build_steps(
     fs::create_dir(&out).map_err(io_fail("output directory"))?;
     let resolved = configure(NAME, work, prepared, &out, host, &slot)?;
     let (src, vars) = (&prepared.src, &prepared.vars);
-    work.run(&make_tool(host, src, &out, vars, goals, &slot))?;
+    let jobs = crate::pool::Shared::default();
+    let jobs_sink = jobs.clone();
+    let made = work.run(
+        &make_tool(host, src, &out, vars, goals, &slot)
+            .on_line(move |_, line| crate::pool::feed(&jobs_sink, line)),
+    );
+    crate::pool::record(work, &jobs);
+    made?;
     // With per-package directories, the goals installed into their own
     // trees: merge them into `host/` as Buildroot's finalize would.
     if ppd::enabled(&resolved) {

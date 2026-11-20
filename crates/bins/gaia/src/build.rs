@@ -154,6 +154,7 @@ fn build_one(options: &args::Project) -> Result<Run, Stop> {
         .collect();
     let deps = dependencies(&project);
     let critical_path = timing::critical_path(&steps, &deps);
+    let pool = timing::pool_summary(&steps);
     let items = timing::top_items(&steps, timing::TOP);
 
     let (outcome, stop) = match result {
@@ -242,6 +243,9 @@ fn build_one(options: &args::Project) -> Result<Run, Stop> {
     // On stderr, so the port lines on stdout stay as they are; the last
     // line on stdout is the outcome and the record.
     eprint!("{}", timing::report(&items, &run.critical_path));
+    if let Some(pool) = &pool {
+        eprintln!("{pool}");
+    }
     println!(
         "{outcome} in {:.1} s; recorded in {}",
         (end_ns - start_ns) as f64 / 1e9,
