@@ -33,8 +33,8 @@ pub struct Item {
     pub kind: Kind,
     pub name: String,
     pub wall_ms: u64,
-    /// CPU time of the step's tools. A package's CPU time is not measured,
-    /// so a package has none.
+    /// CPU time of the step's tools and of its work inside Gaia's own
+    /// process. A package's CPU time is not measured, so a package has none.
     pub cpu_ms: Option<u64>,
     pub jobs: Option<u32>,
     /// Whether it was made (not found in the store). A package always was.
@@ -51,7 +51,7 @@ pub fn top_items(steps: &[Step], n: usize) -> Vec<Item> {
             kind: Kind::Step,
             name: step.step.clone(),
             wall_ms: step.ms,
-            cpu_ms: Some(step.cpu_ms),
+            cpu_ms: Some(step.cpu_ms + step.own_cpu_ms),
             jobs: step.jobs,
             made: step.made,
         });
@@ -223,6 +223,8 @@ mod tests {
             start_ns: start_s * 1_000_000_000,
             end_ns: end_s * 1_000_000_000,
             cpu_ms: 0,
+            own_cpu_ms: 0,
+            load: None,
             jobs: None,
             failed: false,
             details: BTreeMap::new(),
@@ -255,6 +257,7 @@ mod tests {
     fn top_items_sort_by_wall_time_then_kind_then_name() {
         let mut buildroot = step("gaia.os.buildroot", 0, 100);
         buildroot.cpu_ms = 90_000;
+        buildroot.own_cpu_ms = 500;
         buildroot.jobs = Some(13);
         buildroot.details.insert(
             PACKAGES.into(),
@@ -277,7 +280,7 @@ mod tests {
         // the packages' too.
         assert_eq!(items[1].cpu_ms, None);
         assert_eq!(items[1].jobs, Some(13));
-        assert_eq!(items[0].cpu_ms, Some(90_000));
+        assert_eq!(items[0].cpu_ms, Some(90_500));
         assert_eq!(items[0].jobs, Some(13));
     }
 

@@ -145,6 +145,8 @@ fn build_one(options: &args::Project) -> Result<Run, Stop> {
             start_ns: u64::try_from(r.start_ns).unwrap_or(u64::MAX),
             end_ns: u64::try_from(r.end_ns).unwrap_or(u64::MAX),
             cpu_ms: r.report.cpu_ns / 1_000_000,
+            own_cpu_ms: r.report.own_cpu_ns / 1_000_000,
+            load: r.report.load,
             jobs: r.report.jobs.or(Some(budget)),
             failed: r.report.failed,
             details: r.report.details,

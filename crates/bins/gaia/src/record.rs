@@ -79,6 +79,13 @@ pub struct Step {
     /// CPU time of the processes its tools ran, in milliseconds.
     #[serde(default)]
     pub cpu_ms: u64,
+    /// CPU time spent inside Gaia's own process on the step's work, in
+    /// milliseconds: an in-process encoder or hash, which `cpu_ms` misses.
+    #[serde(default, skip_serializing_if = "is_zero")]
+    pub own_cpu_ms: u64,
+    /// The 1-minute load average at the step's start and end.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub load: Option<[f32; 2]>,
     /// The job count the step was given: its make's `-j` when it has one,
     /// else the build's `--jobs`, its budget.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -94,6 +101,11 @@ pub struct Step {
 /// For `skip_serializing_if`: a flag that is off is left out.
 fn is_false(flag: &bool) -> bool {
     !*flag
+}
+
+/// For `skip_serializing_if`: a count of zero is left out.
+fn is_zero(count: &u64) -> bool {
+    *count == 0
 }
 
 /// What a record says about its build, given its outcome, its process and
@@ -222,6 +234,8 @@ mod tests {
             start_ns: 10,
             end_ns: 1_510_000_000,
             cpu_ms: 900,
+            own_cpu_ms: 0,
+            load: None,
             jobs: Some(13),
             failed: false,
             details: BTreeMap::new(),
@@ -247,6 +261,8 @@ mod tests {
     fn a_run_record_round_trips_with_reports_and_critical_path() {
         let mut built = step("gaia.os.buildroot");
         built.failed = true;
+        built.own_cpu_ms = 31_300;
+        built.load = Some([4.5, 12.25]);
         built.details.insert(
             "packages".into(),
             serde_json::json!([{"name": "glibc", "phases": {"build": 400.0}, "total_s": 400.0}]),
@@ -266,6 +282,8 @@ mod tests {
         assert_eq!(value["steps"][0]["failed"], true);
         assert_eq!(value["steps"][0]["jobs"], 13);
         assert_eq!(value["steps"][0]["cpu_ms"], 900);
+        assert_eq!(value["steps"][0]["own_cpu_ms"], 31_300);
+        assert_eq!(value["steps"][0]["load"], serde_json::json!([4.5, 12.25]));
         assert_eq!(value["critical_path"][0]["ms"], 1_500);
     }
 
@@ -279,6 +297,8 @@ mod tests {
         let step_value = &value["steps"][0];
         assert!(step_value.get("details").is_none());
         assert!(step_value.get("failed").is_none());
+        assert!(step_value.get("own_cpu_ms").is_none());
+        assert!(step_value.get("load").is_none());
         assert_eq!(step_value["cpu_ms"], 900);
 
         let old = serde_json::json!({
@@ -292,6 +312,8 @@ mod tests {
         let read: Run = serde_json::from_value(old).expect("old record");
         assert_eq!(read.steps[0].cpu_ms, 0);
         assert_eq!(read.steps[0].jobs, None);
+        assert_eq!(read.steps[0].own_cpu_ms, 0);
+        assert_eq!(read.steps[0].load, None);
         assert!(read.critical_path.is_empty());
     }
 
