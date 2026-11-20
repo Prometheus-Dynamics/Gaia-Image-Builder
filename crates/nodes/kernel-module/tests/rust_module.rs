@@ -108,6 +108,7 @@ fn host() -> BuildrootHost {
         cpus: std::env::var("GAIA_BUILDROOT_CPUS").unwrap_or_default(),
         jobs: 8,
         download_dir: String::new(),
+        download_pool: String::new(),
         ccache_dir: String::new(),
         mirror: String::new(),
         config_only: false,

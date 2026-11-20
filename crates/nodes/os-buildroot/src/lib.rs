@@ -56,6 +56,11 @@
 //!
 //! - `GAIA_BUILDROOT_DL`: the download directory (`BR2_DL_DIR`). Default:
 //!   `buildroot-downloads` beside the store's objects.
+//! - `GAIA_BUILDROOT_DL_POOL`: the download pool, Buildroot's downloads by
+//!   sha256 shared by every store of the user (see `dlpool`), so a new store
+//!   or a key change does not fetch again. Default:
+//!   `gaia/buildroot-download-pool` in `XDG_CACHE_HOME` or `~/.cache`;
+//!   empty: none.
 //! - `GAIA_BUILDROOT_MIRROR`: a primary download site (`BR2_PRIMARY_SITE`),
 //!   a URI such as `https://mirror.example/buildroot`. Buildroot tries it
 //!   first and then the package's own site and its backup site, so nothing
@@ -75,6 +80,7 @@
 mod config;
 mod contract;
 mod dev;
+mod dlpool;
 mod host;
 mod jobs;
 mod kbuild;
@@ -681,6 +687,7 @@ pub(crate) fn configure(
         move |error: io::Error| StepError::body(step, format!("{what}: {error}"))
     };
     let (src, vars) = (&prepared.src, &prepared.vars);
+    dlpool::before(step, work, src, host)?;
     work.run(&make_tool(host, src, out, vars, &["allnoconfig"], slot))?;
     let config = out.join(".config");
     let base = fs::read_to_string(&config).map_err(io_fail("the base config"))?;
@@ -863,8 +870,11 @@ fn build_steps(
     let sink = installed.clone();
     let jobs = pool::Shared::default();
     let jobs_sink = jobs.clone();
+    let mismatches = dlpool::Mismatches::default();
+    let seen = mismatches.clone();
     let build = make_tool(host, src, &out, vars, &[], &slot).on_line(move |_, line| {
         pool::feed(&jobs_sink, line);
+        seen.line(line);
         if let Some(name) = progress::installed_to_target(line)
             && let Ok(mut set) = sink.lock()
         {
@@ -873,6 +883,7 @@ fn build_steps(
     });
     let made = work.run(&build);
     pool::record(work, &jobs);
+    let made = dlpool::after(NAME, work, src, host, &mismatches, made);
     // The planted host tools are links every seeded package shares: one
     // written in place through any of them fails the build (see `ppd`).
     // Checked when make failed too: the write may be why it failed, and a
@@ -1354,6 +1365,7 @@ mod toolchain_tests {
             cpus: String::new(),
             jobs: 4,
             download_dir: "/dl".into(),
+            download_pool: String::new(),
             config_only: false,
             dev_reuse: String::new(),
             bwrap: String::new(),
@@ -1449,6 +1461,7 @@ mod bound_tests {
             cpus: cpus.into(),
             jobs,
             download_dir: "/dl".into(),
+            download_pool: String::new(),
             ccache_dir: String::new(),
             mirror: String::new(),
             config_only: false,

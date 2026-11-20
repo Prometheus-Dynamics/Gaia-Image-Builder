@@ -32,6 +32,12 @@ pub struct BuildrootHost {
     pub jobs: u32,
     /// Absolute path of the download cache (`BR2_DL_DIR`).
     pub download_dir: String,
+    /// Absolute path of the download pool: Buildroot's downloads by their
+    /// sha256, shared by every store on the machine (see `dlpool` in
+    /// `gaia-os-buildroot`). Empty: none. In no key, as the download
+    /// directory is not.
+    #[serde(default)]
+    pub download_pool: String,
     /// Absolute path of the compiler cache's directory (`BR2_CCACHE_DIR`),
     /// shared by every build of one store. Empty: none given, and a build
     /// keeps its cache in its own directory.

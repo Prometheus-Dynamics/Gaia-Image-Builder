@@ -415,6 +415,27 @@ pub fn store_dir(flag: Option<&Path>) -> Result<PathBuf, Stop> {
     Ok(cache.join("gaia").join("store"))
 }
 
+/// The download pool: `GAIA_BUILDROOT_DL_POOL` (empty: none), else
+/// `gaia/buildroot-download-pool` in `XDG_CACHE_HOME` or `~/.cache`, the
+/// default store's neighbour, shared by every store of the user.
+fn download_pool(
+    set: Option<std::ffi::OsString>,
+    xdg_cache: Option<std::ffi::OsString>,
+    home: Option<std::ffi::OsString>,
+) -> Option<PathBuf> {
+    if let Some(set) = set {
+        return (!set.is_empty()).then(|| PathBuf::from(set));
+    }
+    let cache = xdg_cache
+        .filter(|v| !v.is_empty())
+        .map(PathBuf::from)
+        .or_else(|| {
+            home.filter(|v| !v.is_empty())
+                .map(|h| PathBuf::from(h).join(".cache"))
+        })?;
+    Some(cache.join("gaia").join("buildroot-download-pool"))
+}
+
 fn absolute(path: &Path) -> PathBuf {
     std::path::absolute(path).unwrap_or_else(|_| path.to_path_buf())
 }
@@ -500,12 +521,20 @@ fn buildroot_host(
         .map(PathBuf::from)
         .unwrap_or_else(|_| store.join("buildroot-downloads"));
     let ccache_dir = store.join("buildroot-ccache");
+    let download_pool = download_pool(
+        std::env::var_os("GAIA_BUILDROOT_DL_POOL"),
+        std::env::var_os("XDG_CACHE_HOME"),
+        std::env::var_os("HOME"),
+    );
     Some(gaia_types::BuildrootHost {
         make,
         taskset: found("taskset").unwrap_or_default(),
         cpus: std::env::var("GAIA_CPUS").unwrap_or_default(),
         jobs,
         download_dir: absolute(&download_dir).display().to_string(),
+        download_pool: download_pool
+            .map(|pool| absolute(&pool).display().to_string())
+            .unwrap_or_default(),
         ccache_dir: absolute(&ccache_dir).display().to_string(),
         mirror: std::env::var("GAIA_BUILDROOT_MIRROR")
             .unwrap_or_default()
@@ -529,6 +558,30 @@ fn on_path(program: &str) -> Option<PathBuf> {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn the_download_pool_is_the_setting_else_beside_the_default_store() {
+        use super::download_pool;
+        let os = |v: &str| Some(std::ffi::OsString::from(v));
+        assert_eq!(
+            download_pool(os("/pool"), os("/xdg"), os("/home/u")),
+            Some("/pool".into())
+        );
+        assert_eq!(
+            download_pool(os(""), os("/xdg"), os("/home/u")),
+            None,
+            "empty: none"
+        );
+        assert_eq!(
+            download_pool(None, os("/xdg"), os("/home/u")),
+            Some("/xdg/gaia/buildroot-download-pool".into())
+        );
+        assert_eq!(
+            download_pool(None, None, os("/home/u")),
+            Some("/home/u/.cache/gaia/buildroot-download-pool".into())
+        );
+        assert_eq!(download_pool(None, None, None), None);
+    }
+
     /// `--jobs` is the bound on an OS build's make too; the variable is for
     /// a build that was given no flag.
     #[test]

@@ -193,6 +193,7 @@ fn a_minimal_aarch64_buildroot_build_and_its_rebuilds() {
         cpus,
         jobs,
         download_dir: download,
+        download_pool: String::new(),
         ccache_dir: String::new(),
         mirror: String::new(),
         config_only: false,
@@ -321,6 +322,7 @@ fn the_fakeroot_stages_work_reaches_the_root_filesystem() {
         cpus: std::env::var("GAIA_BUILDROOT_CPUS").unwrap_or_default(),
         jobs,
         download_dir: download,
+        download_pool: String::new(),
         ccache_dir: String::new(),
         mirror: String::new(),
         config_only: false,
@@ -454,4 +456,125 @@ fn the_fakeroot_stages_work_reaches_the_root_filesystem() {
         error.contains("outside /dev") && error.contains("etc/gaia-node char 1:3"),
         "{error}"
     );
+}
+
+/// A second store builds without fetching: the first store's build puts
+/// its download directory's files into the pool by their hashes, and the
+/// second's download directory, empty, is filled from the pool before make
+/// runs. Both may fetch only from a mirror that does not exist, so a file
+/// the pool did not give fails the second build.
+#[test]
+fn a_new_store_takes_its_downloads_from_the_pool() {
+    if !gated() {
+        return;
+    }
+    let source = PathBuf::from(env_path("GAIA_BUILDROOT_SOURCE"));
+    let filled = env_path("GAIA_BUILDROOT_DL");
+    let jobs: u32 = std::env::var("GAIA_BUILDROOT_JOBS")
+        .ok()
+        .and_then(|value| value.parse().ok())
+        .unwrap_or(4);
+    let dir = tempfile::tempdir().expect("tempdir");
+    let pool = dir.path().join("pool");
+    let empty = dir.path().join("dl-two");
+    fs::create_dir(&empty).expect("dl");
+    let host = |download_dir: String| BuildrootHost {
+        make: "/usr/bin/make".into(),
+        taskset: "/usr/bin/taskset".into(),
+        cpus: std::env::var("GAIA_BUILDROOT_CPUS").unwrap_or_default(),
+        jobs,
+        download_dir,
+        download_pool: pool.display().to_string(),
+        ccache_dir: String::new(),
+        mirror: String::new(),
+        config_only: false,
+        dev_reuse: String::new(),
+        bwrap: ["/usr/bin/bwrap"]
+            .into_iter()
+            .find(|p| Path::new(p).exists())
+            .unwrap_or_default()
+            .into(),
+    };
+    // The toolchain a product's download directory commonly holds, as in
+    // the fakeroot test.
+    let fragments = || {
+        vec![ConfigFragment {
+            name: "pool".into(),
+            text: "BR2_aarch64=y\n\
+                   BR2_TOOLCHAIN_EXTERNAL=y\n\
+                   BR2_TOOLCHAIN_EXTERNAL_BOOTLIN=y\n\
+                   BR2_TOOLCHAIN_EXTERNAL_BOOTLIN_AARCH64_GLIBC_STABLE=y\n\
+                   BR2_PACKAGE_BUSYBOX=y\n\
+                   BR2_PRIMARY_SITE=\"file:///nonexistent-gaia-mirror\"\n\
+                   BR2_PRIMARY_SITE_ONLY=y\n"
+                .into(),
+        }]
+    };
+    let details = |store_dir: &Path| {
+        let store = Store::open(store_dir).expect("store");
+        let record = step_records(&logs_dir(&store))
+            .into_iter()
+            .rev()
+            .find(|record| record.step == "gaia.os.buildroot")
+            .expect("a step record");
+        record.report.details.clone()
+    };
+    let mut runs = Vec::new();
+    for (name, download_dir) in [
+        ("one", filled.clone()),
+        ("two", empty.display().to_string()),
+    ] {
+        let store_dir = dir.path().join(name);
+        let store = Store::open(&store_dir).expect("store");
+        let source_tree = Tree {
+            object: store.put_tree(&source).expect("source").into(),
+            entries: Vec::new(),
+        };
+        drop(store);
+        let run = build(&store_dir, &source_tree, fragments(), &host(download_dir));
+        assert!(run.made);
+        let details = details(&store_dir);
+        println!(
+            "{name}: {} / {}",
+            details["download-pool"], details["download-pool-after"]
+        );
+        runs.push(details);
+    }
+    assert!(
+        runs[0]["download-pool"]["kept"].as_u64() > Some(0),
+        "the first store's files went into the pool"
+    );
+    assert!(
+        runs[1]["download-pool"]["seeded"].as_u64() > Some(0),
+        "the second store's came from it"
+    );
+    assert_eq!(
+        runs[1]["download-pool-after"]["kept"], 0,
+        "nothing new was fetched"
+    );
+    // Each file in the second download directory is a pool file.
+    let pooled: std::collections::BTreeSet<u64> = fs::read_dir(&pool)
+        .expect("pool")
+        .flatten()
+        .map(|e| std::os::unix::fs::MetadataExt::ino(&e.metadata().expect("meta")))
+        .collect();
+    let mut stack = vec![empty.clone()];
+    let mut files = 0;
+    while let Some(at) = stack.pop() {
+        for entry in fs::read_dir(&at).expect("dl").flatten() {
+            let meta = entry.metadata().expect("meta");
+            let name = entry.file_name().to_string_lossy().into_owned();
+            if meta.is_dir() {
+                stack.push(entry.path());
+            } else if meta.is_file() && !name.starts_with('.') {
+                files += 1;
+                assert!(
+                    pooled.contains(&std::os::unix::fs::MetadataExt::ino(&meta)),
+                    "{} did not come from the pool",
+                    entry.path().display()
+                );
+            }
+        }
+    }
+    assert!(files > 0);
 }

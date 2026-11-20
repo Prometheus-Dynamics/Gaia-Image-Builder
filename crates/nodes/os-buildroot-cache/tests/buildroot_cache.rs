@@ -167,6 +167,7 @@ fn offline_build() {
         cpus: cpus(),
         jobs: jobs(),
         download_dir: dl.display().to_string(),
+        download_pool: String::new(),
         ccache_dir: env_abs("GAIA_BUILDROOT_CCACHE").display().to_string(),
         mirror: String::new(),
         config_only: false,

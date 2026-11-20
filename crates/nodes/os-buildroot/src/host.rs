@@ -498,12 +498,16 @@ fn build_steps(
     let (src, vars) = (&prepared.src, &prepared.vars);
     let jobs = crate::pool::Shared::default();
     let jobs_sink = jobs.clone();
+    let mismatches = crate::dlpool::Mismatches::default();
+    let seen = mismatches.clone();
     let made = work.run(
-        &make_tool(host, src, &out, vars, goals, &slot)
-            .on_line(move |_, line| crate::pool::feed(&jobs_sink, line)),
+        &make_tool(host, src, &out, vars, goals, &slot).on_line(move |_, line| {
+            crate::pool::feed(&jobs_sink, line);
+            seen.line(line);
+        }),
     );
     crate::pool::record(work, &jobs);
-    made?;
+    crate::dlpool::after(NAME, work, src, host, &mismatches, made)?;
     // With per-package directories, the goals installed into their own
     // trees: merge them into `host/` as Buildroot's finalize would.
     if ppd::enabled(&resolved) {

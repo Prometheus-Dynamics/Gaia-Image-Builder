@@ -87,6 +87,7 @@ fn buildroot_host() -> BuildrootHost {
         cpus: cpus(),
         jobs: jobs(),
         download_dir: env_path("GAIA_BUILDROOT_DL"),
+        download_pool: String::new(),
         ccache_dir: String::new(),
         mirror: String::new(),
         config_only: false,

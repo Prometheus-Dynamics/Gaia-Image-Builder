@@ -329,6 +329,7 @@ t%:
             cpus: String::new(),
             jobs: 13,
             download_dir: String::new(),
+            download_pool: String::new(),
             ccache_dir: String::new(),
             mirror: String::new(),
             config_only: false,

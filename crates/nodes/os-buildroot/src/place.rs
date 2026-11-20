@@ -67,6 +67,7 @@ mod tests {
             cpus: String::new(),
             jobs: 1,
             download_dir: "/dl".into(),
+            download_pool: String::new(),
             ccache_dir: String::new(),
             mirror: String::new(),
             config_only: false,
