@@ -213,3 +213,24 @@ fn host_limits_apply_and_are_in_the_key() {
     assert_ne!(key(base.clone()), key(base.clone().network(true)));
     assert_ne!(key(base.clone()), key(base.clone().input("/x", "/in")));
 }
+
+/// The CPU a tool spends in the sandbox, and in the processes it waits for,
+/// is in its step's record, as it is for a tool run outside one.
+#[test]
+fn a_sandboxed_tools_cpu_time_is_recorded() {
+    if !available() {
+        return;
+    }
+    let dir = tempfile::tempdir().expect("tempdir");
+    let store = dir.path().join("store");
+    let script = "(i=0; while [ $i -lt 300000 ]; do i=$((i+1)); done); touch /out/done";
+    run(&store, sandbox(dir.path()), script).expect("runs");
+    let store = Store::open(&store).expect("store");
+    let records = gaia_step::step_records(&gaia_step::logs_dir(&store));
+    let cpu_ns = records.last().expect("a record").report.cpu_ns;
+    println!("the spinning tool's CPU: {} ms", cpu_ns / 1_000_000);
+    assert!(
+        cpu_ns >= 300_000_000,
+        "a loop of 300,000 shell steps takes well over 0.3 s: {cpu_ns} ns"
+    );
+}

@@ -146,6 +146,12 @@ impl Sandbox {
             &"--die-with-parent",
             &"--new-session",
             &"--clearenv",
+            // The tool is the namespace's first process, so bubblewrap
+            // waits for it itself and its CPU time, with that of the
+            // processes it waited for, reaches the step. Bubblewrap's own
+            // first process reaps the tool and is never waited for, which
+            // leaves the step with none of it.
+            &"--as-pid-1",
         ]);
         // A fresh root, the image's top-level entries bound into it.
         push(&[&"--tmpfs", &"/"]);
