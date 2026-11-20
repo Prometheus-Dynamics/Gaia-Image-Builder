@@ -292,3 +292,166 @@ fn a_minimal_aarch64_buildroot_build_and_its_rebuilds() {
         "the changed fragment is in the resolved config"
     );
 }
+
+/// What Buildroot's fakeroot stage does reaches the root filesystem: the
+/// users a users table names (mkusers), and a post-fakeroot script's work,
+/// run after Buildroot's own tables. The script removes a file, changes
+/// one, adds one and makes a device node under /dev. The root filesystem
+/// is the tar Buildroot packed then: the removed file is gone, the changed
+/// and added ones are as the script left them, the user is in passwd, group
+/// and shadow, and the /dev node is listed in the step's `rootfs` detail
+/// (left out of the tree: devtmpfs covers /dev). A second build whose
+/// script also makes a node in /etc fails, naming it. The toolchain is
+/// bootlin's aarch64 glibc stable, as a Buildroot product's download cache
+/// commonly holds it.
+#[test]
+fn the_fakeroot_stages_work_reaches_the_root_filesystem() {
+    if !gated() {
+        return;
+    }
+    let source = PathBuf::from(env_path("GAIA_BUILDROOT_SOURCE"));
+    let download = env_path("GAIA_BUILDROOT_DL");
+    let jobs: u32 = std::env::var("GAIA_BUILDROOT_JOBS")
+        .ok()
+        .and_then(|value| value.parse().ok())
+        .unwrap_or(4);
+    let host = BuildrootHost {
+        make: "/usr/bin/make".into(),
+        taskset: "/usr/bin/taskset".into(),
+        cpus: std::env::var("GAIA_BUILDROOT_CPUS").unwrap_or_default(),
+        jobs,
+        download_dir: download,
+        ccache_dir: String::new(),
+        mirror: String::new(),
+        config_only: false,
+        dev_reuse: String::new(),
+        bwrap: ["/usr/bin/bwrap"]
+            .into_iter()
+            .find(|p| Path::new(p).exists())
+            .unwrap_or_default()
+            .into(),
+    };
+    let dir = tempfile::tempdir().expect("tempdir");
+    let users = dir.path().join("users.table");
+    fs::write(
+        &users,
+        "gaiauser -1 gaiagroup -1 * /home/gaiauser /bin/sh - Gaia test user\n",
+    )
+    .expect("users table");
+    let script = |name: &str, extra: &str| {
+        let path = dir.path().join(name);
+        fs::write(
+            &path,
+            format!(
+                "#!/bin/sh\nset -e\n\
+                 rm \"$1/etc/issue\"\n\
+                 echo fakeroot-was-here > \"$1/etc/hostname\"\n\
+                 echo added > \"$1/etc/gaia-added\"\n\
+                 mknod \"$1/dev/gaia-node\" c 1 3\n{extra}"
+            ),
+        )
+        .expect("script");
+        fs::set_permissions(&path, std::os::unix::fs::PermissionsExt::from_mode(0o755))
+            .expect("chmod");
+        path
+    };
+    let fragments = |script: &Path| {
+        vec![ConfigFragment {
+            name: "fakeroot-stage".into(),
+            text: format!(
+                "BR2_aarch64=y\n\
+                 BR2_TOOLCHAIN_EXTERNAL=y\n\
+                 BR2_TOOLCHAIN_EXTERNAL_BOOTLIN=y\n\
+                 BR2_TOOLCHAIN_EXTERNAL_BOOTLIN_AARCH64_GLIBC_STABLE=y\n\
+                 BR2_PACKAGE_BUSYBOX=y\n\
+                 BR2_ROOTFS_USERS_TABLES=\"{}\"\n\
+                 BR2_ROOTFS_POST_FAKEROOT_SCRIPT=\"{}\"\n",
+                users.display(),
+                script.display()
+            ),
+        }]
+    };
+    let store_dir = dir.path().join("store");
+    let store = Store::open(&store_dir).expect("store");
+    let source_tree = Tree {
+        object: store
+            .put_tree(&source)
+            .expect("source into the store")
+            .into(),
+        entries: Vec::new(),
+    };
+    drop(store);
+
+    let run = build(
+        &store_dir,
+        &source_tree,
+        fragments(&script("dev.sh", "")),
+        &host,
+    );
+    assert!(run.made, "a first build makes its outputs");
+    assert!(
+        !run.rootfs.join("etc/issue").exists(),
+        "a file the post-fakeroot script removed is in the root filesystem"
+    );
+    assert_eq!(
+        fs::read_to_string(run.rootfs.join("etc/hostname")).expect("hostname"),
+        "fakeroot-was-here\n",
+        "a file the post-fakeroot script changed is not as it left it"
+    );
+    assert_eq!(
+        fs::read_to_string(run.rootfs.join("etc/gaia-added")).expect("added"),
+        "added\n"
+    );
+    for file in ["etc/passwd", "etc/group", "etc/shadow"] {
+        let text = fs::read_to_string(run.rootfs.join(file)).expect(file);
+        let wanted = if file == "etc/group" {
+            "gaiagroup:"
+        } else {
+            "gaiauser:"
+        };
+        assert!(
+            text.lines().any(|line| line.starts_with(wanted)),
+            "mkusers' user is not in {file}:\n{text}"
+        );
+    }
+    assert!(
+        !run.rootfs.join("dev/gaia-node").exists(),
+        "a device node in the tree"
+    );
+    let record = step_records(&run.logs)
+        .into_iter()
+        .rev()
+        .find(|record| record.step == "gaia.os.buildroot")
+        .expect("a step record");
+    let detail = &record.report.details["rootfs"];
+    println!("rootfs detail: {detail}");
+    assert!(
+        detail["devices"]
+            .as_array()
+            .expect("devices")
+            .iter()
+            .any(|device| device == "dev/gaia-node char 1:3"),
+        "the /dev node is not listed: {detail}"
+    );
+
+    let store_path = store_dir.display().to_string();
+    let error = build_os(
+        &store_path,
+        source_tree.clone(),
+        &OsConfig {
+            fragments: fragments(&script("etc.sh", "mknod \"$1/etc/gaia-node\" c 1 3\n")),
+            ..OsConfig::default()
+        },
+        &[],
+        &gaia_os_buildroot::no_seed(&store_path).expect("seed"),
+        &host,
+        &Ctx::new(),
+    )
+    .expect_err("a device node outside /dev");
+    let error = error.to_string();
+    println!("second build: {error}");
+    assert!(
+        error.contains("outside /dev") && error.contains("etc/gaia-node char 1:3"),
+        "{error}"
+    );
+}

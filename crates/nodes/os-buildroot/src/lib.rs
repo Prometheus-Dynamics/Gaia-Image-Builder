@@ -104,8 +104,10 @@ pub(crate) const NAME: &str = "gaia.os.buildroot";
 /// kernel's build user, host and time are fixed (see `kbuild`). 5: a
 /// kernel with Rust keeps `rust/` in `kernel-build` (see `out`). 6: every
 /// make sees its output directory at one fixed path, and a pinned source date
-/// (see `place`, `kbuild`).
-const KEY_VERSION: u32 = 6;
+/// (see `place`, `kbuild`). 7: the root filesystem is what Buildroot
+/// packed under fakeroot, its post-fakeroot scripts' changes included, not
+/// the target tree (see `perms`).
+const KEY_VERSION: u32 = 7;
 /// The work directory an OS build expects when no earlier run recorded its
 /// size: about what a full build leaves in its output directory.
 const WORK_BYTES: u64 = 24 << 30;
@@ -898,15 +900,42 @@ fn build_steps(
     let installed = installed.lock().map(|set| set.clone()).unwrap_or_default();
     work.progress(progress::done(&installed, &targets), total);
 
-    // The owners and modes Buildroot gives the image, from the tar it packed
-    // under fakeroot. The tar itself is not an output.
+    // The root filesystem is what Buildroot packed under fakeroot, after its
+    // device and permission tables, mkusers, the post-fakeroot scripts and
+    // the presets: the tar's files, and its owners and modes as the tree's
+    // entries (see `perms`). The tar itself is not an output. Without a tar
+    // (a build that packs no root filesystem) it is the target tree.
     let tar = out.join("images").join(perms::TAR);
+    let rootfs = dir.join("rootfs");
     let entries = if tar.is_file() {
-        let entries = perms::entries(&tar, &out.join("target"))
+        let started = std::time::Instant::now();
+        let unpacked =
+            perms::unpack(&tar, &rootfs).map_err(io_fail("the root filesystem's tar"))?;
+        let entries = perms::entries(&tar, &rootfs)
             .map_err(io_fail("the root filesystem's owners and modes"))?;
         fs::remove_file(&tar).map_err(io_fail("the root filesystem's tar"))?;
+        work.detail(
+            "rootfs",
+            serde_json::json!({
+                "from": perms::TAR,
+                "devices": unpacked.devices,
+                "devices_left_out": perms::DEVICES_LEFT_OUT,
+                "seconds": started.elapsed().as_secs_f64(),
+            }),
+        );
+        let outside = perms::outside_dev(&unpacked.devices);
+        if !outside.is_empty() {
+            return Err(fail(format!(
+                "the root filesystem has {} device node{} outside /dev, which the tree cannot \
+                 hold (only /dev's are left out, since devtmpfs covers /dev at boot):\n  {}",
+                outside.len(),
+                if outside.len() == 1 { "" } else { "s" },
+                outside.join("\n  ")
+            )));
+        }
         entries
     } else {
+        take(&out.join("target"), &rootfs, warm.is_some()).map_err(io_fail("the target tree"))?;
         Vec::new()
     };
     let text = serde_json::to_vec(&entries).map_err(|e| fail(e.to_string()))?;
@@ -914,14 +943,12 @@ fn build_steps(
     // What Buildroot leaves at the top of its target tree for its own use:
     // its image steps leave these out, and so does this.
     for name in out::BOOKKEEPING {
-        match fs::remove_file(out.join("target").join(name)) {
+        match fs::remove_file(rootfs.join(name)) {
             Ok(()) => {}
             Err(error) if error.kind() == io::ErrorKind::NotFound => {}
             Err(error) => return Err(io_fail("Buildroot's own file in the target")(error)),
         }
     }
-    take(&out.join("target"), &dir.join("rootfs"), warm.is_some())
-        .map_err(io_fail("the target tree"))?;
     let left = out::bookkeeping_in(&dir.join("rootfs"));
     if !left.is_empty() {
         return Err(fail(format!(
