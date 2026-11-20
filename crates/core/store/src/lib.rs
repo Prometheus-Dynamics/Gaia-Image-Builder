@@ -192,6 +192,7 @@ impl Store {
         if !wanted {
             return self.scratch();
         }
+        placement::sweep_once(shm);
         let root = placement::ram_root(self.root(), shm);
         match budget.claim(expected, settings.ram_max) {
             Some(claim) => Scratch::in_ram(self, &root, claim),

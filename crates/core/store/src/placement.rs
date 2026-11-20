@@ -19,10 +19,17 @@
 //! A RAM work directory is `/dev/shm/gaia-<store id>/<scratch name>`, where
 //! the store id is a short digest of the store's root path, so two stores on
 //! one machine do not share a directory.
+//!
+//! Nothing is left there after a run: a work directory goes when its step
+//! ends, and the `gaia-<store id>` directory with the last one. A process
+//! that is killed cannot do that, so the first RAM work directory of each
+//! process removes what killed ones left (see [`sweep`]).
 
 use crate::{Digest, Error, Result};
+use std::collections::BTreeSet;
 use std::fs;
 use std::os::unix::ffi::OsStrExt;
+use std::os::unix::fs::MetadataExt;
 use std::path::{Path, PathBuf};
 use std::sync::{Mutex, PoisonError};
 
@@ -356,6 +363,60 @@ pub(crate) fn auto_fits(room: Room, expected: u64) -> bool {
 pub fn ram_root(root: &Path, shm: &Path) -> PathBuf {
     let id = Digest::of_bytes(root.as_os_str().as_bytes()).hex();
     shm.join(format!("gaia-{}", &id[..16]))
+}
+
+/// Removes what killed runs of this user left in `shm`: in each RAM root
+/// (`gaia-` and 16 hex digits, a directory this user owns), the work
+/// directories of processes that are gone (named by their pid, see
+/// `fsutil::unique_name`), then the root itself if it is empty. Anything
+/// else there is not looked at. Returns how many directories it removed.
+pub(crate) fn sweep(shm: &Path) -> usize {
+    let Ok(me) = fs::metadata("/proc/self").map(|m| m.uid()) else {
+        return 0;
+    };
+    let Ok(entries) = fs::read_dir(shm) else {
+        return 0;
+    };
+    let mut removed = 0;
+    for entry in entries.flatten() {
+        let name = entry.file_name();
+        let Some(id) = name.to_str().and_then(|n| n.strip_prefix("gaia-")) else {
+            continue;
+        };
+        if id.len() != 16 || !id.bytes().all(|b| b.is_ascii_hexdigit()) {
+            continue;
+        }
+        let root = entry.path();
+        let ours = fs::symlink_metadata(&root).is_ok_and(|m| m.is_dir() && m.uid() == me);
+        if !ours {
+            continue;
+        }
+        for work in fs::read_dir(&root).into_iter().flatten().flatten() {
+            let name = work.file_name().to_string_lossy().into_owned();
+            if !crate::fsutil::name_pid(&name).is_some_and(crate::fsutil::process_alive)
+                && crate::fsutil::remove_tree(&work.path()).is_ok()
+            {
+                removed += 1;
+            }
+        }
+        // Only when empty: a live process's work directory keeps it.
+        if fs::remove_dir(&root).is_ok() {
+            removed += 1;
+        }
+    }
+    removed
+}
+
+/// [`sweep`], the first time this process asks for `shm`.
+pub(crate) fn sweep_once(shm: &Path) {
+    static SWEPT: Mutex<BTreeSet<PathBuf>> = Mutex::new(BTreeSet::new());
+    let first = SWEPT
+        .lock()
+        .unwrap_or_else(PoisonError::into_inner)
+        .insert(shm.to_path_buf());
+    if first {
+        sweep(shm);
+    }
 }
 
 /// Memory that work inside this process has said it is using or about to

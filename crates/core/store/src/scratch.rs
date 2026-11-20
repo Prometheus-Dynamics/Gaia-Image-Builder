@@ -35,9 +35,18 @@ impl<'s> Scratch<'s> {
 
     /// A scratch directory under `root` (in RAM), counted by `claim`.
     pub(crate) fn in_ram(store: &'s Store, root: &Path, claim: RamClaim) -> Result<Self> {
-        fs::create_dir_all(root).map_err(|e| Error::io("create", root, e))?;
         let dir = root.join(fsutil::unique_name());
-        fs::create_dir(&dir).map_err(|e| Error::io("create", &dir, e))?;
+        // Another process's step may remove the root, empty, between the
+        // two: make it again.
+        let mut tries = 0;
+        loop {
+            fs::create_dir_all(root).map_err(|e| Error::io("create", root, e))?;
+            match fs::create_dir(&dir) {
+                Ok(()) => break,
+                Err(e) if e.kind() == std::io::ErrorKind::NotFound && tries < 8 => tries += 1,
+                Err(e) => return Err(Error::io("create", &dir, e)),
+            }
+        }
         Ok(Self {
             store,
             dir,
@@ -158,7 +167,13 @@ impl Drop for Scratch<'_> {
         // while other steps run would block them (see the module docs of
         // `lib`). The trash is emptied by `Store::retain`.
         let _ = if self.in_memory() {
-            fsutil::remove_tree(&self.dir)
+            let removed = fsutil::remove_tree(&self.dir);
+            // The store's RAM root goes with its last work directory; while
+            // another step's is in it, this fails and leaves it.
+            if let Some(root) = self.dir.parent() {
+                let _ = fs::remove_dir(root);
+            }
+            removed
         } else {
             fsutil::bury(&self.dir, &self.store.root().join("trash"))
         };
@@ -494,6 +509,88 @@ mod tests {
         let scratch = store.scratch().expect("scratch");
         output_tree(&scratch.path().join("out"));
         assert!(scratch.commit(&[("out", Path::new("out"))]).is_ok());
+    }
+
+    /// The store's RAM root is there while a work directory is in it, and
+    /// gone with the last one, whether its step committed or failed.
+    #[test]
+    fn the_ram_root_goes_with_its_last_work_directory() {
+        let base = tempfile::tempdir().expect("tempdir");
+        let (store, shm) = store_in(base.path());
+        let budget = budget();
+        let root = placement::ram_root(store.root(), &shm);
+        let first = ram_scratch(&store, &shm, budget);
+        let second = ram_scratch(&store, &shm, budget);
+        output_tree(&second.path().join("out"));
+        first.discard();
+        assert!(root.is_dir(), "the second step's directory keeps it");
+        second
+            .commit_step(
+                &StepKey(Digest::of_bytes(b"last")),
+                &[("out", Path::new("out"))],
+            )
+            .expect("commit");
+        assert!(!root.exists(), "the last one takes the root with it");
+        assert_eq!(fs::read_dir(&shm).expect("shm").count(), 0);
+    }
+
+    /// What a killed run left in /dev/shm goes when the next run makes its
+    /// first RAM work directory: the dead process's work directories, and
+    /// RAM roots left empty, of any store. A live process's directory, and
+    /// anything not named as a RAM root, stay.
+    #[test]
+    fn a_killed_runs_ram_directories_go_with_the_next_runs_first() {
+        let base = tempfile::tempdir().expect("tempdir");
+        let (store, shm) = store_in(base.path());
+        // A pid no process has (above the kernel's pid limit).
+        let killed = placement::ram_root(Path::new("/killed/store"), &shm).join("999999999-0-1");
+        output_tree(&killed.join("out"));
+        let empty = shm.join("gaia-0123456789abcdef");
+        fs::create_dir_all(&empty).expect("mkdir");
+        let live_root = placement::ram_root(Path::new("/live/store"), &shm);
+        let live = live_root.join(format!("{}-0-1", std::process::id()));
+        fs::create_dir_all(&live).expect("mkdir");
+        let other = shm.join("gaia-buildroot/out");
+        fs::create_dir_all(&other).expect("mkdir");
+        let not_hex = shm.join("gaia-0123456789abcdeg");
+        fs::create_dir_all(&not_hex).expect("mkdir");
+        let scratch = store
+            .scratch_with(GIB, &settings(Mode::Ram, 10 * GIB), roomy(), &shm, budget())
+            .expect("scratch");
+        assert!(scratch.in_memory());
+        assert!(
+            !killed.exists(),
+            "the dead process's work directory is removed"
+        );
+        assert!(
+            !killed.parent().expect("root").exists(),
+            "and its root, now empty"
+        );
+        assert!(!empty.exists(), "an empty root is removed");
+        assert!(live.is_dir(), "a live process's directory stays");
+        assert!(
+            other.is_dir() && not_hex.is_dir(),
+            "other names are not looked at"
+        );
+        drop(scratch);
+        let mut left: Vec<String> = fs::read_dir(&shm)
+            .expect("shm")
+            .flatten()
+            .map(|e| e.file_name().to_string_lossy().into_owned())
+            .collect();
+        left.sort();
+        let live_name = live_root
+            .file_name()
+            .expect("name")
+            .to_string_lossy()
+            .into_owned();
+        let mut want = [
+            "gaia-0123456789abcdeg",
+            "gaia-buildroot",
+            live_name.as_str(),
+        ];
+        want.sort();
+        assert_eq!(left, want);
     }
 
     #[test]
