@@ -33,6 +33,7 @@
 //! This is not the general `gaia.compress.xz` node: that one is for any
 //! artifact and its presets above 6 use a dictionary a board refuses.
 
+mod blocks;
 pub mod dictionary;
 pub mod signing;
 
@@ -40,7 +41,7 @@ use daedalus::prelude::*;
 use gaia_step::{Ctx, KeyBuilder, Step, StepError, Store};
 use gaia_types::{Artifact, ArtifactKind, Image, ObjectKind};
 use std::fs::File;
-use std::io::{BufReader, BufWriter, Write};
+use std::io::{BufWriter, Write};
 use std::path::Path;
 use zeroize::Zeroizing;
 
@@ -159,9 +160,13 @@ pub fn flash_image_with(
     let made = Step::new(&store, cx, NAME, key).look_up_or_make(
         &[("file", Path::new(OUTPUT))],
         |work| {
-            let dir = work.dir();
+            let dir = work.dir().to_path_buf();
             let image_stream = dir.join("image.xz");
-            encode(&src, &image_stream, threads()).map_err(fail)?;
+            let made = encode(&src, &image_stream, threads()).map_err(fail)?;
+            work.detail(
+                "blocks",
+                serde_json::json!({ "blocks": made.blocks, "zero": made.zero_blocks }),
+            );
             check_dictionary(&image_stream).map_err(fail)?;
             let out = dir.join(OUTPUT);
             match &signer {
@@ -179,7 +184,7 @@ pub fn flash_image_with(
                         .map_err(|e| fail(format!("the record: {e}")))?;
                     let record_stream = dir.join("record.xz");
                     encode_record(&record_bin, &record_stream).map_err(fail)?;
-                    check_dictionary(&record_stream).map_err(fail)?;
+                    check_record(&record_stream).map_err(fail)?;
                     concat(&[&image_stream, &record_stream], &out).map_err(fail)?;
                     for scratch in [&image_stream, &record_stream, &record_bin] {
                         std::fs::remove_file(scratch)
@@ -217,23 +222,40 @@ fn ed25519_sign(key: &ed25519_dalek::SigningKey, message: &[u8]) -> [u8; 64] {
     key.sign(message).to_bytes()
 }
 
-/// `input` as one xz stream at the step's preset, CRC64, LZMA2 only, in
-/// blocks of [`BLOCK`] bytes of input: liblzma's multithreaded encoder, the
-/// one `xz -6 --check=crc64 --block-size=64MiB -T<threads>` runs. The block
-/// size is fixed, so the bytes are the same at any thread count.
-fn encode(input: &Path, out: &Path, threads: u32) -> Result<(), String> {
-    let stream = xz2::stream::MtStreamBuilder::new()
+/// The multithreaded encoder the image's stream is made with: the step's
+/// preset, CRC64, LZMA2 only, blocks of [`BLOCK`] bytes of input, `threads`
+/// workers. The block size is fixed, so the bytes are the same at any thread
+/// count.
+fn mt_encoder(threads: u32) -> Result<xz2::stream::Stream, String> {
+    xz2::stream::MtStreamBuilder::new()
         .preset(PRESET)
         .check(xz2::stream::Check::Crc64)
         .block_size(BLOCK)
         .threads(threads.max(1))
         .encoder()
-        .map_err(|e| format!("the xz encoder: {e}"))?;
+        .map_err(|e| format!("the xz encoder: {e}"))
+}
+
+/// `input` as one xz stream, the bytes `xz -6 --check=crc64
+/// --block-size=64MiB -T<threads>` writes, made from its blocks (see
+/// [`blocks`]): every block that holds data is encoded, on up to `threads`
+/// threads, and the all-zero block once, its bytes written for every block
+/// of zeros. A disk image is mostly holes, so most of it is never encoded.
+fn encode(input: &Path, out: &Path, threads: u32) -> Result<blocks::Made, String> {
+    blocks::write_stream(input, out, BLOCK, threads, &|| mt_encoder(1))
+}
+
+/// `input` through the multithreaded encoder from start to end: the bytes
+/// [`encode`] must write, for the tests to compare.
+#[cfg(test)]
+fn encode_whole(input: &Path, out: &Path, threads: u32) -> Result<(), String> {
     let reader = File::open(input).map_err(|e| format!("encode: {e}"))?;
     let writer = File::create(out).map_err(|e| format!("encode: {e}"))?;
-    let mut reader = BufReader::with_capacity(1 << 20, reader);
-    let mut encoder =
-        xz2::write::XzEncoder::new_stream(BufWriter::with_capacity(1 << 20, writer), stream);
+    let mut reader = std::io::BufReader::with_capacity(1 << 20, reader);
+    let mut encoder = xz2::write::XzEncoder::new_stream(
+        BufWriter::with_capacity(1 << 20, writer),
+        mt_encoder(threads)?,
+    );
     std::io::copy(&mut reader, &mut encoder).map_err(|e| format!("encode: {e}"))?;
     let mut writer = encoder.finish().map_err(|e| format!("encode: {e}"))?;
     writer.flush().map_err(|e| format!("encode: {e}"))
@@ -261,6 +283,28 @@ fn encode_record(input: &Path, out: &Path) -> Result<(), String> {
 fn check_dictionary(stream: &Path) -> Result<(), String> {
     let declared = dictionary::read_back_all(stream)?;
     check_declared(declared)
+}
+
+/// The signature record's stream, read back: one block, within the
+/// dictionary limit, LZMA2 only (read back refuses any other filter). It is
+/// the one-thread encoder's, so its block header has no sizes, and that is
+/// not asked of it: the sizes are the image stream's rule.
+fn check_record(stream: &Path) -> Result<(), String> {
+    let declared = dictionary::read_back_all(stream)?;
+    if declared.blocks != 1 {
+        return Err(format!(
+            "the signature record's stream has {} blocks, not one",
+            declared.blocks
+        ));
+    }
+    if declared.dictionary > dictionary::LIMIT {
+        return Err(format!(
+            "the signature record's dictionary is {} MiB, over the limit of {} MiB",
+            declared.dictionary.div_ceil(1024 * 1024),
+            dictionary::LIMIT / (1024 * 1024)
+        ));
+    }
+    Ok(())
 }
 
 /// The limits a board holds the image's stream to, on what it declares.
@@ -413,6 +457,148 @@ mod tests {
                 );
             }
             _ => println!("SKIPPED the comparison with the xz program: none ran"),
+        }
+    }
+
+    /// A sparse image as a disk is: blocks of zeros, a data block between
+    /// holes, and data in the last block, which is shorter than a block.
+    fn sparse() -> Vec<u8> {
+        const MIB: usize = 1024 * 1024;
+        let block = BLOCK as usize;
+        let mut out = vec![0_u8; block];
+        let line = b"partition table, boot files and a root filesystem\n";
+        out.extend(line.iter().cycle().take(block));
+        out.resize(4 * block, 0);
+        let mut digest = b"tail".to_vec();
+        while out.len() < 4 * block + MIB + 3 {
+            digest = Sha256::digest(&digest).to_vec();
+            out.extend_from_slice(&digest);
+        }
+        out.truncate(4 * block + MIB + 3);
+        out
+    }
+
+    /// `raw` in `path` with its zero runs of a MiB or more left as holes.
+    fn write_with_holes(path: &Path, raw: &[u8]) {
+        use std::os::unix::fs::FileExt;
+        const MIB: usize = 1024 * 1024;
+        let file = File::create(path).expect("create");
+        file.set_len(raw.len() as u64).expect("size");
+        for (i, chunk) in raw.chunks(MIB).enumerate() {
+            if chunk.iter().any(|b| *b != 0) {
+                file.write_all_at(chunk, (i * MIB) as u64).expect("write");
+            }
+        }
+        let allocated = std::process::Command::new("du")
+            .args(["-B1", "--"])
+            .arg(path)
+            .output()
+            .map(|out| String::from_utf8_lossy(&out.stdout).to_string())
+            .unwrap_or_default();
+        println!("holes image: {} bytes, du {allocated}", raw.len());
+    }
+
+    /// Made from its blocks, with the zero block written once for every
+    /// block of zeros, the stream is the whole encoder's, byte for byte, at
+    /// any thread count, and the xz program reads it back as the image.
+    #[test]
+    fn the_stream_from_its_blocks_is_the_whole_encoders() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        for (name, raw) in [
+            ("sparse", sparse()),
+            ("holes", sparse()),
+            ("agreed", sample()),
+        ] {
+            let image = dir.path().join(format!("{name}.img"));
+            if name == "holes" {
+                // The same bytes with real holes: only the data is written,
+                // so the file system reports the zeros as holes.
+                write_with_holes(&image, &raw);
+            } else {
+                std::fs::write(&image, &raw).expect("write");
+            }
+            let whole = dir.path().join(format!("{name}-whole.xz"));
+            encode_whole(&image, &whole, 4).expect("encodes");
+            let whole = std::fs::read(&whole).expect("read");
+            for threads in [1, 3] {
+                let out = dir.path().join(format!("{name}-{threads}.xz"));
+                let made = encode(&image, &out, threads).expect("encodes");
+                let from_blocks = std::fs::read(&out).expect("read");
+                assert!(
+                    from_blocks == whole,
+                    "{name} at {threads} threads: {} bytes against {}",
+                    from_blocks.len(),
+                    whole.len()
+                );
+                let expect_zero = if name == "agreed" { 0 } else { 3 };
+                assert_eq!(made.zero_blocks, expect_zero, "{name}");
+                assert_eq!(made.blocks, (raw.len() as u64).div_ceil(BLOCK), "{name}");
+                check_dictionary(&out).expect("within a board's limits");
+            }
+            let xz = std::process::Command::new("xz")
+                .args(["-dc"])
+                .arg(dir.path().join(format!("{name}-3.xz")))
+                .output();
+            match xz {
+                Ok(out) if out.status.success() => {
+                    assert!(
+                        out.stdout == raw,
+                        "{name}: the xz program reads back the image"
+                    )
+                }
+                _ => println!("SKIPPED the xz program's read-back: none ran"),
+            }
+        }
+    }
+
+    /// The image `GAIA_FLASH_IMAGE` names (a real disk image), both ways:
+    /// the same bytes, and how long each took.
+    #[test]
+    #[ignore = "a real disk image: GAIA_FLASH_IMAGE=<path> cargo test -- --ignored"]
+    fn a_real_image_is_the_whole_encoders_bytes() {
+        let Some(image) = std::env::var_os("GAIA_FLASH_IMAGE") else {
+            println!("SKIPPED: GAIA_FLASH_IMAGE is not set");
+            return;
+        };
+        // GAIA_FLASH_MODE: `blocks` or `whole` makes only that one, to time it
+        // alone; unset, both are made and compared.
+        let mode = std::env::var("GAIA_FLASH_MODE").unwrap_or_default();
+        let image = Path::new(&image);
+        let dir = tempfile::tempdir().expect("tempdir");
+        let threads = threads();
+        let out = dir.path().join("blocks.xz");
+        let whole = dir.path().join("whole.xz");
+        if mode != "whole" {
+            let started = std::time::Instant::now();
+            let made = encode(image, &out, threads).expect("encodes");
+            println!(
+                "from blocks: {:.1} s, {made:?}, {threads} threads",
+                started.elapsed().as_secs_f64()
+            );
+            let bytes = std::fs::read(&out).expect("read");
+            println!(
+                "from blocks: {} bytes, sha256 {}",
+                bytes.len(),
+                hex_of(&bytes)
+            );
+        }
+        if mode != "blocks" {
+            let started = std::time::Instant::now();
+            encode_whole(image, &whole, threads).expect("encodes");
+            println!(
+                "whole: {:.1} s, {threads} threads",
+                started.elapsed().as_secs_f64()
+            );
+            let bytes = std::fs::read(&whole).expect("read");
+            println!("whole: {} bytes, sha256 {}", bytes.len(), hex_of(&bytes));
+        }
+        if mode.is_empty() {
+            let (a, b) = (
+                std::fs::read(&out).expect("read"),
+                std::fs::read(&whole).expect("read"),
+            );
+            assert!(a == b, "{} bytes against {}", a.len(), b.len());
+            println!("the same bytes");
         }
     }
 

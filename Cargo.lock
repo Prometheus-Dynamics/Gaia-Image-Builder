@@ -826,6 +826,8 @@ dependencies = [
  "gaia-store",
  "gaia-types",
  "lzma-sys",
+ "rustix",
+ "serde_json",
  "sha2 0.11.1",
  "tempfile",
  "xz2",
