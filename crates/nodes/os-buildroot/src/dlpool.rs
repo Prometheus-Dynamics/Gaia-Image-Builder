@@ -139,6 +139,23 @@ pub(crate) fn seed(wanted: &Wanted, dl: &Path, pool: &Path) -> io::Result<Moved>
     Ok(moved)
 }
 
+/// The line to print when the download directory and the pool are on
+/// different file systems: each file is then copied, and takes its room
+/// twice, which on a full disk matters.
+pub(crate) fn copy_note(dl: &Path, pool: &Path) -> io::Result<Option<String>> {
+    use std::os::unix::fs::MetadataExt;
+    let same = fs::metadata(dl)?.dev() == fs::metadata(pool)?.dev();
+    Ok((!same).then(|| {
+        format!(
+            "note: the download pool {} and the download directory {} are on different \
+             file systems: downloads are copied between them, not linked \
+             (GAIA_BUILDROOT_DL_POOL sets the pool)",
+            pool.display(),
+            dl.display()
+        )
+    }))
+}
+
 /// Links `from` at `to`, or copies it there (through a temporary name, so
 /// `to` is whole or absent) when they are on different file systems. False
 /// when `to` was there already.
@@ -191,6 +208,19 @@ pub(crate) fn before(
     let fail = |e: io::Error| {
         gaia_step::StepError::body(step, format!("the download pool {}: {e}", pool.display()))
     };
+    fs::create_dir_all(pool).map_err(fail)?;
+    fs::create_dir_all(dl).map_err(fail)?;
+    if let Some(note) = copy_note(dl, pool).map_err(fail)? {
+        // Once a process: every step of a build would say the same.
+        static SAID: Mutex<BTreeSet<(PathBuf, PathBuf)>> = Mutex::new(BTreeSet::new());
+        if SAID
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .insert((dl.to_path_buf(), pool.to_path_buf()))
+        {
+            eprintln!("{note}");
+        }
+    }
     let wanted = wanted(src).map_err(fail)?;
     let harvested = harvest(&wanted, dl, pool).map_err(fail)?;
     let seeded = seed(&wanted, dl, pool).map_err(fail)?;
@@ -372,6 +402,53 @@ mod tests {
         assert!(!two.join("bad").exists());
         assert!(!two.join("zlib/LICENSE").exists(), "only what the pool has");
         assert_eq!(seed(&wanted, &two, &pool).expect("again").files, 0);
+    }
+
+    /// Across file systems a file is copied, whole, and said to be.
+    #[test]
+    fn a_pool_on_another_file_system_copies_and_says_so() {
+        let Ok(shm) = tempfile::Builder::new().tempdir_in("/dev/shm") else {
+            return;
+        };
+        let disk = tempfile::tempdir().expect("tempdir");
+        let (dl, pool) = (disk.path().join("dl"), shm.path().join("pool"));
+        fs::create_dir_all(&dl).expect("dl");
+        fs::create_dir_all(&pool).expect("pool");
+        let dev = |p: &Path| std::os::unix::fs::MetadataExt::dev(&fs::metadata(p).expect("meta"));
+        if dev(&dl) == dev(&pool) {
+            return;
+        }
+        let note = copy_note(&dl, &pool).expect("reads").expect("a note");
+        assert!(
+            note.contains(&pool.display().to_string()) && note.contains("copied"),
+            "{note}"
+        );
+        assert!(copy_note(&dl, &dl).expect("reads").is_none());
+        let src = disk.path().join("buildroot");
+        let hex = hex_of(b"zlib source");
+        tree(
+            &src,
+            &[(
+                "package/zlib/zlib.hash",
+                &format!("sha256  {hex}  zlib-1.3.tar.xz\n"),
+            )],
+        );
+        tree(&dl, &[("zlib/zlib-1.3.tar.xz", "zlib source")]);
+        let wanted = wanted(&src).expect("reads");
+        assert_eq!(harvest(&wanted, &dl, &pool).expect("harvest").files, 1);
+        assert_eq!(fs::read(pool.join(&hex)).expect("copied"), b"zlib source");
+        let other = disk.path().join("dl-two");
+        assert_eq!(seed(&wanted, &other, &pool).expect("seed").files, 1);
+        assert_eq!(
+            fs::read(other.join("zlib/zlib-1.3.tar.xz")).expect("copied"),
+            b"zlib source"
+        );
+        let names: Vec<String> = fs::read_dir(other.join("zlib"))
+            .expect("dir")
+            .flatten()
+            .map(|e| e.file_name().to_string_lossy().into_owned())
+            .collect();
+        assert_eq!(names, ["zlib-1.3.tar.xz"], "no temporary copy is left");
     }
 
     #[test]
