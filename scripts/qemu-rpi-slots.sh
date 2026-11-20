@@ -21,7 +21,8 @@
 #   counter, and nothing there could clear one, so none is given to the OS;
 # - os_prefix, kernel= (default kernel_2712.img, else kernel8.img),
 #   cmdline= (default cmdline.txt) and `initramfs <file> [followkernel]`;
-#   device_tree= and dtoverlay= are not applied (the device tree is virt's).
+#   device_tree= and dtoverlay= are not applied (the device tree is virt's),
+#   except the board overlay's marker (below).
 #   A file in a fixed-size bay is padded with zeros: the command line is
 #   read up to its padding; the kernel takes an initramfs's zeros as it is;
 # - console=serial0 becomes ttyAMA0, the virt machine's PL011, and other
@@ -39,9 +40,19 @@
 #   checked in the built device tree: there, a virtio-mmio node with the
 #   disk's transport, or the boot fails with words;
 # - /serial-number in the device tree (--serial, default 1000000052540077),
-#   as a Pi's firmware sets it, so the board keeps one identity across runs.
-# dtoverlay= and dtparam= are not applied: the device tree is the virt
-# machine's, so Pi hardware (RP1, CSI, PIO, the fan) is absent.
+#   as a Pi's firmware sets it, so the board keeps one identity across runs;
+# - the board overlay's marker: for each dtoverlay= the boot's config names
+#   (<os_prefix><overlay_prefix, default overlays/><name>.dtbo), the
+#   fragment that targets / and carries lemnos { lemnos,board;
+#   lemnos,overlay-sha256 } gives those two properties to /lemnos in the
+#   virt tree, as the firmware's applying the overlay would. Only that
+#   fragment: the overlay's other fragments are for Pi hardware. With no
+#   dtoverlay=, a file missing from the boot partition (the firmware drops
+#   it without a word) or no marker fragment, nothing is added, so a
+#   missing overlay is refused as on the board. Each boot records whether
+#   the marker was emulated and from which file.
+# Other dtoverlay= fragments and dtparam= are not applied: the device tree
+# is the virt machine's, so Pi hardware (RP1, CSI, PIO, the fan) is absent.
 #
 # Restarts: QEMU runs with -no-reboot and the serial console goes to a log.
 # When the kernel logs "Restarting system with command '...tryboot...'"
@@ -98,8 +109,9 @@
 #   --cpu --smp --mem   guest CPU (cortex-a76), CPUs (4), memory (4G)
 #   --print         print what the first boot would use and the QEMU
 #                   command, then exit (needs no QEMU)
-#   --dtb           build and check the first boot's device tree, print its
-#                   path, then exit (needs QEMU, boots nothing)
+#   --dtb           build and check the first boot's device tree, print
+#                   the board overlay marker's line and the tree's path,
+#                   then exit (needs QEMU, boots nothing)
 #   -- ARGS         passed to QEMU
 #
 # A QMP socket is at <state>/qmp.sock (e.g. system_powerdown). Without a
@@ -305,6 +317,7 @@ read_config() {
 # Sets boot_kernel, boot_initramfs, boot_cmdline from the FAT for tryboot $1.
 plan_boot() {
 	local config=config.txt settings key value prefix="" kernel="" cmdline=cmdline.txt initramfs="" arg out
+	local overlay_prefix=overlays/ name overlays=()
 	[[ $1 -eq 0 ]] || config=tryboot.txt
 	cfg_on=1
 	settings=$(read_config "$config" "$1")
@@ -317,8 +330,18 @@ plan_boot() {
 		kernel) kernel=$value ;;
 		cmdline) cmdline=$value ;;
 		initramfs) initramfs=${value%% *} ;;
+		overlay_prefix) overlay_prefix=$value ;;
+		dtoverlay)
+			name=${value%%[,:]*}
+			[[ -z $name ]] || overlays+=("$name")
+			;;
 		esac
 	done <<< "$settings"
+	boot_overlays=()
+	for name in ${overlays[@]+"${overlays[@]}"}; do
+		boot_overlays+=("$prefix$overlay_prefix$name.dtbo")
+	done
+	boot_config=$config
 	if [[ -z $kernel ]]; then
 		kernel=kernel8.img
 		fat_has "${prefix}kernel_2712.img" && kernel=kernel_2712.img
@@ -388,6 +411,38 @@ disk_transport() {
 			/dev: virtio-blk-device/ { sub(/^0+/, "", base); print base; exit }'
 }
 
+# The board overlay's marker in the virt tree, from the dtoverlay= files
+# plan_boot found (the last marker wins, as the overlays apply in order).
+# Sets marker_note to what was done, for the boot's record.
+emulate_marker() {
+	local file dtbo="$state/overlay.dtbo" fragment board="" digest="" from="" b d why=()
+	for file in ${boot_overlays[@]+"${boot_overlays[@]}"}; do
+		if ! fat_has "$file"; then
+			why+=("$file is not on the boot partition")
+			continue
+		fi
+		mcopy -n -i "$fat" "::$file" "$dtbo"
+		local found=0
+		for fragment in $(fdtget -l "$dtbo" / 2> /dev/null); do
+			[[ $(fdtget -t s "$dtbo" "/$fragment" target-path 2> /dev/null) == / ]] || continue
+			b=$(fdtget -t s "$dtbo" "/$fragment/__overlay__/lemnos" lemnos,board 2> /dev/null) || continue
+			d=$(fdtget -t s "$dtbo" "/$fragment/__overlay__/lemnos" lemnos,overlay-sha256 2> /dev/null) || continue
+			board=$b digest=$d from="$file /$fragment" found=1
+		done
+		[[ $found -eq 1 ]] || why+=("$file has no marker fragment")
+		rm -f "$dtbo"
+	done
+	if [[ -n $from ]]; then
+		fdtput -p -t s "$state/virt.dtb" /lemnos lemnos,board "$board"
+		fdtput -t s "$state/virt.dtb" /lemnos lemnos,overlay-sha256 "$digest"
+		marker_note="board overlay marker: emulated from $from (lemnos,board \"$board\", lemnos,overlay-sha256 $digest)"
+	elif [[ ${#boot_overlays[@]} -eq 0 ]]; then
+		marker_note="board overlay marker: none, $boot_config names no dtoverlay="
+	else
+		marker_note="board overlay marker: none, $(IFS=';'; echo "${why[*]}" | sed 's/;/; /g')"
+	fi
+}
+
 # The virt machine's device tree with /chosen/bootloader/tryboot set to $1,
 # the boot mode $2, the board's serial number, and the disk's node at the
 # boot source's path $3 when there is one.
@@ -398,6 +453,7 @@ make_dtb() {
 	fdtput -p -t x "$state/virt.dtb" /chosen/bootloader tryboot "$1"
 	fdtput -t x "$state/virt.dtb" /chosen/bootloader boot-mode "$(printf %x "$2")"
 	fdtput -t s "$state/virt.dtb" / serial-number "$serial"
+	emulate_marker
 	[[ -n $3 ]] || return 0
 	base=$(disk_transport)
 	[[ -n $base ]] || { echo "QEMU did not say which virtio-mmio transport the disk is on" >&2; return 1; }
@@ -483,6 +539,7 @@ while :; do
 		echo "kernel: $boot_kernel"
 		echo "initramfs: ${boot_initramfs:-none}"
 		echo "cmdline: $boot_cmdline"
+		echo "overlays: ${boot_overlays[*]:-none}"
 		printf 'qemu:'
 		printf ' %q' "$qemu" "${args[@]}" -dtb "$state/virt.dtb" "${qemu_extra[@]}"
 		echo
@@ -490,6 +547,7 @@ while :; do
 	fi
 	make_dtb "$this_tryboot" "$boot_mode" "$boot_from"
 	if [[ $dtb_only -eq 1 ]]; then
+		echo "$marker_note"
 		echo "$state/virt.dtb"
 		exit 0
 	fi
@@ -500,6 +558,7 @@ while :; do
 		[[ -z $kernel_override ]] || whose="--kernel; not the image's"
 		echo "kernel $boot_kernel sha256 $(sha256sum < "$boot_kernel" | cut -d' ' -f1) ($whose)"
 		echo "device tree $state/virt.dtb sha256 $(sha256sum < "$state/virt.dtb" | cut -d' ' -f1) (the virt machine's; not the image's)"
+		echo "$marker_note"
 		[[ -z $boot_initramfs ]] || echo "initramfs from the image sha256 $(sha256sum < "$boot_initramfs" | cut -d' ' -f1)"
 		if [[ $boot_cmdline == "$image_cmdline" ]]; then
 			echo "command line: the image's"
@@ -509,6 +568,7 @@ while :; do
 	} > "$state/boot-$boots.replaced"
 	log="$state/boot-$boots.log"
 	echo "== boot $boots (tryboot $this_tryboot) from $boot_source; serial log $log" >&2
+	echo "== $marker_note" >&2
 	if [[ -t 0 ]]; then
 		args+=(-chardev "stdio,id=con,mux=on,signal=on,logfile=$log" -serial chardev:con -mon chardev=con)
 	else

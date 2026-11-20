@@ -43,8 +43,44 @@ fn run(program: &str, args: &[&str]) {
     );
 }
 
+/// The marker digest the test overlay carries.
+const MARKER_SHA: &str = "2910e37d9417588e329e01f30093c82fd6f2f6db6daa05f75e6a15cfd6da8fea";
+
+/// A board overlay as `lemnos-ctl tree` writes one: a fragment for Pi
+/// hardware, then (with `marker`) the marker fragment last.
+fn overlay(dir: &Path, marker: bool) -> Vec<u8> {
+    let mut dts = String::from(
+        "/dts-v1/;\n/plugin/;\n/ {\n\tfragment@0 {\n\t\ttarget-path = \"/axi/pcie@1000120000/rp1\";\n\t\t__overlay__ {\n\t\t\tgaia-test-rp1 = \"applied\";\n\t\t};\n\t};\n",
+    );
+    if marker {
+        dts += &format!(
+            "\tfragment@1 {{\n\t\ttarget-path = \"/\";\n\t\t__overlay__ {{\n\t\t\tlemnos {{\n\t\t\t\tlemnos,board = \"raze\";\n\t\t\t\tlemnos,overlay-sha256 = \"{MARKER_SHA}\";\n\t\t\t}};\n\t\t}};\n\t}};\n"
+        );
+    }
+    dts += "};\n";
+    let source = dir.join("overlay.dts");
+    let out = dir.join("overlay.dtbo");
+    std::fs::write(&source, dts).expect("write");
+    run(
+        "dtc",
+        &[
+            "-q",
+            "-I",
+            "dts",
+            "-O",
+            "dtb",
+            "-o",
+            out.to_str().expect("utf-8"),
+            source.to_str().expect("utf-8"),
+        ],
+    );
+    std::fs::read(out).expect("read")
+}
+
 /// A disk with a FAT boot partition laid out in three bays; each bay's
-/// command line names its own slot and is padded with zeros.
+/// command line names its own slot and is padded with zeros. The board
+/// overlay is bay 0's with its marker, bay 1's without one, and missing
+/// from bay 2.
 fn disk(dir: &Path) -> PathBuf {
     let fat = dir.join("fat.img");
     let fat_arg = fat.to_str().expect("utf-8");
@@ -95,6 +131,16 @@ fn disk(dir: &Path) -> PathBuf {
                 .into_bytes();
         cmdline.resize(512, 0);
         write(&format!("slots/bay{bay}/cmdline.txt"), &cmdline);
+        if bay < 2 {
+            run(
+                "mmd",
+                &["-i", fat_arg, &format!("::slots/bay{bay}/overlays")],
+            );
+            write(
+                &format!("slots/bay{bay}/overlays/lemnos-board.dtbo"),
+                &overlay(dir, bay == 0),
+            );
+        }
     }
     // The disk: an MBR, the FAT at 1 MiB, an empty partition after it.
     let disk = dir.join("disk.img");
@@ -323,4 +369,93 @@ fn the_disks_node_is_at_the_boot_sources_path() {
         .output()
         .expect("fdtget");
     assert!(!out.status.success(), "a count was given");
+}
+
+/// The board overlay's marker reaches /lemnos of the virt tree from the
+/// dtoverlay= the boot's config names, and only the marker: a bay whose
+/// overlay has no marker, or whose overlay file is missing, gets none, so
+/// slot-init refuses it as a board would.
+#[test]
+fn the_board_overlays_marker_is_emulated_from_the_boots_overlay() {
+    if !tools_here(&[
+        "mformat",
+        "mcopy",
+        "mmd",
+        "mtype",
+        "sfdisk",
+        "fdtput",
+        "fdtget",
+        "dtc",
+        "python3",
+        "qemu-system-aarch64",
+    ]) {
+        return;
+    }
+    let dir = tempfile::tempdir().expect("tempdir");
+    let disk = disk(dir.path());
+    let get = |dtb: &str, args: &[&str]| {
+        let out = Command::new("fdtget")
+            .arg(dtb)
+            .args(args)
+            .output()
+            .expect("fdtget");
+        out.status
+            .success()
+            .then(|| String::from_utf8_lossy(&out.stdout).trim().to_string())
+    };
+    let dtb_of = |out: &str| {
+        out.lines()
+            .last()
+            .expect("the device tree's path")
+            .to_string()
+    };
+
+    // Bay 0: the marker, and nothing of the overlay's other fragment.
+    let (ok, out) = runner(dir.path(), &disk, &["--fresh", "--dtb"]);
+    assert!(ok, "{out}");
+    assert!(
+        out.contains(
+            "board overlay marker: emulated from slots/bay0/overlays/lemnos-board.dtbo /fragment@1"
+        ),
+        "{out}"
+    );
+    let dtb = dtb_of(&out);
+    assert_eq!(
+        get(&dtb, &["/lemnos", "lemnos,board"]).as_deref(),
+        Some("raze")
+    );
+    assert_eq!(
+        get(&dtb, &["/lemnos", "lemnos,overlay-sha256"]).as_deref(),
+        Some(MARKER_SHA)
+    );
+    let text = Command::new("dtc")
+        .args(["-q", "-I", "dtb", "-O", "dts", &dtb])
+        .output()
+        .expect("dtc");
+    assert!(
+        !String::from_utf8_lossy(&text.stdout).contains("gaia-test-rp1"),
+        "a fragment other than the marker was applied"
+    );
+
+    // Bay 1 (boot count 4): an overlay with no marker fragment.
+    let (ok, out) = runner(
+        dir.path(),
+        &disk,
+        &["--fresh", "--boot-count", "4", "--dtb"],
+    );
+    assert!(ok, "{out}");
+    assert!(
+        out.contains("board overlay marker: none, slots/bay1/overlays/lemnos-board.dtbo has no marker fragment"),
+        "{out}"
+    );
+    assert_eq!(get(&dtb_of(&out), &["/lemnos", "lemnos,board"]), None);
+
+    // Bay 2 (the trial): the overlay file is missing.
+    let (ok, out) = runner(dir.path(), &disk, &["--fresh", "--tryboot", "--dtb"]);
+    assert!(ok, "{out}");
+    assert!(
+        out.contains("board overlay marker: none, slots/bay2/overlays/lemnos-board.dtbo is not on the boot partition"),
+        "{out}"
+    );
+    assert_eq!(get(&dtb_of(&out), &["/lemnos", "lemnos,board"]), None);
 }
