@@ -729,7 +729,12 @@ fn build(
         Some(warm) => warm.out(),
         None => work.dir().join("out"),
     };
+    // How full the shared pool was while this build ran.
+    let sampler = crate::jobs::sample(&host.make, usize::try_from(host.jobs).unwrap_or(usize::MAX));
     let result = build_steps(work, prepared, seed, host, warm);
+    if let Some(sampler) = sampler {
+        work.detail(crate::jobs::SAMPLE_DETAIL, sampler.finish());
+    }
     times::record(work, &out, host.jobs);
     result
 }

@@ -28,6 +28,12 @@
 //! name is the make's own, not this process's `/proc/<pid>/fd/<n>`: a make in
 //! the build's sandbox (bwrap, in its own user namespace) may not open
 //! another process's descriptors, and would fall back to one job.
+//!
+//! How full the pool is, over a build: a [`Sampler`] reads the fifo's byte
+//! count (its free tokens) every [`SAMPLE`] while the build runs, and the
+//! build records the series as the [`SAMPLE_DETAIL`] detail. A pool at zero
+//! for long stretches is exhausted, and the builds wait on each other's
+//! tokens; a pool with tokens left is not what holds a build back.
 
 use rustix::fs::{CWD, Mode, mkfifoat};
 use std::fs::{self, File, OpenOptions};
@@ -35,8 +41,10 @@ use std::io::{self, Write};
 use std::os::fd::AsRawFd;
 use std::path::PathBuf;
 use std::process::Command;
+use std::sync::atomic::AtomicBool;
 use std::sync::atomic::{AtomicUsize, Ordering};
-use std::sync::{Condvar, Mutex, OnceLock, PoisonError};
+use std::sync::{Arc, Condvar, Mutex, OnceLock, PoisonError};
+use std::time::{Duration, Instant};
 
 /// The Buildroot builds one image runs at once: the root filesystem, the
 /// kernel and the bootloader.
@@ -48,6 +56,12 @@ static POOL: OnceLock<Result<Jobserver, String>> = OnceLock::new();
 
 /// How often a waiting build checks whether its run was cut short.
 const WAIT: std::time::Duration = std::time::Duration::from_millis(20);
+
+/// How often a [`Sampler`] reads the pool's free tokens.
+const SAMPLE: Duration = Duration::from_secs(1);
+
+/// The detail a build records its pool's free tokens under.
+pub(crate) const SAMPLE_DETAIL: &str = "job-pool-free";
 
 /// The pool's name for each fifo it makes, unique within the process.
 static FIFOS: AtomicUsize = AtomicUsize::new(0);
@@ -204,6 +218,85 @@ pub(crate) fn admit(
     pool(make, jobs).map_err(Refused::Pool)?.admit(cancelled)
 }
 
+/// Reads a pool's free tokens at a steady interval until it is finished.
+pub(crate) struct Sampler {
+    tokens: usize,
+    every: Duration,
+    stop: Arc<AtomicBool>,
+    thread: std::thread::JoinHandle<Vec<u64>>,
+}
+
+impl Sampler {
+    /// Starts reading `pipe` (the pool's fifo, holding `tokens` when none is
+    /// taken) every `every`.
+    fn start(pipe: File, tokens: usize, every: Duration) -> Self {
+        let stop = Arc::new(AtomicBool::new(false));
+        let stopped = Arc::clone(&stop);
+        let thread = std::thread::spawn(move || {
+            let begun = Instant::now();
+            let mut free = Vec::new();
+            let mut next = begun;
+            while !stopped.load(Ordering::Relaxed) {
+                // A read that fails is the one value no pool holds.
+                free.push(rustix::io::ioctl_fionread(&pipe).unwrap_or(u64::MAX));
+                next += every;
+                if let Some(wait) = next.checked_duration_since(Instant::now()) {
+                    std::thread::park_timeout(wait);
+                }
+            }
+            free
+        });
+        Self {
+            tokens,
+            every,
+            stop,
+            thread,
+        }
+    }
+
+    /// Stops reading, and gives the series as the detail: `{tokens,
+    /// every_s, free: [...], empty_s, mean_free}`, `empty_s` the samples
+    /// with no token free times the interval.
+    pub(crate) fn finish(self) -> serde_json::Value {
+        self.stop.store(true, Ordering::Relaxed);
+        self.thread.thread().unpark();
+        let free = self.thread.join().unwrap_or_default();
+        let read: Vec<u64> = free.iter().copied().filter(|n| *n != u64::MAX).collect();
+        let empty = read.iter().filter(|n| **n == 0).count();
+        let mean = if read.is_empty() {
+            0.0
+        } else {
+            read.iter().sum::<u64>() as f64 / read.len() as f64
+        };
+        serde_json::json!({
+            "tokens": self.tokens,
+            "every_s": self.every.as_secs_f64(),
+            "free": free,
+            "empty_s": empty as f64 * self.every.as_secs_f64(),
+            "mean_free": (mean * 100.0).round() / 100.0,
+        })
+    }
+}
+
+impl Jobserver {
+    /// A sampler of this pool's free tokens every `every`; `None` without a
+    /// fifo or when its descriptor cannot be copied.
+    fn sampler(&self, every: Duration) -> Option<Sampler> {
+        let pipe = self._pipe.as_ref()?.try_clone().ok()?;
+        Some(Sampler::start(
+            pipe,
+            tokens(self.jobs, builds_for(self.jobs)),
+            every,
+        ))
+    }
+}
+
+/// A sampler of this process's pool (for `make` and `jobs`, as [`admit`]),
+/// reading every [`SAMPLE`]; `None` without a fifo pool.
+pub(crate) fn sample(make: &str, jobs: usize) -> Option<Sampler> {
+    pool(make, jobs).ok()?.sampler(SAMPLE)
+}
+
 /// A fifo holding `tokens` tokens, and the `fifo:` name of it that a make is
 /// given: the pipe, kept open across exec and opened through the make's own
 /// `/proc/self` entry.
@@ -226,7 +319,7 @@ fn fifo_pipe(tokens: usize) -> io::Result<(File, String)> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::time::{Duration, Instant};
+    use std::io::Read;
 
     /// The Makefile of the bound tests: sixteen targets, each one logging
     /// its start and its end to `LOGFILE` and sleeping in between. A failing
@@ -357,6 +450,43 @@ t%:
         assert!(!stderr.contains("jobserver"), "{stderr}");
         let most = most_running(&std::fs::read_to_string(out.join("log")).unwrap_or_default());
         assert!(most > 1, "{most} recipe at once in the sandbox: {stderr}");
+    }
+
+    /// The sampler reads the tokens left in the fifo: all of them, then two
+    /// fewer while two are taken; a pool without a fifo has no sampler.
+    #[test]
+    fn the_sampler_reads_the_free_tokens() {
+        let pool = Jobserver::new(8, true).expect("a pool");
+        let sampler = pool.sampler(Duration::from_millis(10)).expect("a sampler");
+        std::thread::sleep(Duration::from_millis(80));
+        let mut taker = pool
+            ._pipe
+            .as_ref()
+            .expect("a fifo")
+            .try_clone()
+            .expect("dup");
+        let mut taken = [0_u8; 2];
+        taker.read_exact(&mut taken).expect("two tokens");
+        std::thread::sleep(Duration::from_millis(80));
+        let detail = sampler.finish();
+        let free: Vec<u64> = detail["free"]
+            .as_array()
+            .expect("free")
+            .iter()
+            .map(|n| n.as_u64().expect("a count"))
+            .collect();
+        assert_eq!(detail["tokens"], 5, "8 jobs less 3 builds");
+        assert_eq!(free.first(), Some(&5), "{free:?}");
+        assert_eq!(free.last(), Some(&3), "{free:?}");
+        assert!(free.iter().all(|n| *n == 5 || *n == 3), "{free:?}");
+        assert!(free.len() >= 8, "about one sample per 10 ms: {free:?}");
+        assert_eq!(detail["empty_s"], 0.0);
+        assert!(
+            Jobserver::new(8, false)
+                .expect("no fifo")
+                .sampler(SAMPLE)
+                .is_none()
+        );
     }
 
     #[test]
