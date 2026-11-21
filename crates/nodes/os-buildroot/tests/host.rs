@@ -134,8 +134,8 @@ impl Fixture {
         self.seed_with(&config(lines), &[], self.source())
     }
 
-    /// The plan node, then the host stage with its tree. The plan is given
-    /// the input trees it reads or needs, as the graph gives them.
+    /// The plan node, then the host stage with its tree. Both are given the
+    /// input trees the plan reads or needs, as the graph gives them.
     fn seed_with(&self, config: &OsConfig, inputs: &[Tree], source: Tree) -> Tree {
         let plan = build_plan(
             &self.store(),
@@ -150,7 +150,7 @@ impl Fixture {
             &self.store(),
             source,
             config,
-            inputs,
+            &host_trees(config, inputs),
             &plan,
             &self.host(),
             &Ctx::new(),
@@ -283,6 +283,19 @@ fn plan_trees(config: &OsConfig, inputs: &[Tree]) -> Vec<Tree> {
         .collect()
 }
 
+/// The input trees the host tools are given: those `OsConfig::host_inputs`
+/// names, from `inputs` in the config's order.
+fn host_trees(config: &OsConfig, inputs: &[Tree]) -> Vec<Tree> {
+    config
+        .host_inputs()
+        .iter()
+        .map(|name| {
+            let at = config.inputs.iter().position(|n| n == name).expect("named");
+            inputs[at].clone()
+        })
+        .collect()
+}
+
 /// A config with one fragment, and the names of its input trees.
 fn config_with(lines: &str, inputs: &[&str]) -> OsConfig {
     OsConfig {
@@ -384,4 +397,53 @@ fn the_host_stage_builds_again_when_a_tree_it_builds_from_changes() {
         2,
         "a changed tree did not rebuild"
     );
+}
+
+/// The opposite case: the kernel's tree is not one the host tools are built
+/// from. They are not given it, and a change to it does not build them
+/// again; a change to the tree they are built from does.
+#[test]
+fn a_change_to_the_kernels_tree_does_not_build_the_host_tools_again() {
+    let f = Fixture::new();
+    let config = config_with(
+        "BR2_A_DATA=\"@data@\"\nBR2_LINUX_KERNEL_CUSTOM_DTS_PATH=\"@kernel@/a.dts\"\n",
+        &["data", "kernel"],
+    );
+    assert_eq!(config.host_inputs(), ["data"]);
+    let first = f.seed_with(&config, &[f.tree("one"), f.tree("k1")], f.source());
+    let again = f.seed_with(&config, &[f.tree("one"), f.tree("k2")], f.source());
+    assert_eq!(
+        f.made("gaia.os.buildroot.host"),
+        1,
+        "a kernel change rebuilt"
+    );
+    assert_eq!(again, first);
+    f.seed_with(&config, &[f.tree("two"), f.tree("k2")], f.source());
+    assert_eq!(f.made("gaia.os.buildroot.host"), 2);
+}
+
+/// Host tools built from a tree they are not given fail, naming it, rather
+/// than build from its placeholder path.
+#[test]
+fn host_tools_not_given_a_tree_they_are_built_from_fail_naming_it() {
+    let f = Fixture::new();
+    let config = config_with("BR2_A_DATA=\"@data@\"\n", &["data"]);
+    let plan =
+        build_plan(&f.store(), f.source(), &config, &[], &f.host(), &Ctx::new()).expect("the plan");
+    // The same tree named by a symbol the host tools do not take from, so
+    // they are given nothing: as a wiring that left the tree out would be,
+    // with the plan's values naming it.
+    let without = config_with("BR2_ROOTFS_A_DATA=\"@data@\"\n", &["data"]);
+    assert!(without.host_inputs().is_empty());
+    let err = build_host(
+        &f.store(),
+        f.source(),
+        &without,
+        &[],
+        &plan,
+        &f.host(),
+        &Ctx::new(),
+    )
+    .expect_err("built from a placeholder");
+    assert!(err.to_string().contains("the input \"data\""), "{err}");
 }

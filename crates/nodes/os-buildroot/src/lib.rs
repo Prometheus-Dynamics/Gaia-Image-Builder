@@ -372,12 +372,26 @@ pub(crate) fn prepare_plan(
     trees: &[Tree],
     host: &BuildrootHost,
 ) -> Result<Prepared, String> {
+    prepare_given(store, source, config, &config.plan_inputs(), trees, host)
+}
+
+/// As [`prepare_plan`], with the input trees named `needed` (in that order)
+/// given and every other input at its placeholder path: the host tools'
+/// (`OsConfig::host_inputs`).
+pub(crate) fn prepare_given(
+    store: &Store,
+    source: &Tree,
+    config: &OsConfig,
+    needed: &[String],
+    trees: &[Tree],
+    host: &BuildrootHost,
+) -> Result<Prepared, String> {
     check(config, config.inputs.len(), host)?;
-    let needed = config.plan_inputs();
     if trees.len() != needed.len() {
         return Err(format!(
-            "the plan needs {} input trees, and {} are given",
+            "{} input trees are needed ({}), and {} are given",
             needed.len(),
+            needed.join(", "),
             trees.len()
         ));
     }

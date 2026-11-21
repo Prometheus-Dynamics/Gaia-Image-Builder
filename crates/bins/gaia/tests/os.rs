@@ -2013,9 +2013,9 @@ fn a_script_a_fragment_names_is_executable_in_the_store() {
 /// The host plan is made from the Buildroot tree and the config, and from
 /// the input trees the plan reads or needs, which the demo has none of. It
 /// does not wait for the kernel's, U-Boot's, the blobs' or the files' trees,
-/// and the host tools do wait for them all.
+/// and neither do the host tools, which are given the plan's trees only.
 #[test]
-fn the_host_plan_does_not_wait_for_the_trees_it_does_not_read() {
+fn the_host_plan_and_tools_do_not_wait_for_the_trees_they_do_not_read() {
     let dir = project();
     let out = plan(dir.path(), &[]);
     assert!(out.status.success());
@@ -2025,7 +2025,6 @@ fn the_host_plan_does_not_wait_for_the_trees_it_does_not_read() {
         "zero-3e-demo.host-plan.plan -> zero-3e-demo.host-tools.plan",
         "zero-3e-demo.host-plan.os",
         "zero-3e-demo.host-plan.host",
-        "zero-3e.linux.tree -> zero-3e-demo.host-tools.inputs0",
         "zero-3e-demo.buildroot.tree -> zero-3e-demo.host-tools.source",
     ] {
         assert!(text.contains(edge), "no {edge:?} in the plan");
@@ -2039,6 +2038,17 @@ fn the_host_plan_does_not_wait_for_the_trees_it_does_not_read() {
         "zero-3e-demo.os.files.4.tree -> zero-3e-demo.host-plan",
     ] {
         assert!(!text.contains(edge), "the plan waits for {edge:?}");
+    }
+    for from in [
+        "zero-3e.linux.tree",
+        "zero-3e.u-boot.tree",
+        "zero-3e.rkbin.tree",
+        "zero-3e.tf-a.tree",
+        "zero-3e-demo.os.files.0.tree",
+        "zero-3e-demo.os.files.4.tree",
+    ] {
+        let edge = format!("{from} -> zero-3e-demo.host-tools");
+        assert!(!text.contains(&edge), "the host tools wait for {edge:?}");
     }
 }
 

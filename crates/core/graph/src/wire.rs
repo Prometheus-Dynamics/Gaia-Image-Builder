@@ -1919,18 +1919,25 @@ fn image_os(
     )?;
     // One build per part: `<image>.os` is the root filesystem's,
     // `<image>.kernel` and `<image>.bootloader` the board's.
+    // `only`: the inputs the build is given, by name (the host tools take
+    // those they are built from, `OsConfig::host_inputs`); `None` for all.
     let mut step = |g: &mut Graph<'_>,
                     id: &str,
                     what: &str,
                     port: String,
                     plan: os::OsPlan,
+                    only: Option<Vec<String>>,
                     host_ports: &mut BTreeMap<String, String>,
                     inputs: &mut BTreeMap<String, HostInput>|
      -> Result<u32, Error> {
         let os = g.add(id, format!("{}.{what}", at.image.name), file, &key)?;
         let out = g.first_output(from).unwrap_or("tree");
         g.edge((from, out), (os, "source"));
-        for (k, (name, input)) in plan.inputs.iter().enumerate() {
+        let given = plan
+            .inputs
+            .iter()
+            .filter(|(name, _)| only.as_ref().is_none_or(|only| only.contains(name)));
+        for (k, (name, input)) in given.enumerate() {
             let node = os_input_node(g, at, file, &key, name, input, os_inputs)?;
             let out = g.first_output(node).unwrap_or("tree");
             g.edge((node, out), (os, &format!("inputs{k}")));
@@ -1965,12 +1972,16 @@ fn image_os(
     });
     // The host tools, built once from the whole config; each build below
     // starts with them in place.
+    // The host tools take only the trees they are built from, so they start
+    // when the plan does, not when the kernel's source is stored.
+    let host_inputs = plan.config.host_inputs();
     let tools = step(
         g,
         "gaia.os.buildroot.host",
         "host-tools",
         format!("{name}.os.host-tools"),
         plan,
+        Some(host_inputs),
         host_ports,
         inputs,
     )?;
@@ -1982,6 +1993,7 @@ fn image_os(
         "os",
         format!("{name}.os"),
         parts.rootfs,
+        None,
         host_ports,
         inputs,
     )?;
@@ -1994,6 +2006,7 @@ fn image_os(
                 "kernel",
                 format!("{name}.os.kernel"),
                 plan,
+                None,
                 host_ports,
                 inputs,
             )?;
@@ -2010,6 +2023,7 @@ fn image_os(
                 "bootloader",
                 format!("{name}.os.bootloader"),
                 plan,
+                None,
                 host_ports,
                 inputs,
             )?;

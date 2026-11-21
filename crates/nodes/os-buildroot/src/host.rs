@@ -46,7 +46,7 @@
 //! how a shared host tool is built changes the key, and nothing else does.
 
 use crate::{
-    BuildrootHost, OsConfig, Prepared, admit, configure, in_store, make_tool, ppd, prepare,
+    BuildrootHost, OsConfig, Prepared, admit, configure, in_store, make_tool, ppd, prepare_given,
     prepare_plan, times,
 };
 use daedalus::prelude::*;
@@ -162,8 +162,11 @@ pub fn build_host(
     cx: &Ctx,
 ) -> Result<Tree, StepError> {
     let store = Store::open(store).map_err(StepError::store(NAME))?;
-    let mut prepared =
-        prepare(&store, &source, config, inputs, host).map_err(|why| StepError::body(NAME, why))?;
+    // The trees the host tools are built from (`OsConfig::host_inputs`), so
+    // they do not wait for the kernel's, the bootloader's or the files'
+    // trees. The others are at their placeholder paths, as in the plan.
+    let mut prepared = prepare_given(&store, &source, config, &config.host_inputs(), inputs, host)
+        .map_err(|why| StepError::body(NAME, why))?;
     let mode = crate::patches::mode_from_env().map_err(|why| StepError::body(NAME, why))?;
     crate::patches::apply_to(&store, cx, &mut prepared, mode)?;
 
@@ -176,6 +179,19 @@ pub fn build_host(
     // Only what the shared seed is built from is keyed: see `shared_plan`.
     let shared = shared_plan(&plan_text, &config.inputs, &config.overrides);
     let (goals, text) = (shared.goals.join(" "), shared.text);
+    // A tree the shared values name is one the host tools are built from:
+    // one they were not given would be built from its placeholder path.
+    for name in &config.inputs {
+        if text.contains(&format!("@{name}@")) && !prepared.dirs.iter().any(|(n, _, _)| n == name) {
+            return Err(StepError::body(
+                NAME,
+                format!(
+                    "the host tools are built from the input {name:?}, and are not given it \
+                     (OsConfig::host_inputs)"
+                ),
+            ));
+        }
+    }
     // A check of the configuration alone: it is resolved and held, and no
     // tool is made. The seed is an empty tree nothing may build from.
     if host.config_only {

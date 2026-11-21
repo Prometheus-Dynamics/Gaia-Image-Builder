@@ -1,0 +1,82 @@
+From: Gaia Image Builder <noreply@anthropic.com>
+Subject: [PATCH] support/dependencies: use the machine's m4 when new enough
+
+host-autoconf and host-libtool build on host-m4, which Buildroot always
+builds: in one measured host stage host-m4 alone took 89 s (83 s of it its
+configure), first on the host stage's longest chain (m4, libtool,
+autoconf, automake, libffi, python3, ...).
+
+A machine m4 is now used when it is GNU M4 1.4 at the patch release
+Buildroot builds as host-m4 (1.4.21) or a later one: a later 1.4 patch
+release behaves the same. Another minor release, another m4, or none is
+not used, and host-m4 is built as before. The check is made once per
+make, from the first line of `m4 --version`.
+
+host-autoconf and host-libtool take BR2_M4_HOST_DEPENDENCY instead of
+naming host-m4, and autoconf is configured with BR2_M4_HOST_BIN, the m4
+chosen.
+
+---
+ support/dependencies/check-host-m4.mk | 28 ++++++++++++++++++++++++++++
+ package/autoconf/autoconf.mk          |  4 ++--
+ package/libtool/libtool.mk            |  3 ++-
+ 3 files changed, 32 insertions(+), 3 deletions(-)
+
+--- a/package/autoconf/autoconf.mk
++++ b/package/autoconf/autoconf.mk
+@@ -13,10 +13,10 @@
+ 
+ HOST_AUTOCONF_CONF_ENV = \
+ 	EMACS="no" \
+-	ac_cv_path_M4=$(HOST_DIR)/bin/m4 \
++	ac_cv_path_M4=$(BR2_M4_HOST_BIN) \
+ 	ac_cv_prog_gnu_m4_gnu=no
+ 
+-HOST_AUTOCONF_DEPENDENCIES = host-m4 host-libtool
++HOST_AUTOCONF_DEPENDENCIES = $(BR2_M4_HOST_DEPENDENCY) host-libtool
+ 
+ $(eval $(host-autotools-package))
+ 
+--- a/package/libtool/libtool.mk
++++ b/package/libtool/libtool.mk
+@@ -18,7 +18,8 @@
+ LIBTOOL_CONF_OPTS = --enable-ltdl-install
+ 
+ LIBTOOL_DEPENDENCIES = host-m4
+-HOST_LIBTOOL_DEPENDENCIES = host-m4
++# The machine's m4 when it is new enough (support/dependencies/check-host-m4.mk).
++HOST_LIBTOOL_DEPENDENCIES = $(BR2_M4_HOST_DEPENDENCY)
+ 
+ LIBTOOL_LICENSE = LGPL-2.1+
+ LIBTOOL_LICENSE_FILES = $(LIBTOOL_SUBDIR)/COPYING.LIB
+--- /dev/null
++++ b/support/dependencies/check-host-m4.mk
+@@ -0,0 +1,28 @@
++# The m4 the host tools are built with: the machine's when it is GNU M4 1.4
++# at the patch release Buildroot builds as host-m4 or a later one, and
++# host-m4 otherwise.
++#
++# BR2_M4_HOST_DEPENDENCY is empty or host-m4, for a host package's
++# dependencies; BR2_M4_HOST_BIN is the m4 such a package is configured with.
++
++# The oldest m4 the build takes from the system: the version Buildroot
++# builds as host-m4. A later 1.4 patch release behaves the same; another
++# minor release is not used.
++BR2_M4_HOST_MIN_VERSION = 1.4.21
++
++# The first line of the machine's `m4 --version`, empty without one
++# ("m4 (GNU M4) 1.4.21").
++BR2_M4_HOST_LINE := $(shell m4 --version 2>/dev/null | sed -n 1p)
++BR2_M4_HOST_VERSION := $(lastword $(BR2_M4_HOST_LINE))
++
++# "new" when that m4 is GNU M4 1.4.x with x at least the minimum's, nothing
++# otherwise. Versions are compared with sort, so 1.4.100 is newer than 1.4.21.
++BR2_M4_HOST_MACHINE := $(if $(findstring GNU M4,$(BR2_M4_HOST_LINE)),$(if $(filter 1.4.%,$(BR2_M4_HOST_VERSION)),$(if $(filter $(BR2_M4_HOST_MIN_VERSION),$(firstword $(shell printf '%s\n' '$(BR2_M4_HOST_MIN_VERSION)' '$(BR2_M4_HOST_VERSION)' | sort -V))),new)))
++
++ifeq ($(BR2_M4_HOST_MACHINE),new)
++BR2_M4_HOST_DEPENDENCY =
++BR2_M4_HOST_BIN := $(shell which m4)
++else
++BR2_M4_HOST_DEPENDENCY = host-m4
++BR2_M4_HOST_BIN = $(HOST_DIR)/bin/m4
++endif

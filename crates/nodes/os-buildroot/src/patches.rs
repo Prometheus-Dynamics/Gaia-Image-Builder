@@ -1,6 +1,6 @@
 //! Gaia's own changes to the Buildroot source it builds with.
 //!
-//! Six patches ship in `patches/`, as `git format-patch` writes them for
+//! Seven patches ship in `patches/`, as `git format-patch` writes them for
 //! Buildroot (`-p1`). They are applied to a copy of the source before any
 //! Buildroot step uses it, so every make (the host stage, its plan, the OS
 //! build) runs the same patched tree:
@@ -25,9 +25,13 @@
 //!   libclang, and `BR2_LINUX_KERNEL_LLVM` (`LLVM=1`, `RUSTC`, `BINDGEN`,
 //!   `RUST_LIB_SRC`, the tools there before the kernel's configuration).
 //!   A board's `[kernel] toolchain = "llvm"` asks for it.
+//! - **0007**: Buildroot's m4 choice (`support/dependencies/check-host-m4.mk`,
+//!   new): host-autoconf and host-libtool take the machine's m4 when it is
+//!   GNU M4 1.4 at Buildroot's own patch release (1.4.21) or a later one,
+//!   and host-m4 is built otherwise.
 //!
 //! 0001 and 0002 change no output, so they are applied to the exact upstream
-//! text, strictly (`patch -p1 --fuzz=0`). 0003 to 0006 change what a build
+//! text, strictly (`patch -p1 --fuzz=0`). 0003 to 0007 change what a build
 //! makes (`changes_outputs`). A patch that does not apply to a Buildroot
 //! version is skipped with a warning line that names it: a build that needs
 //! none of them still builds. One that needs 0006 does not, loudly: its
@@ -91,7 +95,7 @@ pub(crate) struct GaiaPatch {
 /// (`dtc-parser.y` uses `%locations`, `dtc-lexer.l` `%option noyywrap nounput
 /// noinput never-interactive`). A program older than the minimum is not used:
 /// the build makes host-bison or host-flex, as it did before.
-pub(crate) const PATCHES: [GaiaPatch; 6] = [
+pub(crate) const PATCHES: [GaiaPatch; 7] = [
     GaiaPatch {
         name: "0001-package-pkg-utils-clone-per-package-trees-with-reflinks.patch",
         text: include_str!(
@@ -129,6 +133,13 @@ pub(crate) const PATCHES: [GaiaPatch; 6] = [
         name: "0006-linux-build-with-LLVM-and-Rust-BR2_LINUX_KERNEL_LLVM.patch",
         text: include_str!(
             "../patches/0006-linux-build-with-LLVM-and-Rust-BR2_LINUX_KERNEL_LLVM.patch"
+        ),
+        changes_outputs: true,
+    },
+    GaiaPatch {
+        name: "0007-support-dependencies-use-the-machine-s-m4-when-new-enough.patch",
+        text: include_str!(
+            "../patches/0007-support-dependencies-use-the-machine-s-m4-when-new-enough.patch"
         ),
         changes_outputs: true,
     },
@@ -189,8 +200,8 @@ pub(crate) fn key_entry(mode: Mode, outcomes: &[(String, bool)]) -> Option<Strin
 }
 
 /// The machine's programs an output-changing patch lets a build use in place
-/// of Buildroot's own: the parser generators (0003, 0004).
-const MACHINE_PARSERS: [&str; 2] = ["bison", "flex"];
+/// of Buildroot's own: the parser generators (0003, 0004) and m4 (0007).
+const MACHINE_PARSERS: [&str; 3] = ["bison", "flex", "m4"];
 
 /// Whether a patch that lets the build take the machine's parser generators
 /// applied: every patch that changes outputs does that, and nothing else.
@@ -431,7 +442,7 @@ mod tests {
     /// The files the shipped patches touch, relative to a Buildroot root.
     /// The files the patches change. The 2026.02.3 fixture has only the
     /// first six (0005 and 0006 are not made for it).
-    const TOUCHED: [&str; 15] = [
+    const TOUCHED: [&str; 17] = [
         "package/pkg-utils.mk",
         "package/Makefile.in",
         "package/pkg-luarocks.mk",
@@ -447,6 +458,8 @@ mod tests {
         "package/rust-bindgen/rust-bindgen.hash",
         "package/Config.in.host",
         "linux/Config.in",
+        "package/autoconf/autoconf.mk",
+        "package/libtool/libtool.mk",
     ];
 
     /// A copy of the fixture's touched files, in a new Buildroot root.
@@ -473,12 +486,12 @@ mod tests {
         text_of(dir, &format!("package/{file}"))
     }
 
-    /// The fixture of `version` with the shipped patches 0003 and 0004
+    /// The fixture of `version` with the shipped patches 0003, 0004 and 0007
     /// applied: the trees the make tests run.
     fn patched_tree(version: &str) -> tempfile::TempDir {
         let tree = copy_of(version);
         let scratch = tempfile::tempdir().expect("tempdir");
-        for index in [2, 3] {
+        for index in [2, 3, 6] {
             let file = scratch.path().join(PATCHES[index].name);
             fs::write(&file, PATCHES[index].text).expect("write");
             let applied = apply_one(tree.path(), &file).expect("apply");
@@ -502,7 +515,7 @@ mod tests {
         let applied: Vec<bool> = outcomes.iter().map(|(_, applied)| *applied).collect();
         assert_eq!(
             applied,
-            [true, true, true, true, false, false],
+            [true, true, true, true, false, false, true],
             "{outcomes:?}"
         );
         assert!(read(tree.path(), "pkg-utils.mk").contains("cp -a --reflink=auto"));
@@ -520,6 +533,30 @@ mod tests {
             text_of(tree.path(), "linux/linux.mk")
                 .contains("LINUX_DEPENDENCIES += $(BR2_BISON_HOST_DEPENDENCY)")
         );
+        assert_m4_patched(tree.path());
+    }
+
+    /// 0007 applied in `tree`: the m4 choice exists, and host-autoconf and
+    /// host-libtool take it.
+    fn assert_m4_patched(tree: &Path) {
+        assert!(
+            text_of(tree, "support/dependencies/check-host-m4.mk")
+                .contains("BR2_M4_HOST_MIN_VERSION = 1.4.21")
+        );
+        let autoconf = read(tree, "autoconf/autoconf.mk");
+        assert!(
+            autoconf
+                .contains("HOST_AUTOCONF_DEPENDENCIES = $(BR2_M4_HOST_DEPENDENCY) host-libtool"),
+            "{autoconf}"
+        );
+        assert!(
+            autoconf.contains("ac_cv_path_M4=$(BR2_M4_HOST_BIN)"),
+            "{autoconf}"
+        );
+        assert!(
+            read(tree, "libtool/libtool.mk")
+                .contains("HOST_LIBTOOL_DEPENDENCIES = $(BR2_M4_HOST_DEPENDENCY)")
+        );
     }
 
     #[test]
@@ -528,6 +565,7 @@ mod tests {
         let scratch = tempfile::tempdir().expect("tempdir");
         let outcomes = apply_all(tree.path(), scratch.path()).expect("apply");
         assert!(all_applied(&outcomes), "{outcomes:?}");
+        assert_m4_patched(tree.path());
         assert!(read(tree.path(), "pkg-utils.mk").contains("cp -a --reflink=auto"));
         assert!(read(tree.path(), "Makefile.in").contains("export PERL:=$(shell which perl)"));
         assert!(read(tree.path(), "pkg-luarocks.mk").contains("firstword"));
@@ -615,6 +653,7 @@ mod tests {
                 (PATCHES[3].name.to_string(), true),
                 (PATCHES[4].name.to_string(), true),
                 (PATCHES[5].name.to_string(), true),
+                (PATCHES[6].name.to_string(), true),
             ]
         );
         assert_eq!(read(tree.path(), "pkg-luarocks.mk"), before);
@@ -669,7 +708,7 @@ mod tests {
         let outcomes: Vec<(String, bool)> =
             PATCHES.iter().map(|p| (p.name.to_string(), true)).collect();
         let entry = key_entry(Mode::On, &outcomes).expect("an entry");
-        let expected: Vec<String> = [2, 3, 4, 5]
+        let expected: Vec<String> = [2, 3, 4, 5, 6]
             .iter()
             .map(|&index| {
                 format!(
@@ -715,9 +754,9 @@ mod tests {
             PATCHES.iter().map(|p| (p.name.to_string(), true)).collect();
         outcomes[1].1 = false;
         let entry = key_entry(Mode::On, &outcomes).expect("an entry");
-        // 0003 to 0006 apply and change outputs, so their digests are there.
+        // 0003 to 0007 apply and change outputs, so their digests are there.
         let lines: Vec<&str> = entry.lines().collect();
-        assert_eq!(lines.len(), 5, "{entry}");
+        assert_eq!(lines.len(), 6, "{entry}");
         assert_eq!(lines[0], format!("skipped {}", PATCHES[1].name));
         for (line, index) in lines[1..].iter().zip(2..) {
             assert!(
@@ -780,7 +819,7 @@ mod tests {
     fn the_machines_parser_generators_are_read_by_name() {
         let found = machine_parsers();
         let names: Vec<&str> = found.iter().map(|(name, _)| name.as_str()).collect();
-        assert_eq!(names, ["bison", "flex"]);
+        assert_eq!(names, ["bison", "flex", "m4"]);
         for (name, line) in &found {
             assert!(!line.is_empty() && !line.contains('\n'), "{name}: {line:?}");
         }
@@ -801,7 +840,7 @@ mod tests {
             fs::set_permissions(&file, executable).expect("mode");
         }
         let base = tempfile::tempdir().expect("tempdir");
-        for program in ["sed", "sort", "head", "printf"] {
+        for program in ["sed", "sort", "head", "printf", "which"] {
             let found = ["/usr/bin", "/bin"]
                 .iter()
                 .map(|dir| Path::new(dir).join(program))
@@ -837,6 +876,41 @@ mod tests {
             .split_whitespace()
             .collect::<Vec<_>>()
             .join(" ")
+    }
+
+    /// host-autoconf's and host-libtool's dependencies and the m4 autoconf
+    /// is configured with, with `tools` on the PATH.
+    fn m4_choice(version: &str, tools: &[(&str, &str)]) -> String {
+        make_words(
+            version,
+            "HOST_DIR := /host\ninclude support/dependencies/check-host-m4.mk\nhost-autotools-package :=\ninclude package/libtool/libtool.mk\ninclude package/autoconf/autoconf.mk\n$(info autoconf: $(HOST_AUTOCONF_DEPENDENCIES) | libtool: $(HOST_LIBTOOL_DEPENDENCIES) | m4: $(notdir $(BR2_M4_HOST_BIN)) $(findstring /host/,$(BR2_M4_HOST_BIN)))\n.DEFAULT_GOAL := probe\nprobe: ;\n",
+            tools,
+        )
+    }
+
+    /// The machine's m4 is used when it is GNU M4 1.4 at Buildroot's patch
+    /// release or a later one (1.4.100 is later than 1.4.21), and host-m4 is
+    /// built for an older one, another minor release, another m4 or none.
+    #[test]
+    fn host_autoconf_and_libtool_take_only_an_m4_at_least_buildroots() {
+        let machine = "autoconf: host-libtool | libtool: | m4: m4";
+        let built = "autoconf: host-m4 host-libtool | libtool: host-m4 | m4: m4 /host/";
+        for version in ["2026.02.3", "2026.08"] {
+            for (line, expected) in [
+                ("m4 (GNU M4) 1.4.21", machine),
+                ("m4 (GNU M4) 1.4.100", machine),
+                ("m4 (GNU M4) 1.4.20", built),
+                ("m4 (GNU M4) 1.5.0", built),
+                ("m4 (BSD m4) 1.4.21", built),
+            ] {
+                assert_eq!(
+                    m4_choice(version, &[("m4", line)]),
+                    expected,
+                    "{version}: {line}"
+                );
+            }
+            assert_eq!(m4_choice(version, &[]), built, "{version}: no m4");
+        }
     }
 
     /// The host dtc's dependencies: its own, with the machine's bison and

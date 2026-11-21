@@ -119,6 +119,17 @@ pub struct OsConfig {
     pub kernel_contracts: Vec<KernelContract>,
 }
 
+/// The prefixes of the config symbols that belong to a package, the kernel,
+/// a bootloader or a file system image (`BR2_TARGET_`), or the root
+/// filesystem's files: none of them is read by the values the host tools
+/// share (see [`OsConfig::host_inputs`]).
+pub const TARGET_SYMBOLS: [&str; 4] = [
+    "BR2_PACKAGE_",
+    "BR2_LINUX_KERNEL_",
+    "BR2_TARGET_",
+    "BR2_ROOTFS_",
+];
+
 impl OsConfig {
     /// The input trees the host plan reads or needs, in the inputs' order:
     /// the externals (Buildroot reads their descriptions and packages), and
@@ -136,6 +147,39 @@ impl OsConfig {
         self.inputs
             .iter()
             .filter(|name| self.externals.contains(name) || patch_dirs.contains(&name.as_str()))
+            .cloned()
+            .collect()
+    }
+
+    /// The input trees the host tools are built from or may be, in the
+    /// inputs' order: the plan's (`plan_inputs`), and every tree a config
+    /// line names whose symbol is not a target's or a package's own. The
+    /// host tools' shared values read only global symbols (`BR2_HOST_DIR`,
+    /// the compiler cache's); a host package whose own values name a tree
+    /// is built by each build, not with the host tools. So a tree named by
+    /// a package's, the kernel's, a bootloader's or the root filesystem's
+    /// symbol ([`TARGET_SYMBOLS`]) is not waited for, and a tree named by
+    /// any other symbol is. An override's tree is not either: an overridden
+    /// host package is built by each build.
+    pub fn host_inputs(&self) -> Vec<String> {
+        let plan = self.plan_inputs();
+        let global: Vec<&str> = self
+            .fragments
+            .iter()
+            .flat_map(|fragment| fragment.text.lines())
+            .map(str::trim_start)
+            .filter(|line| !line.starts_with('#'))
+            .filter_map(|line| line.split_once('='))
+            .filter(|(symbol, _)| {
+                !TARGET_SYMBOLS
+                    .iter()
+                    .any(|prefix| symbol.trim().starts_with(prefix))
+            })
+            .flat_map(|(_, value)| value.split('@').skip(1).step_by(2))
+            .collect();
+        self.inputs
+            .iter()
+            .filter(|name| plan.contains(name) || global.contains(&name.as_str()))
             .cloned()
             .collect()
     }
@@ -213,6 +257,34 @@ mod tests {
             ..OsConfig::default()
         };
         assert!(none.plan_inputs().is_empty());
+    }
+
+    /// The host tools take the plan's trees and those a global symbol
+    /// names; not the kernel's, a bootloader's, a package's or the root
+    /// filesystem's files.
+    #[test]
+    fn the_host_tools_take_the_plans_trees_and_those_global_symbols_name() {
+        let config = OsConfig {
+            fragments: vec![ConfigFragment {
+                name: "f".into(),
+                text: "BR2_GLOBAL_PATCH_DIR=\"@patches@\"\n\
+                       BR2_LINUX_KERNEL_CUSTOM_DTS_PATH=\"@kernel@/a.dts\"\n\
+                       BR2_TARGET_UBOOT_CUSTOM_TARBALL_LOCATION=\"@boot@\"\n\
+                       BR2_ROOTFS_OVERLAY=\"@files0@ @files1@\"\n\
+                       BR2_PACKAGE_FOO_CONFIG=\"@pkg@/foo.conf\"\n\
+                       # BR2_A_UNSET=\"@unset@\" is not set\n\
+                       BR2_A_DATA=\"@data@\"\n"
+                    .into(),
+            }],
+            inputs: [
+                "kernel", "patches", "boot", "files0", "files1", "pkg", "unset", "data", "ext",
+            ]
+            .map(String::from)
+            .to_vec(),
+            externals: vec!["ext".into()],
+            ..OsConfig::default()
+        };
+        assert_eq!(config.host_inputs(), ["patches", "data", "ext"]);
     }
 
     fn config() -> OsConfig {
