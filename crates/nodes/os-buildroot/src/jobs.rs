@@ -31,11 +31,18 @@
 //!
 //! Yielding. A build with slack (see `gaia_step::slack`) takes a yielding
 //! slot: its make reads a second fifo, with tokens of its own (as many as
-//! the main fifo's), and runs at the lowest priority ([`NICE`]). The builds
-//! without slack keep every token of the main fifo, and the processor goes
-//! to them first: a yielding build's jobs run on the CPU they leave idle,
-//! and at full speed when they leave it all. A yielding make has its own
-//! first job like any other. Its jobs are beside the bound: they take only
+//! the main fifo's), and runs [`NICE_STEP`] nicer than Gaia itself. The
+//! builds without slack keep every token of the main fifo, and the
+//! processor goes to them first: on a processor both want they get
+//! [`SPLIT`] against a yielding build, which runs at full speed on what they
+//! leave idle. The step is relative, not the lowest priority: niceness
+//! orders work inside one cgroup only (here, Gaia's unit, which other work
+//! on the machine is weighed against as a whole), and at the lowest the
+//! steps of a yielding build that hold no tokens to give back sat behind
+//! every job of the builds beside it (1024 : 15). In a cgroup shared with
+//! unrelated processes (a terminal's scope) the step orders Gaia's work
+//! against theirs too. A yielding make has its own first job like any
+//! other. Its jobs are beside the bound: they take only
 //! what the builds of the bound leave, so what is beyond it is processes
 //! waiting, not CPU taken from them. (Tokens are not lent from one fifo to
 //! the other: a make takes a token it gives back again at once, so tokens
@@ -44,7 +51,7 @@
 //! while builds without slack ran beside it.
 //!
 //! The yielding fifo is made with the first yielding build, and only where
-//! the lowest priority takes effect ([`nice_takes_effect`]): under cgroup
+//! niceness takes effect ([`nice_takes_effect`]): under cgroup
 //! v1, or in a cgroup without the cpu controller, the kernel's autogroups
 //! give each session (each sandbox) an equal share whatever its niceness,
 //! and a second pool there would be plain oversubscription. Then a yielding
@@ -89,8 +96,27 @@ const SAMPLE: Duration = Duration::from_secs(1);
 /// The detail a build records its pool's free tokens under.
 pub(crate) const SAMPLE_DETAIL: &str = "job-pool-free";
 
-/// The niceness a yielding build's make runs at: the lowest priority.
-pub(crate) const NICE: i32 = 19;
+/// How much nicer than Gaia a yielding build's make runs. Each step is a
+/// factor of about 1.25 in the kernel's weights; measured with two burners
+/// on one processor (`a_yielding_build_gets_about_a_fifth_of_a_contended_processor`),
+/// three runs at a load of 55 to 75 on 32 processors gave 3.1 to 3.8 : 1 at
+/// +5 and 4.7 to 4.9 : 1 at +7 (see [`SPLIT`]).
+pub(crate) const NICE_STEP: i32 = 7;
+
+/// The share of a contended processor the builds beside a yielding one get
+/// against it, at [`NICE_STEP`], as the records say it.
+pub(crate) const SPLIT: &str = "about 5 : 1 inside Gaia's unit";
+
+/// The niceness a yielding build's make runs at: Gaia's own and
+/// [`NICE_STEP`] more, at most 19.
+pub(crate) fn yielding_niceness() -> i32 {
+    niceness_beside(rustix::process::getpriority_process(None).unwrap_or(0))
+}
+
+/// The niceness a yielding build runs at beside a process at `own`.
+fn niceness_beside(own: i32) -> i32 {
+    (own + NICE_STEP).min(19)
+}
 
 /// The memory one job of a yielding build is taken to need, for sizing its
 /// fifo: a compiler job of a large C or C++ file. A link of a large program
@@ -168,7 +194,7 @@ pub(crate) struct Slot<'a> {
 /// What yielding did over one yielding build: the main builds it yielded
 /// to, the jobs of the yielding pool (its tokens and a make's own job), and
 /// the token-seconds the yielding builds held while main builds ran beside
-/// them, at the lowest priority.
+/// them, at the yielding niceness.
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) struct Yield {
     pub(crate) to: Vec<String>,
@@ -176,7 +202,7 @@ pub(crate) struct Yield {
     pub(crate) beside_token_s: f64,
 }
 
-/// Whether the lowest priority takes effect for this process's children,
+/// Whether niceness takes effect for this process's children,
 /// from the autogroup switch (`/proc/sys/kernel/sched_autogroup_enabled`,
 /// `None` when absent), `/proc/self/cgroup`, and the `cgroup.controllers`
 /// of a cgroup v2 path. With autogroups off it does. With them on, a
@@ -458,10 +484,10 @@ impl Slot<'_> {
         }
     }
 
-    /// The niceness this slot's make runs at, when not the step's own: the
-    /// lowest, for a yielding build.
+    /// The niceness this slot's make runs at, when not the step's own:
+    /// [`yielding_niceness`], for a yielding build.
     pub(crate) fn nice(&self) -> Option<i32> {
-        self.yields.then_some(NICE)
+        self.yields.then(yielding_niceness)
     }
 
     /// Why this build, asked to yield, shares the main fifo instead.
@@ -495,7 +521,9 @@ impl Yield {
             "yielded": true,
             "why": why,
             "to": self.to,
-            "nice": NICE,
+            "nice": yielding_niceness(),
+            "nice_step": NICE_STEP,
+            "split": SPLIT,
             "pool_jobs": self.pool_jobs,
             "pool_rule": format!(
                 "min(main tokens, (MemAvailable - {} GiB reserve) / {} GiB a job) tokens, and make's own job",
@@ -1055,7 +1083,7 @@ a% b%:
             low.makeflags()
                 .is_some_and(|flags| flags.starts_with("-j --jobserver-auth=fifo:"))
         );
-        assert_eq!((main.nice(), low.nice()), (None, Some(NICE)));
+        assert_eq!((main.nice(), low.nice()), (None, Some(yielding_niceness())));
         assert_eq!(free(&pool), (10, 10), "13 jobs less 3 builds, in each");
         let mut taker = pool
             .yielding
@@ -1091,7 +1119,7 @@ a% b%:
         assert_eq!(slot.shares(), Some("the pool has no fifo"));
     }
 
-    /// Where the lowest priority would not take effect, a build asked to
+    /// Where niceness would not take effect, a build asked to
     /// yield shares the main fifo at the step's own priority, and says why.
     #[test]
     fn where_niceness_has_no_effect_a_yielding_build_shares_the_main_fifo() {
@@ -1128,7 +1156,7 @@ a% b%:
         assert_eq!(yield_tokens(23, None), 0, "memory unknown");
         let pool = Jobserver::new(13, true).expect("a pool").sized(|_| Ok(0));
         let low = pool.admit_as(&|| false, true, "beside").expect("a slot");
-        assert_eq!(low.nice(), Some(NICE));
+        assert_eq!(low.nice(), Some(yielding_niceness()));
         assert_eq!(free(&pool).1, 0);
         assert_eq!(low.yielded().expect("yielding").pool_jobs, 1);
     }
@@ -1291,6 +1319,82 @@ a% b%:
         assert!(
             yielded * 10 < equal * 7,
             "beside a yielding build the main build took {yielded} ns, beside an equal one {equal} ns"
+        );
+    }
+
+    /// The niceness is Gaia's own and the step, at most 19: relative to a
+    /// Gaia that runs nice itself, not the lowest priority.
+    #[test]
+    fn a_yielding_build_is_the_step_nicer_than_gaia() {
+        assert_eq!(NICE_STEP, 7);
+        assert_eq!(niceness_beside(0), 7);
+        assert_eq!(niceness_beside(5), 12);
+        assert_eq!(niceness_beside(-5), 2);
+        assert_eq!(niceness_beside(15), 19);
+        let own = rustix::process::getpriority_process(None).expect("own niceness");
+        assert_eq!(yielding_niceness(), niceness_beside(own));
+    }
+
+    /// The iterations a shell burner on `cpu` counted in `window`, one at the
+    /// test's niceness and one `step` nicer, as a yielding build's make is
+    /// reniced: its process group, just after it starts.
+    fn burn_pair(cpu: &str, step: i32, window: Duration) -> (u64, u64) {
+        let own = rustix::process::getpriority_process(None).expect("own niceness");
+        let burner = |nice: Option<i32>| {
+            let child = Command::new("/usr/bin/taskset")
+                .args(["-c", cpu, "bash", "-c"])
+                .arg("i=0; trap 'echo $i; exit 0' TERM; while :; do i=$((i+1)); done")
+                .stdout(std::process::Stdio::piped())
+                .process_group(0)
+                .spawn()
+                .expect("a burner");
+            let pid = rustix::process::Pid::from_raw(child.id() as i32).expect("a pid");
+            if let Some(nice) = nice {
+                rustix::process::setpriority_pgrp(Some(pid), nice).expect("renice");
+            }
+            (child, pid)
+        };
+        let main = burner(None);
+        let side = burner(Some((own + step).min(19)));
+        std::thread::sleep(window);
+        let count = |(mut child, pid): (std::process::Child, rustix::process::Pid)| {
+            rustix::process::kill_process_group(pid, rustix::process::Signal::TERM).expect("kill");
+            let mut out = String::new();
+            std::io::Read::read_to_string(child.stdout.as_mut().expect("stdout"), &mut out)
+                .expect("read");
+            child.wait().expect("wait");
+            out.trim().parse::<u64>().expect("a count")
+        };
+        (count(main), count(side))
+    }
+
+    /// Two burners contending for one processor, one [`NICE_STEP`] nicer:
+    /// the other gets about [`SPLIT`]. Prints the split at +5 and +7 too,
+    /// the measurement the step was chosen by.
+    #[test]
+    fn a_yielding_build_gets_about_a_fifth_of_a_contended_processor() {
+        if let Err(why) = yield_size(10) {
+            eprintln!("skipped: {why}");
+            return;
+        }
+        let Some(cpus) = two_cpus() else {
+            eprintln!("skipped: fewer than two CPUs");
+            return;
+        };
+        let cpu = cpus.split(',').next().expect("a cpu");
+        let window = Duration::from_secs(3);
+        for step in [5, 7] {
+            let (main, side) = burn_pair(cpu, step, window);
+            eprintln!(
+                "measured: +{step}: {main} against {side} iterations, {:.1} : 1",
+                main as f64 / side.max(1) as f64
+            );
+        }
+        let (main, side) = burn_pair(cpu, NICE_STEP, window);
+        let split = main as f64 / side.max(1) as f64;
+        assert!(
+            (3.5..8.0).contains(&split),
+            "+{NICE_STEP}: {main} against {side} iterations, {split:.1} : 1"
         );
     }
 

@@ -1313,7 +1313,7 @@ pub(crate) fn make_tool(
     for (name, value) in kbuild::env(src) {
         tool = tool.env(name, value);
     }
-    // A yielding build runs at the lowest priority (see `jobs`).
+    // A yielding build runs nicer than Gaia (see `jobs::NICE_STEP`).
     let tool = match slot.nice() {
         Some(nice) => tool.nice(nice),
         None => tool,

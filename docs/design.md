@@ -135,6 +135,32 @@ mechanism, hand-written pins, the TUI's own progress model.
 without building it now: no OS, a target that is not Linux, an output that is
 a `.bin` or `.uf2`.
 
+## Scheduling: a step with slack yields the processor
+
+A Buildroot build that had slack beside the critical path in an earlier run
+(`gaia_step::slack`, judged by when its join happens) runs its make on a job
+fifo of its own, at Gaia's own niceness plus a step (`jobs::NICE_STEP`, about
+5 : 1 measured). The builds on the path keep the main fifo whole. Scheduling
+only: no output or key changes, and `GAIA_NO_YIELD=1` turns it off.
+
+Niceness orders work inside one cgroup. Under systemd each unit has the cpu
+controller, so other units see Gaia's unit as a whole whatever niceness its
+processes have, and the step only orders Gaia's own builds. Run from a
+terminal, Gaia shares its scope with the shell and whatever else runs there,
+and the step orders Gaia's work against theirs too. Where niceness is ignored
+(autogroups under cgroup v1, or a cgroup without the cpu controller), a build
+asked to yield shares the main fifo and says why.
+
+Measured, works, not needed: cgroup weights in place of niceness. Inside a
+`systemd-run --user` unit (systemd 259, with or without `Delegate=yes`) Gaia
+can make two leaf cgroups, move itself into one, enable `+cpu +io`, and weigh
+them 100 : 20; two busy groups on two processors got 7.8 against 1.3 CPU-s.
+Only a delegated unit is systemd's promise not to reshape that subtree, and a
+terminal's scope must not be reshaped. `io.weight` takes effect only with
+BFQ or a configured iocost, so not on an mq-deadline disk without root.
+Niceness gives the same ratio inside Gaia's unit with none of that, so
+weights wait for a case that needs them (I/O weights on a BFQ disk, say).
+
 ## Order of work
 
 - **A. Proof.** Three real steps as nodes, run by Daedalus in parallel, a

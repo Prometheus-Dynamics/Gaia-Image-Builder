@@ -52,7 +52,7 @@ const YIELD: &str = "job-pool-yield";
 
 /// One line for the build: each step that yielded the shared job pool,
 /// why (the decision of `gaia_step::slack`), to which steps, the
-/// token-seconds it held beside them at the lowest priority, and its join
+/// token-seconds it held beside them at its niceness step, and its join
 /// this run; or that nothing yielded, and why. `None` when no step recorded
 /// what yielding did. `records` are this run's step records.
 pub fn yield_summary(records: &[gaia_step::StepRecord]) -> Option<String> {
@@ -98,7 +98,7 @@ pub fn yield_summary(records: &[gaia_step::StepRecord]) -> Option<String> {
                 .filter_map(|name| name.as_str())
                 .collect();
             let mut part = format!(
-                "{} yields: {}; to {}: its own pool of {} jobs at nice {}, {:.0} token-s held beside them",
+                "{} yields: {}; to {}: its own pool of {} jobs at nice +{} ({}), {:.0} token-s held beside them",
                 label(&records[index]),
                 detail["why"].as_str().unwrap_or("?"),
                 if to.is_empty() {
@@ -107,7 +107,8 @@ pub fn yield_summary(records: &[gaia_step::StepRecord]) -> Option<String> {
                     to.join(", ")
                 },
                 detail["pool_jobs"].as_u64().unwrap_or(0),
-                detail["nice"].as_i64().unwrap_or(0),
+                detail["nice_step"].as_i64().unwrap_or(0),
+                detail["split"].as_str().unwrap_or("?"),
                 detail["beside_token_s"].as_f64().unwrap_or(0.0),
             );
             if let Some(join) = gaia_step::slack::join(records, &run, index) {
@@ -361,7 +362,7 @@ mod tests {
     fn went(label: &str) -> Option<serde_json::Value> {
         Some(serde_json::json!({
             "yielded": true, "why": "last join 432 s yielded against 649 s unyielded", "label": label,
-            "to": ["root filesystem"], "nice": 19, "pool_jobs": 24, "beside_token_s": 3456.7,
+            "to": ["root filesystem"], "nice": 7, "nice_step": 7, "split": "about 5 : 1 inside Gaia's unit", "pool_jobs": 24, "beside_token_s": 3456.7,
         }))
     }
 
@@ -416,7 +417,7 @@ mod tests {
             yield_summary(&records).as_deref(),
             Some(
                 "yield: kernel yields: last join 432 s yielded against 649 s unyielded; to root \
-                 filesystem: its own pool of 24 jobs at nice 19, 3457 token-s held beside them; \
+                 filesystem: its own pool of 24 jobs at nice +7 (about 5 : 1 inside Gaia's unit), 3457 token-s held beside them; \
                  join this run 1008 s"
             )
         );
