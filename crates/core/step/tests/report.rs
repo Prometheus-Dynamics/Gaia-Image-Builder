@@ -140,6 +140,43 @@ fn a_record_has_the_steps_shape_and_inputs() {
     assert_ne!(records[0].key, records[1].key);
 }
 
+/// A tool that prints the same line without end is stopped once it has
+/// printed it the given number of times in a row, and the error says why
+/// and gives the line; the same line fewer times in a row, or lines that
+/// differ, run to the end.
+#[test]
+fn a_tool_that_repeats_itself_without_end_is_stopped() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let store = Store::open(dir.path().join("store")).expect("store");
+    let cx = Ctx::new();
+    let key = KeyBuilder::new("test.repeat", 1).finish();
+    let tool = |script: &str| {
+        Tool::new("/bin/sh")
+            .arg("-c")
+            .arg(script.to_string())
+            .env("PATH", "/usr/bin:/bin")
+            .refuse_repeated(100, "asked again for ever")
+    };
+    let error = Step::new(&store, &cx, "test.repeat", key)
+        .look_up_or_make(&[("out", Path::new("out"))], |work| {
+            // Under the limit, and a long run of lines that differ.
+            work.run(&tool(
+                "yes 'Define X (X) [] (NEW)' | head -n 99; seq 1 5000",
+            ))?;
+            // `yes` never ends: only the refusal ends it.
+            work.run(&tool("echo first; yes 'Define X (X) [] (NEW)'"))?;
+            std::fs::write(work.dir().join("out"), "x").map_err(|e| StepError::body("t", e))
+        })
+        .expect_err("the endless run is refused")
+        .to_string();
+    assert!(
+        error.contains(
+            "asked again for ever (it printed 100 times in a row: Define X (X) [] (NEW))"
+        ),
+        "{error}"
+    );
+}
+
 /// A tool run with `nice` runs, with what it starts, at that niceness; one
 /// without at the step's own.
 #[test]

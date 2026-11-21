@@ -1335,7 +1335,8 @@ pub(crate) fn make_tool(
         // build). Bytecode a package compiles on purpose is not affected.
         .env("PYTHONDONTWRITEBYTECODE", "1")
         .env("CCACHE_MAXSIZE", CCACHE_MAX_SIZE)
-        .env("HOME", seen.display().to_string());
+        .env("HOME", seen.display().to_string())
+        .refuse_repeated(REPEATS, REPEATS_WHY);
     for (name, value) in kbuild::env(src) {
         tool = tool.env(name, value);
     }
@@ -1355,6 +1356,15 @@ pub(crate) fn make_tool(
         None => tool,
     }
 }
+
+/// How many times in a row a make may print one line. Kconfig, asked for a
+/// symbol that has no value and no default (a hex or string one) with no
+/// terminal to read, prints the prompt and "Error in reading or end of
+/// file." again for ever: one rock-5c U-Boot build wrote 11.7 GB of it in
+/// 85 minutes and never failed. A build's own output does not repeat one
+/// line this often.
+pub(crate) const REPEATS: usize = 1000;
+const REPEATS_WHY: &str = "make printed the same line over and over: a Kconfig symbol with no value and no default asks for one, and no terminal answers (give it a value in the config, or turn off what needs it)";
 
 /// What GNU make prints when it cannot use the jobserver its `MAKEFLAGS`
 /// names: a warning, and it goes on with one job. A pool make that prints
@@ -1702,6 +1712,11 @@ mod bound_tests {
         );
         assert!(
             debug.contains(r#"("PYTHONDONTWRITEBYTECODE", "1")"#),
+            "{debug}"
+        );
+        // A make stuck asking again for ever is stopped (`REPEATS`).
+        assert!(
+            debug.contains(&format!("repeated: Some(({REPEATS}, ")),
             "{debug}"
         );
         assert_eq!(debug.matches(r#"("PATH", "#).count(), 1, "{debug}");

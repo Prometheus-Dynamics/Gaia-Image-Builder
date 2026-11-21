@@ -42,6 +42,9 @@ pub struct Tool {
     on_line: Option<LineSink>,
     /// Lines that fail the run as soon as the tool prints them, and why.
     refused: Vec<(String, String)>,
+    /// A line printed this many times in a row on one stream fails the
+    /// run, with why.
+    repeated: Option<(usize, String)>,
     /// The niceness the tool runs at, when not the step's own.
     nice: Option<i32>,
 }
@@ -53,6 +56,8 @@ impl fmt::Debug for Tool {
             .field("args", &self.args)
             .field("env", &self.env)
             .field("cwd", &self.cwd)
+            .field("refused", &self.refused)
+            .field("repeated", &self.repeated)
             .finish_non_exhaustive()
     }
 }
@@ -66,6 +71,7 @@ impl Tool {
             cwd: None,
             on_line: None,
             refused: Vec::new(),
+            repeated: None,
             nice: None,
         }
     }
@@ -103,6 +109,16 @@ impl Tool {
     /// thing or make it the wrong way.
     pub fn refuse_line(mut self, text: impl Into<String>, why: impl Into<String>) -> Self {
         self.refused.push((text.into(), why.into()));
+        self
+    }
+
+    /// Fails the run as soon as the tool prints the same line `times` times
+    /// in a row on one stream: its process group is killed, and the error
+    /// gives `why` and the line. For a tool that, stuck, repeats itself
+    /// without end (a configuration prompt read from no terminal asks
+    /// again for ever), filling the run log instead of failing.
+    pub fn refuse_repeated(mut self, times: usize, why: impl Into<String>) -> Self {
+        self.repeated = Some((times.max(2), why.into()));
         self
     }
 
@@ -203,6 +219,7 @@ pub(crate) fn run(
     let sink = tool.on_line.as_deref();
     let watch = Watch {
         refused: &tool.refused,
+        repeated: tool.repeated.as_ref(),
         seen: OnceLock::new(),
     };
 
@@ -320,6 +337,8 @@ fn cpu_time_ns(pid: u32) -> Option<u64> {
 /// The lines a run refuses, and the first refused line seen, with why.
 struct Watch<'a> {
     refused: &'a [(String, String)],
+    /// How many times in a row a line may come, and why more fails.
+    repeated: Option<&'a (usize, String)>,
     seen: OnceLock<String>,
 }
 
@@ -336,6 +355,8 @@ fn tail(
     let mut reader = BufReader::new(stream);
     let mut lines = VecDeque::with_capacity(TAIL_LINES);
     let mut buffer = Vec::new();
+    // The line before and how many times in a row it came.
+    let (mut last, mut times) = (Vec::new(), 0usize);
     loop {
         buffer.clear();
         match reader.read_until(b'\n', &mut buffer) {
@@ -348,7 +369,20 @@ fn tail(
         {
             buffer.pop();
         }
+        if buffer == last {
+            times += 1;
+        } else {
+            last.clone_from(&buffer);
+            times = 1;
+        }
         let mut line = String::from_utf8_lossy(&buffer).into_owned();
+        if let Some((limit, why)) = watch.repeated
+            && times == *limit
+        {
+            let _ = watch
+                .seen
+                .set(format!("{why} (it printed {limit} times in a row: {line})"));
+        }
         log.line(
             match which {
                 Stream::Stdout => "out",
