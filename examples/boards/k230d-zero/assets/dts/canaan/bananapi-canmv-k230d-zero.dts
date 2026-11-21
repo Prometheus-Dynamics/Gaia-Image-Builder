@@ -1,88 +1,106 @@
 // SPDX-License-Identifier: GPL-2.0 OR MIT
 /*
- * Copyright (C) 2024 Yangyu Chen <cyy@cyyself.name>
+ * Banana Pi BPI-CanMV-K230D-Zero on mainline Linux. Mainline's k230.dtsi
+ * stops at the UARTs (7.3.3), so the SD and USB controllers are added here,
+ * for the mainline drivers (sdhci-of-dwcmshc, phy-k230-usb, dwc2), with the
+ * addresses and interrupts of the K230 Linux SDK's k230.dtsi, as the
+ * K230D AI-CAM's device tree has them. No pinctrl states: the kernel keeps
+ * the pins the SDK's U-Boot set up.
+ *
+ * From the vendor's device tree for this board (the ruyisdk kernel fork's
+ * bananapi-canmv-k230d-zero.dts, fork commit ae4a7e6): the UART0 console,
+ * the TF slot on SDIO1 (mmc_sd1, no 1.8 V, high speed), USB0 as a device
+ * (the USB-C port: the gadget network), 128 MB. The SDK's U-Boot on this
+ * board always boots from SDIO1. Mainline has no node for the rest, so it
+ * is left out of this image:
+ *   - the ST7701 480x800 DSI panel (display-st7701-480x800.dtsi), its touch
+ *     controller (edt-ft5306 on I2C4) and the CSI2 receiver (mipi0);
+ *   - the INNO audio codec on I2S;
+ *   - UART2 and USB1.
+ *
+ * The root is partition 1 (the family's layout): mmc0 is the TF slot.
+ *
+ * Written from the vendor dts and the AI-CAM's mainline nodes, untested on
+ * board.
  */
-
 #include "k230.dtsi"
-#include "display-st7701-480x800.dtsi"
 
 / {
 	model = "Banana Pi CanMV K230D Zero";
-	compatible = "canaan,canmv-k230", "canaan,kendryte-k230";
+	compatible = "bananapi,canmv-k230d-zero", "canaan,kendryte-k230";
 
 	aliases {
-		serial2 = &uart2;
+		serial0 = &uart0;
+		mmc0 = &mmc_sd1;
 	};
 
 	chosen {
 		stdout-path = "serial0:115200n8";
-		bootargs = "root=/dev/mmcblk0p2 loglevel=8 rw rootdelay=4 \
-						rootfstype=ext4 console=ttyS0,115200  earlycon=sbi";
+		bootargs = "root=/dev/mmcblk0p1 rootwait rw rootfstype=ext4 console=ttyS0,115200 earlycon=sbi";
 	};
 
-	ddr: memory@0 {
+	/* The K230D's in-package 128 MB. */
+	memory@0 {
 		device_type = "memory";
 		reg = <0x0 0x0 0x0 0x8000000>;
 	};
 
-	sound {
-		status                      = "okay";
-		compatible                  = "canaan,k230-audio-inno";
-		canaan,model                = "K230_I2S_INNO";
-		canaan,k230-i2s-controller  = <&i2s>;
-		canaan,k230-audio-codec     = <&inno_codec>;
+	timerx_pulse_in: clock-50000000 {
+		compatible = "fixed-clock";
+		#clock-cells = <0>;
+		clock-frequency = <50000000>;
+	};
+
+	soc {
+		usbphy: usb-phy@91585000 {
+			compatible = "canaan,k230-usb-phy";
+			reg = <0x0 0x91585000 0x0 0x400>;
+			#phy-cells = <1>;
+		};
+
+		/* USB0, the USB-C port: a device, for the gadget network. */
+		usb0: usb@91500000 {
+			compatible = "snps,dwc2";
+			status = "okay";
+			dr_mode = "peripheral";
+			reg = <0x0 0x91500000 0x0 0x40000>;
+			interrupts = <173 IRQ_TYPE_LEVEL_HIGH>;
+			clocks = <&sysclk K230_HS_USB0_AHB_GATE>;
+			clock-names = "otg";
+			phys = <&usbphy 0>;
+			phy-names = "usb2-phy";
+			g-rx-fifo-size = <512>;
+			g-np-tx-fifo-size = <64>;
+			g-tx-fifo-size = <512 1024 64 64 64 64>;
+		};
+
+		/* The TF slot. */
+		mmc_sd1: mmc@91581000 {
+			compatible = "canaan,k230-sdio";
+			status = "okay";
+			reg = <0x0 0x91581000 0x0 0x1000>;
+			interrupts = <144 IRQ_TYPE_LEVEL_HIGH>;
+			clocks = <&sysclk K230_HS_SD1_CARD_GATE>,
+				 <&sysclk K230_HS_SD1_AHB_GATE>,
+				 <&sysclk K230_HS_SD1_AXI_GATE>,
+				 <&sysclk K230_HS_SD1_BASE_GATE>,
+				 <&sysclk K230_HS_SD1_TIMER_GATE>;
+			clock-names = "core", "bus", "axi", "block", "timer";
+			canaan,usb-phy = <&usbphy>;
+			bus-width = <4>;
+			max-frequency = <50000000>;
+			cap-sd-highspeed;
+			no-1-8-v;
+		};
 	};
 };
 
+/* UART0: the debug console. */
 &uart0 {
 	status = "okay";
 };
-&uart2 {
-	status = "okay";
-};
-&mmc_sd1{
-	status = "okay";
-	no-1-8-v;
-	cap-sd-highspeed;
-	mshc_ctrl_r = <0x00>;
-};
-&usb0 {
-	status = "okay";
-	/* The USB-C port as a device: the gadget network (usb0, 10.55.0.1). */
-	dr_mode = "peripheral";
-};
-&usb1 {
-	status = "okay";
-};
 
-&i2c4 {
-	status = "okay";
-	touchscreen@38 {
-		compatible = "edt,edt-ft5306";
-		reg = <0x38>;
-		reset-gpios = <&gpio1_ports 4 GPIO_ACTIVE_LOW>;
-		interrupt-parent = <&gpio1_ports>;
-		interrupts = <27 IRQ_TYPE_EDGE_FALLING>;
-	};
-};
-
-&lcd {
-	dsi_reset-gpios = <&gpio1_ports 5 GPIO_ACTIVE_HIGH>;
-};
-
-&mipi0 {
-	// set to csi2
-	id = <2>;
-	reg = <0x0 0x9000a800 0x0 0x800>;
-	interrupts = <121 IRQ_TYPE_LEVEL_HIGH>;
-	resets = <&sysctl_reset
-			  K230_RESET_CSI2_REG_OFFSET
-			  K230_RESET_CSI2_TYPE
-			  K230_RESET_CSI2_DONE_BIT
-			  K230_RESET_CSI2_ASSERT_BIT>,
-			 <&sysctl_reset
-			  K230_RESET_M2_REG_OFFSET
-			  K230_RESET_M2_TYPE
-			  K230_RESET_M2_DONE_BIT
-			  K230_RESET_M2_ASSERT_BIT>;
+&sysclk {
+	clocks = <&osc24m>, <&timerx_pulse_in>;
+	clock-names = "osc24m", "timer-pulse-in";
 };

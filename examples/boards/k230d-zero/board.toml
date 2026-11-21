@@ -1,7 +1,8 @@
 # BPI-CanMV-K230D-Zero (K230D, RVV 1.0) on the K230 family. The device tree
-# is the ruyisdk kernel fork's bananapi-canmv-k230d-zero.dts (fork commit
-# ae4a7e6), not in mainline 7.3.3: a guess that it compiles against 7.3.3's
-# k230.dtsi, not checked. Untested on board.
+# is written for mainline 7.3.3 (assets/dts): the SD and USB nodes as the
+# AI-CAM's, the board's set from the ruyisdk kernel fork's
+# bananapi-canmv-k230d-zero.dts (fork commit ae4a7e6), whose display, touch,
+# camera and audio nodes mainline has nothing for. Untested on board.
 version = 1
 extends = "../k230/family.toml"
 name = "k230d-zero"
