@@ -10,8 +10,10 @@
 //! - **Refused at plan time:** a step that signs with a key (`gaia.sign`, or
 //!   any step given a signing key's variable, `key_env`: a signed first-flash
 //!   image, a signed bundle). Gaia has no publish step; one added later is to
-//!   be refused here too.
-//! - **Marked:** the run record (`"build": "dev-reuse"`); each output copied
+//!   be refused here too. And a dev EROFS image ([`dev_erofs`]: lz4hc, for
+//!   the bench) that a disk, a flash image or a signature would carry.
+//! - **Marked:** the run record (`"build": "dev-reuse"`, and `dev_erofs`
+//!   naming each dev EROFS step); each output copied
 //!   to `<store>/dev-outputs/<run>/<output>` with `<output>.gaia-build.json`
 //!   beside it, `{"build":"dev-reuse"}`, and that copy is the path printed
 //!   (a store object may be a clean build's too, so nothing is put beside
@@ -23,6 +25,7 @@
 //!   in all of these, so any difference is a stale reuse.
 use crate::Stop;
 use crate::record::Run;
+use daedalus::layers::graph::{GraphDoc, Lit, NodeDoc};
 use gaia_store::{Digest, ObjectRef, Store};
 use std::collections::BTreeMap;
 use std::fs;
@@ -83,6 +86,114 @@ pub fn check(doc: &serde_json::Value) -> Result<(), Stop> {
     Err(Stop::usage(format!(
         "--dev-reuse builds are not signed or published, and this product's graph signs:\n  {}\n\
          Build it clean, or give the dev build a product that does not sign.",
+        refused.join("\n  ")
+    )))
+}
+
+/// The node that makes an EROFS image.
+const EROFS: &str = "gaia.fs.erofs";
+/// What a dev erofs is compressed with: about 15 times faster to make than
+/// the release lzma, at 1.8 times the size (1.3 s against
+/// 18-23 s, 30.1 MB against 17.0 MB, on a 68 MB root).
+pub const DEV_COMPRESSION: &str = "lz4hc";
+
+/// Whether node `node` makes what leaves the bench: a disk or a flash image,
+/// or a signature.
+fn leaves_the_bench(node: &NodeDoc) -> bool {
+    let keyed = matches!(node.consts.get(KEY_ENV), Some(Lit::Str(value)) if !value.is_empty());
+    node.id.starts_with("gaia.disk")
+        || node.id.starts_with("gaia.flash")
+        || node.id == SIGN
+        || keyed
+}
+
+/// The first step that leaves the bench (by [`leaves_the_bench`]) that
+/// `from` reaches, following the graph's edges: what would carry its output.
+fn carried_by(doc: &GraphDoc, from: usize) -> Option<usize> {
+    let nodes = &doc.graph.nodes;
+    let mut seen = vec![false; nodes.len()];
+    let mut todo = vec![from];
+    while let Some(node) = todo.pop() {
+        if std::mem::replace(&mut seen[node], true) {
+            continue;
+        }
+        if node != from && leaves_the_bench(&nodes[node]) {
+            return Some(node);
+        }
+        for edge in &doc.graph.edges {
+            if edge.from.node as usize == node && edge.to.node != 0 {
+                todo.push(edge.to.node as usize);
+            }
+        }
+    }
+    None
+}
+
+fn label(doc: &GraphDoc, node: usize) -> String {
+    let node = &doc.graph.nodes[node];
+    node.label.clone().unwrap_or_else(|| node.id.clone())
+}
+
+/// The EROFS images of a dev build.
+#[derive(Debug, Default, PartialEq)]
+pub struct DevErofs {
+    /// The steps made dev ([`DEV_COMPRESSION`]), by label.
+    pub made: Vec<String>,
+    /// A line for each EROFS step that keeps its compression, and why.
+    pub notes: Vec<String>,
+}
+
+/// A dev build's EROFS images (`gaia build --dev-reuse`): each EROFS step
+/// whose image reaches no disk, flash image or signature is made with
+/// [`DEV_COMPRESSION`], at the compressor's default level, without lzma's
+/// dictionary or `fragments` (the slow packing). The compression is in the
+/// step's key, so a dev image never shares one with a release image. An
+/// EROFS step that does reach one keeps what it was given: a dev image never
+/// leaves the bench. To get a dev image from a product that makes a disk,
+/// build it `--until` the EROFS step.
+pub fn dev_erofs(doc: &mut GraphDoc) -> DevErofs {
+    let mut dev = DevErofs::default();
+    for node in 1..doc.graph.nodes.len() {
+        if doc.graph.nodes[node].id != EROFS {
+            continue;
+        }
+        let name = label(doc, node);
+        if let Some(by) = carried_by(doc, node) {
+            dev.notes.push(format!(
+                "dev erofs: {name} is not one: it reaches {}, and a dev erofs never leaves the bench (build --until {name} for one)",
+                label(doc, by)
+            ));
+            continue;
+        }
+        let consts = &mut doc.graph.nodes[node].consts;
+        consts.insert("compression".into(), Lit::Str(DEV_COMPRESSION.into()));
+        consts.insert("level".into(), Lit::Int(0));
+        consts.remove("dictsize");
+        consts.remove("fragments");
+        dev.notes
+            .push(format!("dev erofs: {name} is made with {DEV_COMPRESSION}"));
+        dev.made.push(name);
+    }
+    dev
+}
+
+/// The refusal of a dev build in which a dev EROFS image (`made`, by label)
+/// would leave the bench: carried by a disk, a flash image or a signature.
+/// Checked on the graph as it will run, apart from [`dev_erofs`]'s own test.
+pub fn check_erofs(doc: &GraphDoc, made: &[String]) -> Result<(), Stop> {
+    let mut refused = Vec::new();
+    for node in 1..doc.graph.nodes.len() {
+        if made.contains(&label(doc, node))
+            && let Some(by) = carried_by(doc, node)
+        {
+            refused.push(format!("{} reaches {}", label(doc, node), label(doc, by)));
+        }
+    }
+    if refused.is_empty() {
+        return Ok(());
+    }
+    Err(Stop::usage(format!(
+        "a dev erofs ({DEV_COMPRESSION}, --dev-reuse) never goes into a disk, a flash image or a signature:\n  {}",
         refused.join("\n  ")
     )))
 }
@@ -252,6 +363,121 @@ mod tests {
             {"id": "gaia.flash.image", "label": "p::flash", "consts": {}},
         ]}});
         assert!(check(&unsigned).is_ok());
+    }
+
+    /// A graph document of `nodes` (id, label, consts as JSON) and `edges`
+    /// (from node, to node); node 0 is the host.
+    fn doc(nodes: &[(&str, &str, serde_json::Value)], edges: &[(u32, u32)]) -> GraphDoc {
+        let mut all = vec![serde_json::json!({"id": "host", "kind": "host_bridge"})];
+        all.extend(nodes.iter().map(
+            |(id, label, consts)| serde_json::json!({"id": id, "label": label, "consts": consts}),
+        ));
+        let edges: Vec<_> = edges
+            .iter()
+            .map(|(from, to)| {
+                serde_json::json!({"from": {"node": from, "port": "out"}, "to": {"node": to, "port": "in"}, "policy": {"kind": "fifo"}})
+            })
+            .collect();
+        serde_json::from_value(serde_json::json!({
+            "format": "daedalus.graph", "schema_version": 1, "requires": [],
+            "graph": {"nodes": all, "edges": edges},
+        }))
+        .expect("a graph document")
+    }
+
+    fn release_erofs() -> serde_json::Value {
+        serde_json::json!({
+            "compression": {"type": "str", "value": "lzma"},
+            "level": {"type": "int", "value": 6},
+            "dictsize": {"type": "int", "value": 2097152},
+            "cluster": {"type": "int", "value": 1048576},
+            "fragments": {"type": "bool", "value": true},
+            "ztailpacking": {"type": "bool", "value": true},
+        })
+    }
+
+    /// An EROFS image that reaches no disk, flash image or signature is made
+    /// dev: lz4hc at the default level, no dictionary, no fragments, the
+    /// cluster and tail packing as given. One that reaches a disk (through
+    /// another step) keeps lzma and says why.
+    #[test]
+    fn only_an_erofs_that_stays_on_the_bench_is_made_dev() {
+        let mut graph = doc(
+            &[
+                ("gaia.fs.erofs", "p::slot", release_erofs()),
+                ("gaia.verity", "p::verity", serde_json::json!({})),
+                ("gaia.fs.erofs", "q::root", release_erofs()),
+                ("gaia.verity", "q::verity", serde_json::json!({})),
+                ("gaia.disk", "q::disk", serde_json::json!({})),
+            ],
+            &[(1, 2), (2, 0), (3, 4), (4, 5), (5, 0)],
+        );
+        let dev = dev_erofs(&mut graph);
+        assert_eq!(dev.made, ["p::slot"]);
+        assert_eq!(
+            dev.notes,
+            [
+                "dev erofs: p::slot is made with lz4hc",
+                "dev erofs: q::root is not one: it reaches q::disk, and a dev erofs never leaves the bench (build --until q::root for one)",
+            ]
+        );
+        let consts =
+            |node: usize| serde_json::to_value(&graph.graph.nodes[node].consts).expect("consts");
+        assert_eq!(
+            consts(1),
+            serde_json::json!({
+                "compression": {"type": "str", "value": "lz4hc"},
+                "level": {"type": "int", "value": 0},
+                "cluster": {"type": "int", "value": 1048576},
+                "ztailpacking": {"type": "bool", "value": true},
+            })
+        );
+        assert_eq!(consts(3), release_erofs());
+        assert!(check_erofs(&graph, &dev.made).is_ok());
+    }
+
+    /// The check stands apart from the choice: a dev EROFS image that a
+    /// disk, a flash image or a signing step would carry is refused, each
+    /// named with what carries it.
+    #[test]
+    fn a_dev_erofs_that_would_leave_the_bench_is_refused() {
+        for (id, consts) in [
+            ("gaia.disk", serde_json::json!({})),
+            ("gaia.flash.image", serde_json::json!({})),
+            ("gaia.sign", serde_json::json!({})),
+            (
+                "gaia.generate.image",
+                serde_json::json!({"key_env": {"type": "str", "value": "SEED"}}),
+            ),
+        ] {
+            let graph = doc(
+                &[
+                    ("gaia.fs.erofs", "p::slot", release_erofs()),
+                    ("gaia.verity", "p::verity", serde_json::json!({})),
+                    (id, "p::out", consts),
+                ],
+                &[(1, 2), (2, 3), (3, 0)],
+            );
+            let refused = check_erofs(&graph, &["p::slot".to_string()])
+                .expect_err(id)
+                .message;
+            assert!(
+                refused.contains("p::slot reaches p::out"),
+                "{id}: {refused}"
+            );
+            let unsigned = doc(
+                &[
+                    ("gaia.fs.erofs", "p::slot", release_erofs()),
+                    (
+                        "gaia.generate.image",
+                        "p::out",
+                        serde_json::json!({"key_env": {"type": "str", "value": ""}}),
+                    ),
+                ],
+                &[(1, 2), (2, 0)],
+            );
+            assert!(check_erofs(&unsigned, &["p::slot".to_string()]).is_ok());
+        }
     }
 
     #[test]

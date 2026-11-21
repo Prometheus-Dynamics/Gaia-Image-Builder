@@ -25,6 +25,9 @@ pub struct Project {
     pub setup: Setup,
     pub registry: Registry,
     pub built: Built,
+    /// A dev build's EROFS steps made with the dev compression, by label
+    /// (`dev::dev_erofs`); empty for a clean build.
+    pub dev_erofs: Vec<String>,
 }
 
 impl Project {
@@ -75,15 +78,23 @@ impl Project {
             (None, true) => Some("gaia.os.buildroot.host"),
             (step, false) => step.as_deref(),
         };
-        let built = match until {
+        let mut built = match until {
             Some(step) => built.until(step).map_err(Stop::usage)?,
             None => built,
         };
+        // After `--until`: what is cut away carries no image.
+        let mut dev_erofs = Vec::new();
+        if options.dev_reuse {
+            let dev = crate::dev::dev_erofs(&mut built.doc);
+            built.notes.extend(dev.notes);
+            dev_erofs = dev.made;
+        }
         Ok(Self {
             product: product.clone(),
             setup,
             registry,
             built,
+            dev_erofs,
         })
     }
 

@@ -387,6 +387,49 @@ fn keep_setid_reaches_the_images_erofs_stages() {
     }
 }
 
+/// `--dev-reuse` makes an EROFS image that stays on the bench with lz4hc,
+/// and the plan shows it: the graph a dev build would run, with a line
+/// naming the step. Without the flag the recipe's own compression stands.
+#[test]
+fn a_dev_plan_makes_the_bench_erofs_with_lz4hc() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    product(dir.path());
+    write(
+        &dir.path().join("recipes/tarball.toml"),
+        "version = 1\nname = \"tarball\"\n[stages]\nfs = \"gaia.fs.erofs\"\n[inputs]\nbuild = [\"fs.tree\"]\n[outputs]\nroot = \"fs.image\"\n[consts]\n\"fs.compression\" = \"lzma\"\n\"fs.level\" = 6\n\"fs.dictsize\" = 2097152\n\"fs.fragments\" = true\n\"fs.ztailpacking\" = true\n",
+    );
+    let plan = |args: &[&str]| {
+        let out = gaia(dir.path(), args);
+        assert!(
+            out.status.success(),
+            "{}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+        out
+    };
+    let json = |args: &[&str]| -> serde_json::Value {
+        serde_json::from_slice(&plan(args).stdout).expect("json")
+    };
+    let release = json(&["plan", "product.toml", "--json"]);
+    assert_eq!(constant(&release, "a::fs", "compression"), "lzma");
+    assert_eq!(constant(&release, "a::fs", "dictsize"), 2097152);
+    let dev = json(&["plan", "product.toml", "--json", "--dev-reuse"]);
+    assert_eq!(constant(&dev, "a::fs", "compression"), "lz4hc");
+    assert_eq!(constant(&dev, "a::fs", "level"), 0);
+    assert_eq!(constant(&dev, "a::fs", "dictsize"), serde_json::Value::Null);
+    assert_eq!(
+        constant(&dev, "a::fs", "fragments"),
+        serde_json::Value::Null
+    );
+    assert_eq!(constant(&dev, "a::fs", "ztailpacking"), true);
+    let text = String::from_utf8_lossy(&plan(&["plan", "product.toml", "--dev-reuse"]).stdout)
+        .into_owned();
+    assert!(
+        text.contains("dev erofs: a::fs is made with lz4hc"),
+        "{text}"
+    );
+}
+
 #[test]
 fn a_make_build_takes_its_other_sources_by_name() {
     let dir = tempfile::tempdir().expect("tempdir");

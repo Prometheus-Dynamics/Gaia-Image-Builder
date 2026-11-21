@@ -10,7 +10,7 @@ gaia: build images from product descriptions
 
 usage:
   gaia validate <file.toml>... [--kind product|board|family|component] [--recipes DIR]
-  gaia plan  <product.toml> [project flags] [--json]
+  gaia plan  <product.toml> [project flags] [--json] [--dev-reuse]
   gaia build <product.toml> [project flags] [--jobs N] [--config-only | --until STEP]
              [--dev-reuse [--verify]]
   gaia lock  <product.toml> [--update SOURCE]... [--check]  (see gaia lock --help)
@@ -51,6 +51,10 @@ dev builds (bench iteration only; never a release):
                      publish or bundle with a signing key are refused. Every
                      printed output gets <output>.gaia-build.json beside it,
                      {\"build\":\"dev-reuse\"}, and the run record says so.
+                     An EROFS image that reaches no disk, flash image or
+                     signature is made with lz4hc (fast, larger; named in
+                     the record's dev_erofs); one that does keeps its
+                     compression. --until <image>.<erofs step> gives one.
   --verify           after the dev build, build the same product clean and
                      compare, file by file, every output and what each
                      Buildroot step ships. Run it before trusting a dev image
@@ -274,7 +278,8 @@ pub fn parse(words: &[String]) -> Result<Command, Stop> {
                     }
                     "--until" if build => project.until = Some(words.value(word)?.to_string()),
                     "--config-only" if build => project.config_only = true,
-                    "--dev-reuse" if build => project.dev_reuse = true,
+                    // On a plan too: the graph a dev build would run.
+                    "--dev-reuse" => project.dev_reuse = true,
                     "--verify" if build => project.verify = true,
                     _ => words.positional(word, &mut product)?,
                 }

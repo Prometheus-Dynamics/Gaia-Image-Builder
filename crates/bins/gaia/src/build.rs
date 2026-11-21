@@ -58,6 +58,15 @@ fn build_one(options: &args::Project) -> Result<Run, Stop> {
     if options.dev_reuse {
         let doc = serde_json::to_value(&project.built.doc).map_err(Stop::usage)?;
         crate::dev::check(&doc)?;
+        crate::dev::check_erofs(&project.built.doc, &project.dev_erofs)?;
+        for note in project
+            .built
+            .notes
+            .iter()
+            .filter(|note| note.starts_with("dev erofs:"))
+        {
+            eprintln!("{note}");
+        }
     }
     let planned = project.plan()?;
     let store = Store::open(&project.setup.store).map_err(Stop::usage)?;
@@ -233,6 +242,7 @@ fn build_one(options: &args::Project) -> Result<Run, Stop> {
     run.critical_path = critical_path;
     if options.dev_reuse {
         run.build = Some(crate::dev::BUILD.into());
+        run.dev_erofs = project.dev_erofs.clone();
     }
     let path = run.write(&store)?;
     if options.dev_reuse {
