@@ -148,7 +148,7 @@ pub fn firmware_k230(
     let made = Step::new(&store, cx, NAME, key).look_up_or_make(
         &[("tree", Path::new("tree"))],
         |work| {
-            let bytes = wrap_bytes(wrap, &raw).map_err(&fail)?;
+            let bytes = wrap_bytes(wrap, &raw).map_err(fail)?;
             let dir = work.dir().join("tree");
             std::fs::create_dir(&dir).map_err(|e| StepError::body(NAME, e))?;
             std::fs::write(dir.join(path), bytes).map_err(|e| fail(format!("write: {e}")))

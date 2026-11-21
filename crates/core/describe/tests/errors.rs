@@ -397,7 +397,7 @@ fn a_wrapped_area_parses_with_its_kind() {
         ),
         ("b/frag", ""),
     ]);
-    let board = Board::read(&dir.path().join("b/board.toml")).expect("parses");
+    let board = Board::read(dir.path().join("b/board.toml")).expect("parses");
     assert_eq!(
         board.partitions[0].wrap.as_deref(),
         Some("k230-first-stage")
@@ -416,7 +416,7 @@ fn board_with_area(area: &str) -> (Result<Board, Error>, tempfile::TempDir) {
         ("b/assets/env.bin", "x"),
         ("b/frag", ""),
     ]);
-    let read = Board::read(&dir.path().join("b/board.toml"));
+    let read = Board::read(dir.path().join("b/board.toml"));
     (read, dir)
 }
 
@@ -469,7 +469,7 @@ fn a_file_on_a_table_partition_is_refused() {
         ("b/assets/env.bin", "x"),
         ("b/frag", ""),
     ]);
-    let error = Board::read(&dir.path().join("b/board.toml")).expect_err("in table");
+    let error = Board::read(dir.path().join("b/board.toml")).expect_err("in table");
     assert_names(
         &error,
         &dir.path().join("b/board.toml"),

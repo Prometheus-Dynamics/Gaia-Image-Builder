@@ -21,7 +21,7 @@ fn uimage_args(args: &[String]) -> Result<(gaia_k230_image::UImageFields<'_>, &s
     let mut i = 0;
     while i < args.len() {
         let flag = args[i].as_str();
-        if let Some(_) = flag.strip_prefix("--") {
+        if flag.starts_with("--") {
             let value = args
                 .get(i + 1)
                 .ok_or_else(|| format!("{flag} needs a value"))?
