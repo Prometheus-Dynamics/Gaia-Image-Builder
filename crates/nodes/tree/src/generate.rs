@@ -13,7 +13,8 @@
 //! - `@source@`: the tool's source tree (for data the tool reads from it);
 //! - `@description@`: the board's description file;
 //! - `@out@`: the directory the tool writes into;
-//! - `@slot@`: the slot's id, where the image has one.
+//! - `@slot@`: the slot's id, where the image has one;
+//! - `@build@`: `clean`, or `dev-reuse` for `gaia build --dev-reuse`.
 //!
 //! What the tool is to write is declared: each declared output must be
 //! there when the tool ends, and nothing else may be at the top of `@out@`.
@@ -54,6 +55,7 @@ const OUT: &str = "/out";
 /// slot's id (empty when the image has none: an argument that names
 /// `@slot@` is then an error). `root` is the image the tool was built in,
 /// the sandbox's root filesystem, and `bwrap` the bubblewrap program.
+/// `build` is how the build was made, for `@build@` (none: clean).
 #[node(
     id = "gaia.generate",
     inputs(
@@ -67,7 +69,8 @@ const OUT: &str = "/out";
         description_name,
         args,
         outputs,
-        slot
+        slot,
+        build
     ),
     outputs(tree)
 )]
@@ -84,6 +87,7 @@ pub fn generate(
     args: &str,
     outputs: &str,
     slot: &str,
+    build: Option<&String>,
     cx: &Ctx,
 ) -> Result<Tree, StepError> {
     let fail = |why: String| StepError::body(NAME, why);
@@ -144,6 +148,8 @@ pub fn generate(
         }
     }
     let uses_source = args.iter().any(|arg| arg.contains("@source@"));
+    let build = gaia_types::build_mode(build.map(String::as_str)).map_err(fail)?;
+    let uses_build = args.iter().any(|arg| arg.contains(gaia_types::BUILD_NAME));
 
     let sandbox = Sandbox::new(bwrap, store.path(&root_object))
         .input(store.path(&tool_object), TOOL)
@@ -169,6 +175,11 @@ pub fn generate(
     if uses_source {
         key = key.input("source", source_object.digest);
     }
+    // How the build was made only when the tool is told it: a clean and a
+    // dev build of the rest share the step otherwise.
+    if uses_build {
+        key = key.config("build", build);
+    }
     let program_in = format!("{TOOL}/{}", inside(program).map_err(fail)?);
     let described_in = format!("{DESCRIPTION}/{}", inside(description_name).map_err(fail)?);
     let made = Step::new(&store, cx, NAME, key.finish()).look_up_or_make(
@@ -184,6 +195,7 @@ pub fn generate(
                         .replace("@description@", &described_in)
                         .replace("@out@", OUT)
                         .replace("@slot@", slot)
+                        .replace(gaia_types::BUILD_NAME, build)
                 })
                 .collect();
             let tool = sandbox

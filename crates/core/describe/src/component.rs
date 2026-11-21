@@ -52,7 +52,9 @@ pub struct Generate {
     pub description: String,
     /// The tool's arguments. `@source@` is the tool's source tree,
     /// `@description@` the board's description file, `@out@` the directory
-    /// it writes into, `@slot@` the image's slot id.
+    /// it writes into, `@slot@` the image's slot id, `@build@` how the
+    /// build was made: `clean`, or `dev-reuse` under `gaia build
+    /// --dev-reuse`.
     pub args: Vec<String>,
     /// What the tool writes at the top of `@out@`: each must be there when
     /// it ends, and nothing else.
@@ -79,8 +81,8 @@ pub struct Generate {
 }
 
 /// One image a `[generate]` tool writes from a payload: up to three runs,
-/// each the tool's arguments. `@source@`, `@description@` and `@slot@` are
-/// as in `[generate]`; `@payload@` is the payload directory, `@size@` the
+/// each the tool's arguments. `@source@`, `@description@`, `@slot@` and
+/// `@build@` are as in `[generate]`; `@payload@` is the payload directory, `@size@` the
 /// image's size in bytes and `@out@` the one file to write. Where the
 /// recipe gives them: `@bundle@` the slot's bundle, `@boot-image@` the
 /// image's boot partition image, `@data-size@` the size in bytes of the

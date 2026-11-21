@@ -86,6 +86,7 @@ impl Project {
         let mut dev_erofs = Vec::new();
         if options.dev_reuse {
             let dev = crate::dev::dev_erofs(&mut built.doc);
+            crate::dev::mark_generators(&mut built.doc);
             built.notes.extend(dev.notes);
             dev_erofs = dev.made;
         }

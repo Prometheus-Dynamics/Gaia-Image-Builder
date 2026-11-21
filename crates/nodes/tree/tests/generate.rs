@@ -120,6 +120,18 @@ impl Fixture {
         args: &str,
         slot: &str,
     ) -> Result<PathBuf, String> {
+        self.run_built(name, source_extra, args, slot, None)
+    }
+
+    /// As `run`, in a build made as `build` says (none: clean).
+    fn run_built(
+        &self,
+        name: &str,
+        source_extra: &str,
+        args: &str,
+        slot: &str,
+        build: Option<&str>,
+    ) -> Result<PathBuf, String> {
         let tool = self.tree("tool", &[("bin/gen", TOOL, 0o755)]);
         let source = self.tree(
             &format!("source-{name}"),
@@ -141,6 +153,7 @@ impl Fixture {
             args,
             r#"["board.dts", "boot"]"#,
             slot,
+            build.map(str::to_string).as_ref(),
             &Ctx::new(),
         )
         .map_err(|e| e.to_string())?;
@@ -206,6 +219,39 @@ fn the_source_is_in_the_key_only_when_an_argument_names_it() {
     let before = f.made();
     f.run("d", "two", ARGS, "s").expect("generated");
     assert_eq!(f.made(), before + 1);
+}
+
+/// `@build@` is how the build was made: `clean` unless the build is a dev
+/// one. The step is keyed on it only when an argument names it, and a mode
+/// that is neither is refused.
+#[test]
+fn the_build_is_given_by_name_and_keyed_only_when_named() {
+    if !available() {
+        return;
+    }
+    let f = Fixture::new();
+    let built = r#"["@source@/socs", "@description@", "@out@", "@build@"]"#;
+    let config = |out: PathBuf| std::fs::read_to_string(out.join("boot/config.txt")).expect("read");
+    let clean = f.run("a", "one", built, "").expect("clean");
+    assert_eq!(config(clean), "slot=clean\n");
+    let dev = f
+        .run_built("a", "one", built, "", Some("dev-reuse"))
+        .expect("dev");
+    assert_eq!(config(dev), "slot=dev-reuse\n");
+    assert_eq!(f.made(), 2, "a dev build of a tool told so is its own step");
+    // Not named: a dev build finds the clean build's step.
+    f.run("a", "one", ARGS, "s").expect("clean");
+    let before = f.made();
+    f.run_built("a", "one", ARGS, "s", Some("dev-reuse"))
+        .expect("dev");
+    assert_eq!(f.made(), before, "not told, the same step");
+    let why = f
+        .run_built("a", "one", built, "", Some("fast"))
+        .expect_err("not a mode");
+    assert!(
+        why.contains("build \"fast\": the build is clean or dev-reuse"),
+        "{why}"
+    );
 }
 
 #[test]

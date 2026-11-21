@@ -99,8 +99,32 @@ pub const KEYS: [&str; 30] = [
 ];
 
 /// The names a `[generate]` tool's argument may hold: its source tree, the
-/// board's description file, the directory it writes into, the slot's id.
-pub const GENERATE_NAMES: [&str; 4] = ["@source@", "@description@", "@out@", "@slot@"];
+/// board's description file, the directory it writes into, the slot's id,
+/// and how the build was made ([`BUILD_NAME`]).
+pub const GENERATE_NAMES: [&str; 5] = ["@source@", "@description@", "@out@", "@slot@", BUILD_NAME];
+
+/// The name, in any generator run's arguments, of how the build was made:
+/// [`BUILD_CLEAN`], or [`BUILD_DEV_REUSE`] for `gaia build --dev-reuse`
+/// (the run record's `build`). A tool that writes it into what it makes
+/// lets the board tell a dev build's output from a clean one's. A step is
+/// keyed on it only when one of its arguments names it.
+pub const BUILD_NAME: &str = "@build@";
+/// [`BUILD_NAME`] in a clean build.
+pub const BUILD_CLEAN: &str = "clean";
+/// [`BUILD_NAME`] in a `gaia build --dev-reuse` build.
+pub const BUILD_DEV_REUSE: &str = "dev-reuse";
+
+/// The value of [`BUILD_NAME`] a generator step is given (none in a clean
+/// build), or why it is not one.
+pub fn build_mode(given: Option<&str>) -> Result<&'static str, String> {
+    match given.unwrap_or(BUILD_CLEAN) {
+        BUILD_CLEAN => Ok(BUILD_CLEAN),
+        BUILD_DEV_REUSE => Ok(BUILD_DEV_REUSE),
+        other => Err(format!(
+            "build {other:?}: the build is {BUILD_CLEAN} or {BUILD_DEV_REUSE}"
+        )),
+    }
+}
 
 /// The names an argument of a `[generate.image]` or `[generate.bundle]`
 /// run may hold: the tool's source tree, the board's description file, the
@@ -108,13 +132,13 @@ pub const GENERATE_NAMES: [&str; 4] = ["@source@", "@description@", "@out@", "@s
 /// to write; and, where the recipe gives them, the slot's root image, its
 /// verity table, a signing key file, and the product's name and version;
 /// a directory the tool writes the payload into as it bundled it; what
-/// identifies the signing key; the file of its public half; and the
-/// slot's bundle.
+/// identifies the signing key; the file of its public half; the slot's
+/// bundle; and how the build was made ([`BUILD_NAME`]).
 /// The name a component's keys file has in the tree a generator run is
 /// given it in: `@keys@` is that file.
 pub const GENERATE_KEYS_NAME: &str = "keys";
 
-pub const GENERATE_IMAGE_NAMES: [&str; 20] = [
+pub const GENERATE_IMAGE_NAMES: [&str; 21] = [
     "@source@",
     "@description@",
     "@payload@",
@@ -135,6 +159,7 @@ pub const GENERATE_IMAGE_NAMES: [&str; 20] = [
     "@time@",
     "@data-size@",
     "@firmware@",
+    BUILD_NAME,
 ];
 
 /// The `@name@` words of `text` that are none of [`GENERATE_NAMES`].

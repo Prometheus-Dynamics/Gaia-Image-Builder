@@ -13,7 +13,9 @@
 //!   be refused here too. And a dev EROFS image ([`dev_erofs`]: lz4hc, for
 //!   the bench) that a disk, a flash image or a signature would carry.
 //! - **Marked:** the run record (`"build": "dev-reuse"`, and `dev_erofs`
-//!   naming each dev EROFS step); each output copied
+//!   naming each dev EROFS step); each generator step's `@build@`
+//!   ([`mark_generators`]), for a tool that writes it into what the board
+//!   carries (a slot's manifest); each output copied
 //!   to `<store>/dev-outputs/<run>/<output>` with `<output>.gaia-build.json`
 //!   beside it, `{"build":"dev-reuse"}`, and that copy is the path printed
 //!   (a store object may be a clean build's too, so nothing is put beside
@@ -33,7 +35,7 @@ use std::io;
 use std::path::{Path, PathBuf};
 
 /// The run record's `build` for a dev build.
-pub const BUILD: &str = "dev-reuse";
+pub const BUILD: &str = gaia_types::BUILD_DEV_REUSE;
 /// Where the warm Buildroot output directories are, beside the store's
 /// objects.
 pub const WARM: &str = "dev-buildroot";
@@ -175,6 +177,20 @@ pub fn dev_erofs(doc: &mut GraphDoc) -> DevErofs {
         dev.made.push(name);
     }
     dev
+}
+
+/// The generator nodes, whose runs may name `@build@`.
+const GENERATORS: [&str; 3] = ["gaia.generate", "gaia.generate.image", "gaia.generate.tree"];
+
+/// A dev build's generator steps are told so: each is given `build` =
+/// [`BUILD`], which its runs see as `@build@` (a clean build gives none:
+/// `clean`). A step is keyed on it only when a run names it.
+pub fn mark_generators(doc: &mut GraphDoc) {
+    for node in &mut doc.graph.nodes {
+        if GENERATORS.contains(&node.id.as_str()) {
+            node.consts.insert("build".into(), Lit::Str(BUILD.into()));
+        }
+    }
 }
 
 /// The refusal of a dev build in which a dev EROFS image (`made`, by label)
@@ -383,6 +399,30 @@ mod tests {
             "graph": {"nodes": all, "edges": edges},
         }))
         .expect("a graph document")
+    }
+
+    /// A dev build gives each generator step `build` = dev-reuse, for its
+    /// runs' `@build@`; no other step is given it.
+    #[test]
+    fn generator_steps_are_told_the_build() {
+        let mut d = doc(
+            &[
+                ("gaia.generate", "p::gen", serde_json::json!({})),
+                ("gaia.generate.image", "p::bundle", serde_json::json!({})),
+                ("gaia.generate.tree", "p::data", serde_json::json!({})),
+                ("gaia.fs.erofs", "p::erofs", serde_json::json!({})),
+            ],
+            &[],
+        );
+        mark_generators(&mut d);
+        let build = |node: usize| match d.graph.nodes[node].consts.get("build") {
+            Some(Lit::Str(value)) => value.clone(),
+            other => format!("{other:?}"),
+        };
+        assert_eq!(
+            [build(1), build(2), build(3), build(4)],
+            ["dev-reuse", "dev-reuse", "dev-reuse", "None"]
+        );
     }
 
     fn release_erofs() -> serde_json::Value {

@@ -167,7 +167,8 @@ pub struct Runs {
         data_size,
         firmware,
         tools,
-        tool_names
+        tool_names,
+        build
     ),
     outputs(image, report, payload)
 )]
@@ -199,6 +200,7 @@ pub fn generate_image(
     firmware: Option<&Artifact>,
     tools: FanIn<'_, Tree>,
     tool_names: Option<&String>,
+    build: Option<&String>,
     cx: &Ctx,
 ) -> Result<(Artifact, Artifact, Tree), StepError> {
     let (image, report, payload) = make(
@@ -231,6 +233,7 @@ pub fn generate_image(
             firmware,
             tools: tools.iter().map(|t| (*t).clone()).collect(),
             tool_names: tool_names.map(String::as_str).unwrap_or_default(),
+            build: build.map(String::as_str),
         },
         cx,
     )?;
@@ -280,7 +283,8 @@ pub fn generate_image(
         data_size,
         firmware,
         tools,
-        tool_names
+        tool_names,
+        build
     ),
     outputs(tree, report, payload)
 )]
@@ -312,6 +316,7 @@ pub fn generate_tree(
     firmware: Option<&Artifact>,
     tools: FanIn<'_, Tree>,
     tool_names: Option<&String>,
+    build: Option<&String>,
     cx: &Ctx,
 ) -> Result<(Tree, Artifact, Tree), StepError> {
     let (tree, report, payload) = make(
@@ -344,6 +349,7 @@ pub fn generate_tree(
             firmware,
             tools: tools.iter().map(|t| (*t).clone()).collect(),
             tool_names: tool_names.map(String::as_str).unwrap_or_default(),
+            build: build.map(String::as_str),
         },
         cx,
     )?;
@@ -373,6 +379,8 @@ struct More<'a> {
     /// names in `tool_names` (separated by spaces, in the same order).
     tools: Vec<Tree>,
     tool_names: &'a str,
+    /// How the build was made, for `@build@` (none: clean).
+    build: Option<&'a str>,
 }
 
 /// What a run writes at `@out@`.
@@ -596,6 +604,7 @@ fn make(
             }
         }
     }
+    let build = gaia_types::build_mode(more.build).map_err(fail)?;
     let data_size = more.data_size.unwrap_or(0);
     if data_size < 0 {
         return Err(fail(format!("data size {data_size}: not a size")));
@@ -764,6 +773,10 @@ fn make(
     if data_size != 0 {
         key = key.config("data size", data_size.to_string());
     }
+    // How the build was made only when a run is told it.
+    if all().any(|arg| arg.contains(gaia_types::BUILD_NAME)) {
+        key = key.config("build", build);
+    }
     if let Some(object) = &firmware_object {
         key = key.input("firmware", object.digest);
     }
@@ -843,6 +856,7 @@ fn make(
                             .replace("@time@", TIME)
                             .replace("@data-size@", &data_size.to_string())
                             .replace("@firmware@", FIRMWARE)
+                            .replace(gaia_types::BUILD_NAME, build)
                     })
                     .collect()
             };

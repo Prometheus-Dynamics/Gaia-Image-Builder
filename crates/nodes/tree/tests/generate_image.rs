@@ -193,6 +193,19 @@ impl Fixture {
         slot: &str,
         size: i64,
     ) -> Result<(Vec<u8>, String), String> {
+        self.run_built(kernel, runs, slot, size, None)
+    }
+
+    /// As `run`, in a build made as `build` says (none: clean).
+    fn run_built(
+        &self,
+        kernel: &str,
+        runs: &str,
+        slot: &str,
+        size: i64,
+        build: Option<&str>,
+    ) -> Result<(Vec<u8>, String), String> {
+        let build = build.map(str::to_string);
         let (image, report, _) = generate_image(
             &self.store,
             BWRAP,
@@ -223,6 +236,7 @@ impl Fixture {
             None,
             FanIn::values(&[]),
             None,
+            build.as_ref(),
             &Ctx::new(),
         )
         .map_err(|e| e.to_string())?;
@@ -275,6 +289,31 @@ fn the_tool_writes_the_image_from_the_payload_and_says_what_fits() {
     let (bigger, _) = f.run("k1", RUNS, "base", 8192).expect("another size");
     assert_eq!(bigger.len(), 8192);
     assert_eq!(f.made(), 4);
+}
+
+/// A run that names `@build@` is given how the build was made, and the step
+/// is keyed on it; a run that does not name it shares the clean build's
+/// step.
+#[test]
+fn an_image_run_is_given_the_build_by_name() {
+    if !available() {
+        return;
+    }
+    let f = Fixture::new();
+    let built = RUNS.replace("\"@slot@\", \"@size@\"", "\"@build@\", \"@size@\"");
+    assert_ne!(built, RUNS);
+    let (clean, _) = f.run("k", &built, "", 4096).expect("clean");
+    let (dev, _) = f
+        .run_built("k", &built, "", 4096, Some("dev-reuse"))
+        .expect("dev");
+    assert_ne!(clean, dev, "the tool wrote what it was told");
+    assert!(String::from_utf8_lossy(&dev).contains("dev-reuse"));
+    assert_eq!(f.made(), 2);
+    f.run("k", RUNS, "s", 4096).expect("clean");
+    let before = f.made();
+    f.run_built("k", RUNS, "s", 4096, Some("dev-reuse"))
+        .expect("dev");
+    assert_eq!(f.made(), before, "not told, the same step");
 }
 
 #[test]
@@ -420,6 +459,7 @@ impl Fixture {
             None,
             None,
             FanIn::values(&[]),
+            None,
             None,
             &Ctx::new(),
         )
@@ -617,6 +657,7 @@ impl Fixture {
             None,
             FanIn::values(&[]),
             None,
+            None,
             &Ctx::new(),
         )
         .map_err(|e| e.to_string())?;
@@ -744,6 +785,7 @@ impl Fixture {
             firmware.as_ref(),
             FanIn::values(&[]),
             None,
+            None,
             &Ctx::new(),
         )
         .map_err(|e| e.to_string())?;
@@ -859,6 +901,7 @@ impl Fixture {
             None,
             FanIn::values(&tools),
             Some(&names.to_string()),
+            None,
             &Ctx::new(),
         )
         .map_err(|e| e.to_string())?;
