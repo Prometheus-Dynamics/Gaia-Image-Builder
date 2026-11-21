@@ -478,3 +478,69 @@ fn no_watchdog_leaves_the_i6300esb_out() {
     assert!(out.contains("\nwatchdog: none (--no-watchdog)\n"), "{out}");
     assert!(!out.contains("i6300esb"), "{out}");
 }
+
+/// A kernel image for `--kernel`: some bytes, then, when `config` is given,
+/// that configuration embedded as CONFIG_IKCONFIG embeds it (gzipped
+/// between IKCFG_ST and IKCFG_ED), then more bytes; the whole gzipped when
+/// `gzipped`.
+fn kernel_with(dir: &Path, name: &str, config: Option<&str>, gzipped: bool) -> PathBuf {
+    let mut image = vec![0x55u8; 4096];
+    if let Some(config) = config {
+        let text = dir.join(format!("{name}.config"));
+        std::fs::write(&text, config).expect("write");
+        run("gzip", &["-n9", &text.display().to_string()]);
+        image.extend_from_slice(b"IKCFG_ST");
+        image.extend(std::fs::read(dir.join(format!("{name}.config.gz"))).expect("read"));
+        image.extend_from_slice(b"IKCFG_ED");
+    }
+    image.extend(vec![0xaau8; 4096]);
+    let path = dir.join(name);
+    std::fs::write(&path, &image).expect("write");
+    if gzipped {
+        run("gzip", &["-n9", &path.display().to_string()]);
+        std::fs::rename(dir.join(format!("{name}.gz")), &path).expect("rename");
+    }
+    path
+}
+
+/// The boot says whether the kernel has seccomp with filters, from the
+/// configuration it embeds: on, off, or unknown when it embeds none; a
+/// gzipped kernel is read through gzip.
+#[test]
+fn the_boot_says_whether_the_kernel_has_seccomp() {
+    if !tools_here(&["mformat", "mcopy", "mmd", "mtype", "sfdisk", "dtc", "gzip"]) {
+        return;
+    }
+    let dir = tempfile::tempdir().expect("tempdir");
+    let disk = disk(dir.path());
+    let on = "CONFIG_IKCONFIG=y\nCONFIG_SECCOMP=y\nCONFIG_SECCOMP_FILTER=y\n";
+    let no_filter = "CONFIG_IKCONFIG=y\nCONFIG_SECCOMP=y\n# CONFIG_SECCOMP_FILTER is not set\n";
+    for (name, config, gzipped, expected) in [
+        ("on", Some(on), false, "on"),
+        ("on-gzipped", Some(on), true, "on"),
+        ("no-filter", Some(no_filter), false, "off"),
+        ("none", None, false, "unknown"),
+        ("none-gzipped", None, true, "unknown"),
+    ] {
+        let kernel = kernel_with(dir.path(), name, config, gzipped);
+        let (ok, out) = runner(
+            dir.path(),
+            &disk,
+            &[
+                "--fresh",
+                "--kernel",
+                &kernel.display().to_string(),
+                "--print",
+            ],
+        );
+        assert!(ok, "{out}");
+        assert!(
+            out.contains(&format!("\nseccomp: {expected}\n")),
+            "{name}: {out}"
+        );
+    }
+    // The image's own kernel, which embeds no configuration.
+    let (ok, out) = runner(dir.path(), &disk, &["--fresh", "--print"]);
+    assert!(ok, "{out}");
+    assert!(out.contains("\nseccomp: unknown\n"), "{out}");
+}

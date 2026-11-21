@@ -77,7 +77,9 @@
 # The guest's MAC is fixed (--mac, default 52:54:00:77:00:02), so its lease
 # and name stay the same across boots. An i6300esb watchdog is attached for
 # kernels that carry its driver, unless --no-watchdog leaves it out (each
-# boot records which).
+# boot records which). Each boot also records "seccomp: on", "off" or
+# "unknown", from the configuration the kernel embeds (CONFIG_IKCONFIG;
+# unknown without it): systemd's SystemCallFilter= needs it on.
 #
 # The image is never written: its contents are copied (sparse) to
 # <state>/disk.img once, and the guest writes that copy. --fresh copies again.
@@ -519,6 +521,28 @@ trial_faulted() {
 	for n in "${trial_at[@]}"; do [[ $n -eq $trials ]] && return 0; done
 	return 1
 }
+# Whether seccomp with filters is on in the kernel $1, from the
+# configuration it embeds (CONFIG_IKCONFIG: the gzipped .config between
+# IKCFG_ST and IKCFG_ED): on, off, or unknown when it embeds none. A
+# gzipped kernel is read through gzip.
+kernel_seccomp() {
+	local image=$1 read=(cat) offset config
+	[[ $(od -An -tx1 -N2 "$image" | tr -d ' \n') != 1f8b ]] || read=(gzip -dc)
+	offset=$("${read[@]}" < "$image" 2>/dev/null | grep -abo IKCFG_ST | head -n1 | cut -d: -f1 || true)
+	if [[ -z $offset ]]; then
+		echo unknown
+		return
+	fi
+	# gzip stops at the end of the embedded stream and warns of the bytes after.
+	config=$("${read[@]}" < "$image" 2>/dev/null | tail -c +$((offset + 9)) | gzip -dc 2>/dev/null || true)
+	if [[ -z $config ]]; then
+		echo unknown
+	elif grep -qx 'CONFIG_SECCOMP=y' <<<"$config" && grep -qx 'CONFIG_SECCOMP_FILTER=y' <<<"$config"; then
+		echo on
+	else
+		echo off
+	fi
+}
 while :; do
 	this_tryboot=0
 	if [[ -e $state/tryboot-next ]]; then
@@ -545,6 +569,7 @@ while :; do
 		echo "kernel: $boot_kernel"
 		echo "initramfs: ${boot_initramfs:-none}"
 		echo "watchdog: $([[ $watchdog -eq 1 ]] && echo i6300esb || echo "none (--no-watchdog)")"
+		echo "seccomp: $(kernel_seccomp "$boot_kernel")"
 		echo "cmdline: $boot_cmdline"
 		echo "overlays: ${boot_overlays[*]:-none}"
 		printf 'qemu:'
@@ -571,6 +596,7 @@ while :; do
 		else
 			echo "watchdog: NONE, left out (--no-watchdog); a board has one"
 		fi
+		echo "seccomp: $(kernel_seccomp "$boot_kernel")"
 		[[ -z $boot_initramfs ]] || echo "initramfs from the image sha256 $(sha256sum < "$boot_initramfs" | cut -d' ' -f1)"
 		if [[ $boot_cmdline == "$image_cmdline" ]]; then
 			echo "command line: the image's"
