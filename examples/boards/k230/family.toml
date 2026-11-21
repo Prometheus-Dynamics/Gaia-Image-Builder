@@ -20,10 +20,15 @@ ref = "v7.3.3"
 git = "https://source.denx.de/u-boot/u-boot.git"
 ref = "v2022.10"
 
+# Built with LLVM (clang and Gaia's pinned LLVM tools) from the start: a
+# riscv64 kernel with Rust needs clang (HAVE_RUST depends on CC_IS_CLANG),
+# and the second K230D image carries Lemnos's Rust module. CONFIG_RUST and
+# CONFIG_MODULES are not set yet; they come with that module.
 [kernel]
 source = "linux"
 defconfig = "defconfig"
 fragments = ["assets/linux.fragment"]
+toolchain = "llvm"
 
 # The SDK's U-Boot 2022.10 overlay, trimmed to what the K230D configs build, as
 # one patch against upstream v2022.10. Generated, not hand-written: the command,
