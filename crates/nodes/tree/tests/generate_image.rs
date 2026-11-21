@@ -237,6 +237,7 @@ impl Fixture {
             FanIn::values(&[]),
             None,
             build.as_ref(),
+            None,
             &Ctx::new(),
         )
         .map_err(|e| e.to_string())?;
@@ -461,6 +462,7 @@ impl Fixture {
             FanIn::values(&[]),
             None,
             None,
+            None,
             &Ctx::new(),
         )
         .map_err(|e| e.to_string())?;
@@ -658,6 +660,7 @@ impl Fixture {
             FanIn::values(&[]),
             None,
             None,
+            None,
             &Ctx::new(),
         )
         .map_err(|e| e.to_string())?;
@@ -786,6 +789,7 @@ impl Fixture {
             FanIn::values(&[]),
             None,
             None,
+            None,
             &Ctx::new(),
         )
         .map_err(|e| e.to_string())?;
@@ -901,6 +905,7 @@ impl Fixture {
             None,
             FanIn::values(&tools),
             Some(&names.to_string()),
+            None,
             None,
             &Ctx::new(),
         )

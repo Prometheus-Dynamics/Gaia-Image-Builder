@@ -262,6 +262,18 @@ pub enum Medium {
     SpiNor,
 }
 
+impl Medium {
+    /// The medium as a board file writes it (`spi-nand`).
+    pub fn name(self) -> &'static str {
+        match self {
+            Self::Sd => "sd",
+            Self::Emmc => "emmc",
+            Self::SpiNand => "spi-nand",
+            Self::SpiNor => "spi-nor",
+        }
+    }
+}
+
 /// A whole number of 0 or more, read from a TOML integer.
 fn non_negative<'de, D: Deserializer<'de>>(deserializer: D) -> Result<Option<u64>, D::Error> {
     match Option::<i64>::deserialize(deserializer)? {

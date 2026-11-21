@@ -14,7 +14,8 @@
 //! - `@description@`: the board's description file;
 //! - `@out@`: the directory the tool writes into;
 //! - `@slot@`: the slot's id, where the image has one;
-//! - `@build@`: `clean`, or `dev-reuse` for `gaia build --dev-reuse`.
+//! - `@build@`: `clean`, or `dev-reuse` for `gaia build --dev-reuse`;
+//! - `@medium@`: the medium the board's image is written to.
 //!
 //! What the tool is to write is declared: each declared output must be
 //! there when the tool ends, and nothing else may be at the top of `@out@`.
@@ -55,7 +56,9 @@ const OUT: &str = "/out";
 /// slot's id (empty when the image has none: an argument that names
 /// `@slot@` is then an error). `root` is the image the tool was built in,
 /// the sandbox's root filesystem, and `bwrap` the bubblewrap program.
-/// `build` is how the build was made, for `@build@` (none: clean).
+/// `build` is how the build was made, for `@build@` (none: clean), and
+/// `medium` the board's medium, for `@medium@` (none: the board states
+/// none, and an argument that names it is an error).
 #[node(
     id = "gaia.generate",
     inputs(
@@ -70,7 +73,8 @@ const OUT: &str = "/out";
         args,
         outputs,
         slot,
-        build
+        build,
+        medium
     ),
     outputs(tree)
 )]
@@ -88,6 +92,7 @@ pub fn generate(
     outputs: &str,
     slot: &str,
     build: Option<&String>,
+    medium: Option<&String>,
     cx: &Ctx,
 ) -> Result<Tree, StepError> {
     let fail = |why: String| StepError::body(NAME, why);
@@ -150,6 +155,14 @@ pub fn generate(
     let uses_source = args.iter().any(|arg| arg.contains("@source@"));
     let build = gaia_types::build_mode(build.map(String::as_str)).map_err(fail)?;
     let uses_build = args.iter().any(|arg| arg.contains(gaia_types::BUILD_NAME));
+    let medium = medium.map(String::as_str).unwrap_or_default();
+    let uses_medium = args.iter().any(|arg| arg.contains(gaia_types::MEDIUM_NAME));
+    if uses_medium && medium.is_empty() {
+        return Err(fail(format!(
+            "an argument names {}, and the board states no medium",
+            gaia_types::MEDIUM_NAME
+        )));
+    }
 
     let sandbox = Sandbox::new(bwrap, store.path(&root_object))
         .input(store.path(&tool_object), TOOL)
@@ -180,6 +193,9 @@ pub fn generate(
     if uses_build {
         key = key.config("build", build);
     }
+    if uses_medium {
+        key = key.config("medium", medium);
+    }
     let program_in = format!("{TOOL}/{}", inside(program).map_err(fail)?);
     let described_in = format!("{DESCRIPTION}/{}", inside(description_name).map_err(fail)?);
     let made = Step::new(&store, cx, NAME, key.finish()).look_up_or_make(
@@ -196,6 +212,7 @@ pub fn generate(
                         .replace("@out@", OUT)
                         .replace("@slot@", slot)
                         .replace(gaia_types::BUILD_NAME, build)
+                        .replace(gaia_types::MEDIUM_NAME, medium)
                 })
                 .collect();
             let tool = sandbox

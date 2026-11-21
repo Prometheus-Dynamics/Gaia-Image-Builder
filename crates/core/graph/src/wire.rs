@@ -1147,6 +1147,18 @@ fn image_recipe(
                         ),
                     ));
                 };
+                let medium = board_medium(at.board);
+                if medium.is_empty() && runs.contains(gaia_types::MEDIUM_NAME) {
+                    return Err(Error::at(
+                        &generator.file,
+                        table,
+                        format!(
+                            "a run names {}, and the board {} states no `[flash] medium`",
+                            gaia_types::MEDIUM_NAME,
+                            at.board.name
+                        ),
+                    ));
+                }
                 for p in ports {
                     let stage = stages[&p.stage];
                     for (port, from) in [
@@ -1169,6 +1181,9 @@ fn image_recipe(
                     }
                     if let Some(from) = generator.keys.get(table) {
                         g.edge(*from, (stage, "keys"));
+                    }
+                    if !medium.is_empty() {
+                        g.set(stage, "medium", Lit::Str(medium.to_string()));
                     }
                     if let Some(tools) = generator.tools.get(table) {
                         let names: Vec<&str> = tools.iter().map(|(n, _)| n.as_str()).collect();
@@ -2388,6 +2403,17 @@ enum PlaceFrom {
 /// The step that runs a component's `[generate]` tool for the image: the
 /// tool, built for the build machine from the component's source, and the
 /// board's description it reads.
+/// The board's `[flash] medium` as its file writes it, or empty: the value
+/// of a generator run's `@medium@`.
+fn board_medium(board: &gaia_describe::Board) -> &'static str {
+    board
+        .flash
+        .as_ref()
+        .and_then(|flash| flash.medium)
+        .map(gaia_describe::Medium::name)
+        .unwrap_or_default()
+}
+
 fn generate_node(g: &mut Graph<'_>, at: &OsIn<'_>, component: &Component) -> Result<u32, Error> {
     let file = &component.file;
     let image = &at.image.name;
@@ -2485,6 +2511,23 @@ fn generate_node(g: &mut Graph<'_>, at: &OsIn<'_>, component: &Component) -> Res
             ),
         ));
     }
+    let medium = board_medium(at.board);
+    if medium.is_empty()
+        && generate
+            .args
+            .iter()
+            .any(|arg| arg.contains(gaia_types::MEDIUM_NAME))
+    {
+        return Err(Error::at(
+            file,
+            "generate.args",
+            format!(
+                "an argument names {}, and the board {} states no `[flash] medium`",
+                gaia_types::MEDIUM_NAME,
+                at.board.name
+            ),
+        ));
+    }
     let node = g.add(
         "gaia.generate",
         format!("{image}.{}.generate", component.name),
@@ -2505,6 +2548,9 @@ fn generate_node(g: &mut Graph<'_>, at: &OsIn<'_>, component: &Component) -> Res
     g.set(node, "args", json(&generate.args));
     g.set(node, "outputs", json(&generate.outputs));
     g.set(node, "slot", Lit::Str(slot.to_string()));
+    if !medium.is_empty() {
+        g.set(node, "medium", Lit::Str(medium.to_string()));
+    }
     // The image the tool was built in is the root it runs in: the
     // component's `root` source, the one its builds take.
     let root = component.sources.get("root").ok_or_else(|| {

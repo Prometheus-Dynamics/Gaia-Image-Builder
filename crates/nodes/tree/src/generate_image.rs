@@ -168,7 +168,8 @@ pub struct Runs {
         firmware,
         tools,
         tool_names,
-        build
+        build,
+        medium
     ),
     outputs(image, report, payload)
 )]
@@ -201,6 +202,7 @@ pub fn generate_image(
     tools: FanIn<'_, Tree>,
     tool_names: Option<&String>,
     build: Option<&String>,
+    medium: Option<&String>,
     cx: &Ctx,
 ) -> Result<(Artifact, Artifact, Tree), StepError> {
     let (image, report, payload) = make(
@@ -234,6 +236,7 @@ pub fn generate_image(
             tools: tools.iter().map(|t| (*t).clone()).collect(),
             tool_names: tool_names.map(String::as_str).unwrap_or_default(),
             build: build.map(String::as_str),
+            medium: medium.map(String::as_str),
         },
         cx,
     )?;
@@ -284,7 +287,8 @@ pub fn generate_image(
         firmware,
         tools,
         tool_names,
-        build
+        build,
+        medium
     ),
     outputs(tree, report, payload)
 )]
@@ -317,6 +321,7 @@ pub fn generate_tree(
     tools: FanIn<'_, Tree>,
     tool_names: Option<&String>,
     build: Option<&String>,
+    medium: Option<&String>,
     cx: &Ctx,
 ) -> Result<(Tree, Artifact, Tree), StepError> {
     let (tree, report, payload) = make(
@@ -350,6 +355,7 @@ pub fn generate_tree(
             tools: tools.iter().map(|t| (*t).clone()).collect(),
             tool_names: tool_names.map(String::as_str).unwrap_or_default(),
             build: build.map(String::as_str),
+            medium: medium.map(String::as_str),
         },
         cx,
     )?;
@@ -381,6 +387,8 @@ struct More<'a> {
     tool_names: &'a str,
     /// How the build was made, for `@build@` (none: clean).
     build: Option<&'a str>,
+    /// The board's medium, for `@medium@` (none: the board states none).
+    medium: Option<&'a str>,
 }
 
 /// What a run writes at `@out@`.
@@ -605,6 +613,14 @@ fn make(
         }
     }
     let build = gaia_types::build_mode(more.build).map_err(fail)?;
+    let medium = more.medium.unwrap_or_default();
+    let uses_medium = every_run().any(|arg| arg.contains(gaia_types::MEDIUM_NAME));
+    if uses_medium && medium.is_empty() {
+        return Err(fail(format!(
+            "a run names {}, and the board states no medium",
+            gaia_types::MEDIUM_NAME
+        )));
+    }
     let data_size = more.data_size.unwrap_or(0);
     if data_size < 0 {
         return Err(fail(format!("data size {data_size}: not a size")));
@@ -777,6 +793,9 @@ fn make(
     if all().any(|arg| arg.contains(gaia_types::BUILD_NAME)) {
         key = key.config("build", build);
     }
+    if uses_medium {
+        key = key.config("medium", medium);
+    }
     if let Some(object) = &firmware_object {
         key = key.input("firmware", object.digest);
     }
@@ -857,6 +876,7 @@ fn make(
                             .replace("@data-size@", &data_size.to_string())
                             .replace("@firmware@", FIRMWARE)
                             .replace(gaia_types::BUILD_NAME, build)
+                            .replace(gaia_types::MEDIUM_NAME, medium)
                     })
                     .collect()
             };

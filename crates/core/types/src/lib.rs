@@ -100,8 +100,16 @@ pub const KEYS: [&str; 30] = [
 
 /// The names a `[generate]` tool's argument may hold: its source tree, the
 /// board's description file, the directory it writes into, the slot's id,
-/// and how the build was made ([`BUILD_NAME`]).
-pub const GENERATE_NAMES: [&str; 5] = ["@source@", "@description@", "@out@", "@slot@", BUILD_NAME];
+/// how the build was made ([`BUILD_NAME`]) and the medium the board's image
+/// is written to ([`MEDIUM_NAME`]).
+pub const GENERATE_NAMES: [&str; 6] = [
+    "@source@",
+    "@description@",
+    "@out@",
+    "@slot@",
+    BUILD_NAME,
+    MEDIUM_NAME,
+];
 
 /// The name, in any generator run's arguments, of how the build was made:
 /// [`BUILD_CLEAN`], or [`BUILD_DEV_REUSE`] for `gaia build --dev-reuse`
@@ -109,6 +117,13 @@ pub const GENERATE_NAMES: [&str; 5] = ["@source@", "@description@", "@out@", "@s
 /// lets the board tell a dev build's output from a clean one's. A step is
 /// keyed on it only when one of its arguments names it.
 pub const BUILD_NAME: &str = "@build@";
+/// The name, in any generator run's arguments, of the medium the board's
+/// image is written to: its `[flash] medium` as the board file writes it
+/// (`sd`, `emmc`, `spi-nand`, `spi-nor`). An argument that names it on a
+/// board that states none is refused. A step is keyed on it only when one
+/// of its arguments names it.
+pub const MEDIUM_NAME: &str = "@medium@";
+
 /// [`BUILD_NAME`] in a clean build.
 pub const BUILD_CLEAN: &str = "clean";
 /// [`BUILD_NAME`] in a `gaia build --dev-reuse` build.
@@ -133,12 +148,13 @@ pub fn build_mode(given: Option<&str>) -> Result<&'static str, String> {
 /// verity table, a signing key file, and the product's name and version;
 /// a directory the tool writes the payload into as it bundled it; what
 /// identifies the signing key; the file of its public half; the slot's
-/// bundle; and how the build was made ([`BUILD_NAME`]).
+/// bundle; how the build was made ([`BUILD_NAME`]); and the board's medium
+/// ([`MEDIUM_NAME`]).
 /// The name a component's keys file has in the tree a generator run is
 /// given it in: `@keys@` is that file.
 pub const GENERATE_KEYS_NAME: &str = "keys";
 
-pub const GENERATE_IMAGE_NAMES: [&str; 21] = [
+pub const GENERATE_IMAGE_NAMES: [&str; 22] = [
     "@source@",
     "@description@",
     "@payload@",
@@ -160,6 +176,7 @@ pub const GENERATE_IMAGE_NAMES: [&str; 21] = [
     "@data-size@",
     "@firmware@",
     BUILD_NAME,
+    MEDIUM_NAME,
 ];
 
 /// The `@name@` words of `text` that are none of [`GENERATE_NAMES`].

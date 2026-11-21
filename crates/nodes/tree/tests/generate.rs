@@ -123,6 +123,11 @@ impl Fixture {
         self.run_built(name, source_extra, args, slot, None)
     }
 
+    /// As `run`, on a board written to `medium` (none: the board states none).
+    fn run_on(&self, name: &str, args: &str, medium: Option<&str>) -> Result<PathBuf, String> {
+        self.run_full(name, "one", args, "", None, medium)
+    }
+
     /// As `run`, in a build made as `build` says (none: clean).
     fn run_built(
         &self,
@@ -131,6 +136,18 @@ impl Fixture {
         args: &str,
         slot: &str,
         build: Option<&str>,
+    ) -> Result<PathBuf, String> {
+        self.run_full(name, source_extra, args, slot, build, None)
+    }
+
+    fn run_full(
+        &self,
+        name: &str,
+        source_extra: &str,
+        args: &str,
+        slot: &str,
+        build: Option<&str>,
+        medium: Option<&str>,
     ) -> Result<PathBuf, String> {
         let tool = self.tree("tool", &[("bin/gen", TOOL, 0o755)]);
         let source = self.tree(
@@ -154,6 +171,7 @@ impl Fixture {
             r#"["board.dts", "boot"]"#,
             slot,
             build.map(str::to_string).as_ref(),
+            medium.map(str::to_string).as_ref(),
             &Ctx::new(),
         )
         .map_err(|e| e.to_string())?;
@@ -250,6 +268,34 @@ fn the_build_is_given_by_name_and_keyed_only_when_named() {
         .expect_err("not a mode");
     assert!(
         why.contains("build \"fast\": the build is clean or dev-reuse"),
+        "{why}"
+    );
+}
+
+/// `@medium@` is the board's medium. The step is keyed on it only when an
+/// argument names it, and an argument that names it on a board that states
+/// none is refused.
+#[test]
+fn the_medium_is_given_by_name_and_keyed_only_when_named() {
+    if !available() {
+        return;
+    }
+    let f = Fixture::new();
+    let named = r#"["@source@/socs", "@description@", "@out@", "@medium@"]"#;
+    let config = |out: PathBuf| std::fs::read_to_string(out.join("boot/config.txt")).expect("read");
+    let sd = f.run_on("a", named, Some("sd")).expect("sd");
+    assert_eq!(config(sd), "slot=sd\n");
+    let nand = f.run_on("a", named, Some("spi-nand")).expect("nand");
+    assert_eq!(config(nand), "slot=spi-nand\n");
+    assert_eq!(f.made(), 2, "another medium, told, is another step");
+    let not_named = r#"["@source@/socs", "@description@", "@out@", "x"]"#;
+    f.run_on("a", not_named, Some("sd")).expect("sd");
+    let before = f.made();
+    f.run_on("a", not_named, Some("emmc")).expect("emmc");
+    assert_eq!(f.made(), before, "not told, the same step");
+    let why = f.run_on("a", named, None).expect_err("no medium");
+    assert!(
+        why.contains("names @medium@, and the board states no medium"),
         "{why}"
     );
 }

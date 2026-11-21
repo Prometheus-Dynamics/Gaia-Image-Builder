@@ -829,6 +829,12 @@ fn a_component_generates_from_the_boards_description() {
             "generate.outputs[0]",
             "is not a name at the top of the output directory",
         ),
+        (
+            "\"@out@/board.dts\"",
+            "\"@out@/@medium@.dts\"",
+            "generate.args",
+            "names @medium@, and the board zero-3e states no `[flash] medium`",
+        ),
     ];
     for (from, to, key, message) in cases {
         std::fs::write(
@@ -1041,7 +1047,7 @@ sets = ["bundle.key_id"]
 "#,
     )
     .expect("recipe");
-    let block = "[generate]\ntool = { source = \"src\", package = \"hello-rust\" }\ndescription = \"daemon\"\nargs = [\"tree\", \"@description@\", \"@out@\"]\noutputs = [\"overlay.dts\"]\n\n[generate.bundle]\nargs = [\"bundle\", \"--slot\", \"@slot@\", \"--payload\", \"@payload@\", \"--rootfs\", \"@rootfs@\", \"--verity-table\", \"@verity-table@\", \"--product\", \"@product@\", \"--version\", \"@version@\", \"--out\", \"@out@\"]\nkey_args = [\"--key-file\", \"@key@\"]\nverify = [\"bundle\", \"--verify\", \"@out@\"]\n\n[generate.data]\nargs = [\"data-partition\", \"--install\", \"@bundle@\", \"--out\", \"@out@\"]\nverify = [\"data-partition\", \"--verify\", \"@out@\"]\n";
+    let block = "[generate]\ntool = { source = \"src\", package = \"hello-rust\" }\ndescription = \"daemon\"\nargs = [\"tree\", \"@description@\", \"@out@\"]\noutputs = [\"overlay.dts\"]\n\n[generate.bundle]\nargs = [\"bundle\", \"--slot\", \"@slot@\", \"--payload\", \"@payload@\", \"--rootfs\", \"@rootfs@\", \"--verity-table\", \"@verity-table@\", \"--product\", \"@product@\", \"--version\", \"@version@\", \"--medium\", \"@medium@\", \"--out\", \"@out@\"]\nkey_args = [\"--key-file\", \"@key@\"]\nverify = [\"bundle\", \"--verify\", \"@out@\"]\n\n[generate.data]\nargs = [\"data-partition\", \"--install\", \"@bundle@\", \"--out\", \"@out@\"]\nverify = [\"data-partition\", \"--verify\", \"@out@\"]\n";
     let original = std::fs::read_to_string(&component).expect("read");
     std::fs::write(&component, format!("{original}\n{block}")).expect("write");
     let text = std::fs::read_to_string(&board).expect("read");
@@ -1050,6 +1056,12 @@ sets = ["bundle.key_id"]
         format!("{text}\n[descriptions]\ndaemon = \"daemon-board.toml\"\n"),
     )
     .expect("write");
+    // The bundle's run names @medium@: the board says what it is written to.
+    edit(
+        &board,
+        "[flash.files]",
+        "[flash]\nmedium = \"emmc\"\n\n[flash.files]",
+    );
     std::fs::write(board_dir.join("daemon-board.toml"), "id = \"zero-3e\"\n").expect("write");
     edit(
         &product,
@@ -1094,6 +1106,7 @@ sets = ["bundle.key_id"]
         .find(|n| n["label"] == "zero-3e-demo::bundle")
         .expect("the bundle stage")["consts"];
     assert_eq!(bundle["slot"]["value"], "base");
+    assert_eq!(bundle["medium"]["value"], "emmc");
     assert_eq!(bundle["product"]["value"], "demo");
     assert_eq!(bundle["version"]["value"], "1.2.3");
     // The variable's name and the key's identity: never a key.
