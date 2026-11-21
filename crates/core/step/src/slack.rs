@@ -25,17 +25,27 @@
 //! job count are compared. [`decide`] says whether a step yields the shared
 //! job pool to the others in this run:
 //!
-//! - With no run of it that yielded, it tries yielding when the last run
-//!   that made it recorded a slack of more than [`FIRST_TRY`] of its own
-//!   time.
-//! - With a run that yielded and none that did not, there is nothing to
-//!   compare against, and it keeps yielding until there is.
-//! - With both, it compares the last yielded join with the last unyielded
-//!   one: it yields when the yielded join was earlier by more than
-//!   [`HYSTERESIS`] of the unyielded one, and stops when it was later by
-//!   more. A near-tie keeps what the latest of the two runs did, as does a
+//! It learns only from runs that tell about it alone: an unyielded record
+//! from a *clean* run, one in which no step yielded, and a yielded record
+//! from a run in which it alone yielded. A run where another step yielded
+//! hands the steps beside it a slack, and a join, that yielding made.
+//!
+//! - With no run in which it yielded alone, it tries yielding when the last
+//!   clean run recorded a slack of more than [`FIRST_TRY`] of its own time.
+//! - With such a run, it compares that run's join with the last clean
+//!   run's: it yields when the yielded join was earlier by more than
+//!   [`HYSTERESIS`] of the clean one, and stops when it was later by more.
+//!   A near-tie keeps what the latest of the two runs did, as does a
 //!   comparison of runs whose loads at their starts are more than
 //!   [`LOAD_APART`] times apart.
+//! - With no clean run that something took from, it does not yield, and
+//!   says so.
+//!
+//! Among the steps that meet at one join, at most one yields in a run: the
+//! one with the most slack in the last clean run, of those that would yield
+//! on their own records. The others are passed over, and the decision of
+//! each names the other. So two steps cannot take turns handing each other
+//! slack.
 //!
 //! Never with no history, when two steps of one run share the shape, when
 //! no recorded step took from it, or when [`OFF`] is set.
@@ -95,8 +105,26 @@ pub enum Why {
     /// It never yielded: its slack and its time in the last run that made
     /// it. It yields when the slack was more than [`FIRST_TRY`] of the time.
     FirstTry { slack_ns: i128, time_ns: i128 },
-    /// It yielded, with this join, and no run made it without yielding.
+    /// It yielded alone, with this join, and no clean run that something
+    /// took from it is there to compare against: it does not yield.
     Uncompared { join_ns: i128 },
+    /// No clean run (one in which no step yielded) made it.
+    NoCleanRun,
+    /// It would yield on its own records, and so would `to`, which meets
+    /// it at the same join and had more slack in the last clean run.
+    PassedOver {
+        to: String,
+        theirs_ns: i128,
+        mine_ns: i128,
+    },
+    /// It yields as `why` says, and has the most slack in the last clean
+    /// run of the steps that meet it at the same join and would yield too:
+    /// those, with their slack, are passed over.
+    Chosen {
+        why: Box<Why>,
+        mine_ns: i128,
+        passed: Vec<(String, i128)>,
+    },
     /// The last yielded and unyielded joins, and what held the state when
     /// they did not decide it.
     Joins {
@@ -159,10 +187,47 @@ impl fmt::Display for Decision {
             ),
             Why::Uncompared { join_ns } => write!(
                 f,
-                "last join {} yielded, and no unyielded run of its shape and job count to compare \
-                 against: it keeps yielding until there is one",
+                "last join {} yielded alone, and no run without yielding of its shape and job \
+                 count to compare against: it does not yield",
                 secs(*join_ns)
             ),
+            Why::NoCleanRun => write!(
+                f,
+                "no run without yielding of its shape and job count to learn from: it does not \
+                 yield"
+            ),
+            Why::PassedOver {
+                to,
+                theirs_ns,
+                mine_ns,
+            } => write!(
+                f,
+                "passed over for {to}, which meets it at the same join and had more slack in the \
+                 last run without yielding ({} against {})",
+                secs(*theirs_ns),
+                secs(*mine_ns)
+            ),
+            Why::Chosen {
+                why,
+                mine_ns,
+                passed,
+            } => {
+                let inner = Decision {
+                    yields: self.yields,
+                    why: (**why).clone(),
+                };
+                let passed: Vec<String> = passed
+                    .iter()
+                    .map(|(name, slack)| format!("{name} ({})", secs(*slack)))
+                    .collect();
+                write!(
+                    f,
+                    "{inner}; the most slack at its join in the last run without yielding ({}), \
+                     passing over {}",
+                    secs(*mine_ns),
+                    passed.join(", ")
+                )
+            }
             Why::Joins {
                 yielded_ns,
                 unyielded_ns,
@@ -285,25 +350,58 @@ pub fn join(records: &[StepRecord], run: &[usize], at: usize) -> Option<i128> {
         .map(|first| first - start as i128)
 }
 
-/// Whether the step of shape `shape`, given `jobs` jobs, yields this run,
-/// from `records` (the step records, oldest first).
-pub fn decide(records: &[StepRecord], shape: Option<&str>, jobs: Option<u32>) -> Decision {
-    let stay = |why| Decision { yields: false, why };
-    let Some(shape) = shape else {
-        return stay(Why::NoShape);
-    };
-    let of_shape = |record: &StepRecord| record.report.shape.as_deref() == Some(shape);
-    // The records of each run: those of its process.
+/// The name a record is shown by: a detail's `label`, else its step's.
+fn name_of(record: &StepRecord) -> String {
+    record
+        .report
+        .details
+        .values()
+        .find_map(|detail| detail.get("label").and_then(|label| label.as_str()))
+        .unwrap_or(&record.step)
+        .to_string()
+}
+
+/// The records of each run: those of its process.
+fn runs_of(records: &[StepRecord]) -> BTreeMap<u32, Vec<usize>> {
     let mut runs: BTreeMap<u32, Vec<usize>> = BTreeMap::new();
     for (index, record) in records.iter().enumerate() {
         runs.entry(record.pid).or_default().push(index);
     }
-    let run_of = |at: usize| &runs[&records[at].pid];
+    runs
+}
 
-    // The latest usable record, and the latest yielded and unyielded ones
+/// Whether the step of shape `shape`, given `jobs` jobs, yields this run,
+/// from `records` (the step records, oldest first).
+pub fn decide(records: &[StepRecord], shape: Option<&str>, jobs: Option<u32>) -> Decision {
+    let Some(shape) = shape else {
+        return Decision {
+            yields: false,
+            why: Why::NoShape,
+        };
+    };
+    let runs = runs_of(records);
+    let (decision, clean) = alone(records, &runs, shape, jobs);
+    match clean {
+        Some(clean) if decision.yields => guard(records, &runs, shape, jobs, decision, clean),
+        _ => decision,
+    }
+}
+
+/// The decision on the step's own records, and the index of its record in
+/// the last clean run that something took from it in.
+fn alone(
+    records: &[StepRecord],
+    runs: &BTreeMap<u32, Vec<usize>>,
+    shape: &str,
+    jobs: Option<u32>,
+) -> (Decision, Option<usize>) {
+    let stay = |why| Decision { yields: false, why };
+    let of_shape = |record: &StepRecord| record.report.shape.as_deref() == Some(shape);
+    let run_of = |at: usize| &runs[&records[at].pid];
+    // The latest clean record, and the latest yielded-alone and clean ones
     // that something took from, with their joins.
-    let mut shared = false;
-    let mut last = None;
+    let (mut seen, mut shared) = (false, false);
+    let mut clean = None;
     let mut yielded: Option<(usize, i128)> = None;
     let mut unyielded: Option<(usize, i128)> = None;
     for at in (0..records.len()).rev() {
@@ -321,10 +419,17 @@ pub fn decide(records: &[StepRecord], shape: Option<&str>, jobs: Option<u32>) ->
             shared = true;
             continue;
         }
-        last.get_or_insert(at);
+        seen = true;
+        let others_yielded = run
+            .iter()
+            .any(|&index| index != at && records[index].report.yielded);
+        if others_yielded {
+            continue;
+        }
         let found = if record.report.yielded {
             &mut yielded
         } else {
+            clean.get_or_insert(at);
             &mut unyielded
         };
         if found.is_none()
@@ -336,24 +441,27 @@ pub fn decide(records: &[StepRecord], shape: Option<&str>, jobs: Option<u32>) ->
             break;
         }
     }
-    let Some(last) = last else {
-        return stay(if shared { Why::Shared } else { Why::NoHistory });
+    if !seen {
+        return (
+            stay(if shared { Why::Shared } else { Why::NoHistory }),
+            None,
+        );
+    }
+    let Some(clean) = clean else {
+        return (stay(Why::NoCleanRun), None);
     };
-    match (yielded, unyielded) {
+    let decision = match (yielded, unyielded) {
         (None, _) => {
-            let Some(slack_ns) = slacks(records, run_of(last))[&last] else {
-                return stay(Why::NoConsumer);
+            let Some(slack_ns) = slacks(records, run_of(clean))[&clean] else {
+                return (stay(Why::NoConsumer), None);
             };
-            let time_ns = time(&records[last]);
+            let time_ns = time(&records[clean]);
             Decision {
                 yields: slack_ns as f64 > FIRST_TRY * time_ns as f64,
                 why: Why::FirstTry { slack_ns, time_ns },
             }
         }
-        (Some((_, join_ns)), None) => Decision {
-            yields: true,
-            why: Why::Uncompared { join_ns },
-        },
+        (Some((_, join_ns)), None) => stay(Why::Uncompared { join_ns }),
         (Some((y, yielded_ns)), Some((u, unyielded_ns))) => {
             let joins = |yields, held| Decision {
                 yields,
@@ -369,15 +477,14 @@ pub fn decide(records: &[StepRecord], shape: Option<&str>, jobs: Option<u32>) ->
             if let (Some(a), Some(b)) = (load(y), load(u))
                 && (a > LOAD_APART * b || b > LOAD_APART * a)
             {
-                return joins(
+                joins(
                     now,
                     Some(Held::Load {
                         yielded: a,
                         unyielded: b,
                     }),
-                );
-            }
-            if yielded_ns as f64 > (1.0 + HYSTERESIS) * unyielded_ns as f64 {
+                )
+            } else if yielded_ns as f64 > (1.0 + HYSTERESIS) * unyielded_ns as f64 {
                 joins(false, None)
             } else if (1.0 + HYSTERESIS) * (yielded_ns as f64) < unyielded_ns as f64 {
                 joins(true, None)
@@ -385,6 +492,88 @@ pub fn decide(records: &[StepRecord], shape: Option<&str>, jobs: Option<u32>) ->
                 joins(now, Some(Held::NearTie))
             }
         }
+    };
+    (decision, Some(clean))
+}
+
+/// At most one yielding step per join: of the steps that ran beside the
+/// step's record `clean` (in its last clean run) and meet it at its join,
+/// those that would yield on their own records compete with it, and the one
+/// with the most slack in that run yields (ties: by shape).
+fn guard(
+    records: &[StepRecord],
+    runs: &BTreeMap<u32, Vec<usize>>,
+    shape: &str,
+    jobs: Option<u32>,
+    decision: Decision,
+    clean: usize,
+) -> Decision {
+    let run = &runs[&records[clean].pid];
+    let consumers = consumers(records, run);
+    let mine = downstream(&consumers, clean);
+    let (start, end) = (records[clean].start_ns, records[clean].end_ns);
+    let beside: Vec<usize> = run
+        .iter()
+        .copied()
+        .filter(|&index| {
+            index != clean && records[index].start_ns < end && start < records[index].end_ns
+        })
+        .collect();
+    // The join: the first step downstream of it and of a step beside it.
+    let Some(join_at) = beside
+        .iter()
+        .flat_map(|&index| downstream(&consumers, index))
+        .filter(|index| mine.contains(index))
+        .min_by_key(|&index| (records[index].start_ns, index))
+    else {
+        return decision;
+    };
+    let slack = slacks(records, run);
+    let slack_of = |index: usize| slack[&index].unwrap_or(0);
+    let mine_ns = slack_of(clean);
+    let mut rivals: Vec<(i128, String, String)> = Vec::new();
+    for &index in &beside {
+        let Some(theirs) = records[index].report.shape.as_deref() else {
+            continue;
+        };
+        if !downstream(&consumers, index).contains(&join_at) {
+            continue;
+        }
+        if alone(records, runs, theirs, jobs).0.yields {
+            rivals.push((
+                slack_of(index),
+                theirs.to_string(),
+                name_of(&records[index]),
+            ));
+        }
+    }
+    if rivals.is_empty() {
+        return decision;
+    }
+    match rivals
+        .iter()
+        .filter(|(theirs_ns, theirs, _)| (*theirs_ns, theirs.as_str()) > (mine_ns, shape))
+        .max()
+    {
+        Some((theirs_ns, _, to)) => Decision {
+            yields: false,
+            why: Why::PassedOver {
+                to: to.clone(),
+                theirs_ns: *theirs_ns,
+                mine_ns,
+            },
+        },
+        None => Decision {
+            yields: true,
+            why: Why::Chosen {
+                why: Box::new(decision.why),
+                mine_ns,
+                passed: rivals
+                    .into_iter()
+                    .map(|(theirs_ns, _, name)| (name, theirs_ns))
+                    .collect(),
+            },
+        },
     }
 }
 
@@ -586,10 +775,10 @@ mod tests {
         );
     }
 
-    /// With a yielded run and none without, there is nothing to compare
-    /// against: it keeps yielding, and says so.
+    /// With a yielded run and no clean run at its job count, there is
+    /// nothing to learn from: it does not yield, and says so.
     #[test]
-    fn a_yielded_join_with_nothing_to_compare_keeps_yielding() {
+    fn with_no_clean_run_it_stays_put_and_says_so() {
         let mut records = yielded_run(1, 900);
         // An unyielded run at another job count is not comparable.
         let mut other = the_run(2);
@@ -601,16 +790,13 @@ mod tests {
         assert_eq!(
             decision,
             Decision {
-                yields: true,
-                why: Why::Uncompared {
-                    join_ns: 900 * S as i128
-                }
+                yields: false,
+                why: Why::NoCleanRun
             }
         );
         assert_eq!(
             decision.to_string(),
-            "last join 900 s yielded, and no unyielded run of its shape and job count to compare \
-             against: it keeps yielding until there is one"
+            "no run without yielding of its shape and job count to learn from: it does not yield"
         );
     }
 
@@ -702,6 +888,115 @@ mod tests {
             Decision {
                 yields: false,
                 why: Why::Shared
+            }
+        );
+    }
+
+    /// Named as the timing lines name it.
+    fn labelled(mut record: StepRecord, label: &str) -> StepRecord {
+        record
+            .report
+            .details
+            .insert("pool".into(), serde_json::json!({ "label": label }));
+        record
+    }
+
+    /// A planted history: a run in which the root filesystem yielded and
+    /// handed the kernel no slack. The kernel learns from the clean run
+    /// only, and its first try stands.
+    #[test]
+    fn a_run_where_another_step_yielded_teaches_nothing() {
+        let mut records = the_run(1);
+        let mut other = vec![
+            step(2, "host", 0, 100, &[]),
+            step(2, "kernel", 100, 1400, &["host"]),
+            step(2, "rootfs", 100, 900, &["host"]),
+            step(2, "image", 1400, 1420, &["kernel", "rootfs"]),
+        ];
+        other[2].report.yielded = true;
+        records.extend(other);
+        assert_eq!(
+            kernel(&records),
+            Decision {
+                yields: true,
+                why: Why::FirstTry {
+                    slack_ns: 245 * S as i128,
+                    time_ns: 763 * S as i128
+                }
+            }
+        );
+    }
+
+    /// A planted history: a run in which both steps yielded, at an early
+    /// join. That join is not the kernel's alone, and it first-tries from
+    /// the clean run instead of comparing.
+    #[test]
+    fn a_yielded_join_counts_only_from_a_run_where_it_yielded_alone() {
+        let mut records = the_run(1);
+        let mut both = yielded_run(2, 300);
+        both[2].report.yielded = true;
+        records.extend(both);
+        assert_eq!(
+            kernel(&records).why,
+            Why::FirstTry {
+                slack_ns: 245 * S as i128,
+                time_ns: 763 * S as i128
+            }
+        );
+    }
+
+    /// A planted history in which each of two steps that meet at the image
+    /// had slack over the other: the kernel in the first clean run, and its
+    /// yielding paid; the root filesystem in the last clean run, where the
+    /// kernel ran slow. Both would yield on their own records; only the
+    /// root filesystem, with the most slack in the last clean run, does,
+    /// and each decision names the other.
+    #[test]
+    fn of_two_steps_meeting_at_one_join_only_one_yields() {
+        let mut records = the_run(1);
+        records.extend(yielded_run(2, 800));
+        records.extend(vec![
+            step(3, "host", 0, 100, &[]),
+            labelled(step(3, "kernel", 100, 1108, &["host"]), "kernel"),
+            labelled(step(3, "rootfs", 100, 600, &["host"]), "root filesystem"),
+            step(3, "image", 1108, 1130, &["kernel", "rootfs"]),
+        ]);
+        let rootfs = decide(&records, Some(&shape("rootfs")), JOBS);
+        let kernel = kernel(&records);
+        assert_eq!(
+            (rootfs.yields(), kernel.yields()),
+            (true, false),
+            "{rootfs} / {kernel}"
+        );
+        assert_eq!(
+            kernel.to_string(),
+            "passed over for root filesystem, which meets it at the same join and had more \
+             slack in the last run without yielding (508 s against 0 s)"
+        );
+        assert_eq!(
+            rootfs.to_string(),
+            "first try: slack 508 s over 500 s last run, more than 10%; the most slack at its \
+             join in the last run without yielding (508 s), passing over kernel (0 s)"
+        );
+    }
+
+    /// A step beside the kernel with more slack, which meets it at no join
+    /// (the manual is taken by nothing the kernel feeds), does not compete:
+    /// the kernel yields as it would alone.
+    #[test]
+    fn a_step_beside_it_that_meets_it_nowhere_does_not_compete() {
+        let mut records = the_run(1);
+        records.push(step(1, "docs", 100, 300, &["host"]));
+        records.push(step(1, "manual", 900, 910, &["docs"]));
+        assert!(decide(&records, Some(&shape("docs")), JOBS).yields());
+        assert_eq!(
+            kernel(&records),
+            Decision {
+                yields: true,
+                why: Why::FirstTry {
+                    slack_ns: 245 * S as i128,
+                    time_ns: 763 * S as i128
+                }
             }
         );
     }

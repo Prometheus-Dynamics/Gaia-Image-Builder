@@ -143,6 +143,29 @@ fifo of its own, at Gaia's own niceness plus a step (`jobs::NICE_STEP`, about
 5 : 1 measured). The builds on the path keep the main fifo whole. Scheduling
 only: no output or key changes, and `GAIA_NO_YIELD=1` turns it off.
 
+A step learns only from runs that tell about it alone: its slack and its
+unyielded join from runs in which nothing yielded, its yielded join from runs
+in which it alone yielded. Of the steps that meet at one join, at most one
+yields in a run (the one with the most slack in the last clean run), and the
+others say whom they were passed over for.
+
+Measured: cold builds of one image at 26 jobs on a 32-processor box under
+other work (load 55 to 80), the join being the end of the later of the kernel
+and the root filesystem, from their common start. Outputs identical in every
+pair.
+
+| pair | yield | interleaved | join off | join on | change |
+|---|---|---|---|---|---|
+| 1 | nice 19 | yes | 648 s | 432 s | 216 s earlier |
+| 2 | nice 19 | no | 668 s | 846 s | 178 s later |
+| 3 | nice 19 | no | 668 s | 768 s | 100 s later (first try learned from a run where another step yielded) |
+| 4 | +7 | yes | 540 s | 477 s | 63 s earlier |
+| 5 | +7 | yes | 707 s | 410 s | 297 s earlier |
+
+Every interleaved pair moved the join earlier; both later ones ran at nice 19
+against an earlier run's history, one of them from the contaminated history
+the clean-run rule now refuses.
+
 Niceness orders work inside one cgroup. Under systemd each unit has the cpu
 controller, so other units see Gaia's unit as a whole whatever niceness its
 processes have, and the step only orders Gaia's own builds. Run from a
