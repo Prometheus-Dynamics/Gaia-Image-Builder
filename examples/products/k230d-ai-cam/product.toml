@@ -9,7 +9,7 @@ name = "k230d-ai-cam"
 
 [sources.buildroot]
 git = "https://gitlab.com/buildroot.org/buildroot.git"
-ref = "2026.02.3"
+ref = "2026.08"
 
 [components]
 usb-gadget-network = "../../components/usb-gadget-network/component.toml"
