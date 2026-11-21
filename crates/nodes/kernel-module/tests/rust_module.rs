@@ -37,6 +37,33 @@ impl kernel::Module for GaiaHello {
 }
 "#;
 
+/// A C module that compiles a kernel header's `WARN_ON` (rwsem.h's, under
+/// `CONFIG_DEBUG_BUGVERBOSE` its file name is kept for the warning) and its
+/// own `__FILE__`: the paths a module carries of where it was compiled.
+const WHERE_C: &str = r#"// SPDX-License-Identifier: GPL-2.0
+#include <linux/module.h>
+#include <linux/rwsem.h>
+
+static DECLARE_RWSEM(gaia_sem);
+
+static int __init gaia_where_init(void)
+{
+	down_read(&gaia_sem);
+	rwsem_assert_held(&gaia_sem);
+	up_read(&gaia_sem);
+	pr_info("gaia where: %s\n", __FILE__);
+	return 0;
+}
+
+static void __exit gaia_where_exit(void)
+{
+}
+
+module_init(gaia_where_init);
+module_exit(gaia_where_exit);
+MODULE_LICENSE("GPL");
+"#;
+
 /// The kernel step's outputs a module build takes, as store paths.
 struct KernelOutputs {
     kernel_build: PathBuf,
@@ -193,7 +220,11 @@ fn a_rust_module_builds_against_an_llvm_kernel_and_gcc_is_refused() {
     // The make that built it named every Rust tool, the toolchain's, and
     // none from a user's PATH.
     let make_line = newest_make_line(&logs_dir(&store));
-    let toolchain = kernel.toolchain.display().to_string();
+    let toolchain = if host().bwrap.is_empty() {
+        kernel.toolchain.display().to_string()
+    } else {
+        format!("{}/toolchain", gaia_kernel_module::FIXED)
+    };
     for word in [
         format!("BINDGEN={toolchain}/bin/bindgen"),
         format!("RUSTC={toolchain}/bin/rustc"),
@@ -231,6 +262,75 @@ fn a_rust_module_builds_against_an_llvm_kernel_and_gcc_is_refused() {
         why.contains("0.0.0-gaia-mutant") && why.contains(&release),
         "{why}"
     );
+}
+
+/// The same modules built in two stores at different places are the same
+/// bytes, and name neither store: the kernel build tree, the toolchain and
+/// the module source are each in the store, and a module compiled where they
+/// are would carry the store's path (a header's `WARN_ON` file name, the
+/// module's own `__FILE__`). Reads the gated build's store; builds only in
+/// two new ones.
+#[test]
+fn a_module_is_the_same_bytes_from_any_store() {
+    let Some((run, store_dir)) = gated() else {
+        return;
+    };
+    let kernel = outputs(&run, &store_dir);
+    let scratch = tempfile::tempdir().expect("tempdir");
+    let src = scratch.path().join("src");
+    fs::create_dir_all(&src).expect("mkdir");
+    fs::write(src.join("gaia_where.c"), WHERE_C).expect("C source");
+    fs::write(src.join("gaia_hello.rs"), MODULE_RS).expect("Rust source");
+    fs::write(src.join("Kbuild"), "obj-m := gaia_where.o gaia_hello.o\n").expect("Kbuild");
+    let mut made = Vec::new();
+    for root in ["a/store", "a-longer-place/deeper/store"] {
+        let root = scratch.path().join(root);
+        fs::create_dir_all(&root).expect("store dir");
+        let store = Store::open(&root).expect("store");
+        let modules = Artifact {
+            kind: ArtifactKind::parse("modules"),
+            object: store.put_tree(&kernel.modules).expect("modules").into(),
+        };
+        let artifact = kernel_module(
+            &root.display().to_string(),
+            tree(&store, &src),
+            tree(&store, &kernel.kernel_build),
+            tree(&store, &kernel.toolchain),
+            "llvm".into(),
+            modules,
+            "gaia_where gaia_hello".into(),
+            &host(),
+            &Ctx::new(),
+        )
+        .unwrap_or_else(|error| panic!("{}: {error}", root.display()));
+        let object = artifact.object.object_ref().expect("an object");
+        let out = store.path(&object);
+        for name in ["gaia_where", "gaia_hello"] {
+            let ko = fs::read_dir(&out)
+                .expect("release dir")
+                .flatten()
+                .next()
+                .expect("one release")
+                .path()
+                .join(format!("updates/{name}.ko"));
+            let bytes = fs::read(&ko).expect("the module");
+            let text = String::from_utf8_lossy(&bytes);
+            let at = scratch.path().display().to_string();
+            assert!(
+                !text.contains(&at),
+                "{} names where it was built ({at})",
+                ko.display()
+            );
+            if name == "gaia_where" {
+                // The probe holds a kernel header's path: what would name
+                // the store if the kernel tree were seen where it is.
+                assert!(text.contains("include/linux/rwsem.h"), "{}", ko.display());
+            }
+            println!("{}: {} bytes, no store path", ko.display(), bytes.len());
+        }
+        made.push(object.digest);
+    }
+    assert_eq!(made[0], made[1], "the same modules from both stores");
 }
 
 fn copy_dir(from: &Path, to: &Path) {

@@ -42,6 +42,13 @@
 //! must be the release directory of the modules, and each built module's
 //! vermagic must start with that release.
 //!
+//! make runs under `bwrap` with the kernel build tree, the toolchain and the
+//! module's source bound at fixed paths ([`FIXED`]): what the compiler
+//! writes into a module (a header's `__FILE__` in a `WARN`, a Rust panic's
+//! location) names those, never the store's location or the step's scratch
+//! directory, so the same inputs make the same module in any store. Without
+//! a `bwrap` (the host gives none) make runs where the trees are.
+//!
 //! The key holds the digests of the module source, the kernel build, the
 //! toolchain and the modules, the names, the architecture, the cross prefix,
 //! the kernel toolchain and the version of each tool (make, the compiler,
@@ -63,8 +70,13 @@ const NAME: &str = "gaia.kernel-module";
 /// 2: the kernel toolchain, and modules built with LLVM. 3: modinfo,
 /// depmod and the cross prefix from the toolchain, `ARCH` from the kernel's
 /// `.config`, the source input named `source`. 4: a Rust kernel's bindgen,
-/// host rustc and libclang named from the toolchain.
-const KEY_VERSION: u32 = 4;
+/// host rustc and libclang named from the toolchain. 5: built at fixed
+/// paths ([`FIXED`]), the same module from any store.
+const KEY_VERSION: u32 = 5;
+/// Where make sees the trees: the kernel build tree, the toolchain and the
+/// module's source, each bound under this in a mount namespace of make's own
+/// (so builds at once each see their own).
+pub const FIXED: &str = "/dev/shm/gaia-kernel-module";
 /// Where the toolchain tree holds the pinned LLVM (Gaia's Buildroot patch
 /// 0006, `host-llvm-prebuilt`).
 const LLVM_BIN: &str = "opt/llvm-prebuilt/bin";
@@ -91,6 +103,8 @@ struct KernelModuleHost {
     taskset: String,
     cpus: String,
     jobs: u32,
+    /// bubblewrap, which runs make at [`FIXED`]; empty: none.
+    bwrap: String,
 }
 
 /// Where Buildroot records its toolchain's target compiler.
@@ -161,6 +175,7 @@ pub fn kernel_module(
         taskset: host.taskset.clone(),
         cpus: host.cpus.clone(),
         jobs: host.jobs,
+        bwrap: host.bwrap.clone(),
     };
     let bin = tool_dir.join("bin");
     let llvm = tool_dir.join(LLVM_BIN);
@@ -241,6 +256,7 @@ pub fn kernel_module(
                 work,
                 &src,
                 &build_dir,
+                &tool_dir,
                 &modules_dir,
                 &Compiler {
                     cc: &cc,
@@ -407,6 +423,7 @@ fn build_and_place(
     work: &mut Work<'_>,
     src: &Path,
     build: &Path,
+    toolchain: &Path,
     modules: &Path,
     compiler: &Compiler<'_>,
     release: &str,
@@ -424,7 +441,9 @@ fn build_and_place(
         return Err(fail("the module source has no Kbuild or Makefile".into()));
     }
 
-    work.run(&make_tool(host, build, &source, compiler))?;
+    let places = Places::new(host, build, toolchain, &source);
+    let seen = SeenTools::new(compiler, toolchain, &places.toolchain);
+    work.run(&make_tool(host, &places, &seen.compiler()))?;
     let mut built = Vec::with_capacity(names.len());
     for name in names {
         let ko = source.join(format!("{name}.ko"));
@@ -480,27 +499,116 @@ fn build_and_place(
     Ok(())
 }
 
-/// make, run for the module in `source` against `build`, with the toolchain's
-/// compiler. With a CPU list, under `taskset`.
-fn make_tool(
-    host: &KernelModuleHost,
-    build: &Path,
-    source: &Path,
-    compiler: &Compiler<'_>,
-) -> Tool {
-    let tool = if host.cpus.is_empty() {
-        Tool::new(&host.make)
-    } else {
-        Tool::new(&host.taskset)
-            .arg("-c")
-            .arg(&host.cpus)
-            .arg(&host.make)
-    };
-    let mut tool = tool
-        .cwd(source)
+/// The trees a module build reads and writes, where they are and where make
+/// sees them: under [`FIXED`] with a `bwrap`, else where they are.
+struct Places {
+    /// (where it is, where make sees it), for the kernel build tree, the
+    /// toolchain and the module's source.
+    kernel: (PathBuf, PathBuf),
+    toolchain: PathBuf,
+    real_toolchain: PathBuf,
+    module: (PathBuf, PathBuf),
+}
+
+impl Places {
+    fn new(host: &KernelModuleHost, build: &Path, toolchain: &Path, source: &Path) -> Self {
+        let seen = |name: &str, real: &Path| {
+            if host.bwrap.is_empty() {
+                real.to_path_buf()
+            } else {
+                Path::new(FIXED).join(name)
+            }
+        };
+        Self {
+            kernel: (build.to_path_buf(), seen("kernel", build)),
+            toolchain: seen("toolchain", toolchain),
+            real_toolchain: toolchain.to_path_buf(),
+            module: (source.to_path_buf(), seen("module", source)),
+        }
+    }
+}
+
+/// The compiler's paths as make sees them: under the toolchain's place.
+struct SeenTools {
+    cc: PathBuf,
+    bin: PathBuf,
+    llvm: Option<PathBuf>,
+    rust: Option<RustTools>,
+}
+
+impl SeenTools {
+    fn new(compiler: &Compiler<'_>, real: &Path, seen: &Path) -> Self {
+        let at = |path: &Path| match path.strip_prefix(real) {
+            Ok(rest) => seen.join(rest),
+            Err(_) => path.to_path_buf(),
+        };
+        Self {
+            cc: at(compiler.cc),
+            bin: at(compiler.bin),
+            llvm: compiler.llvm.map(at),
+            rust: compiler.rust.map(|rust| RustTools {
+                rustc: at(&rust.rustc),
+                bindgen: at(&rust.bindgen),
+                libclang: at(&rust.libclang),
+            }),
+        }
+    }
+
+    fn compiler(&self) -> Compiler<'_> {
+        Compiler {
+            cc: &self.cc,
+            bin: &self.bin,
+            llvm: self.llvm.as_deref(),
+            rust: self.rust.as_ref(),
+        }
+    }
+}
+
+/// make, run for the module against the kernel build tree, with the
+/// toolchain's compiler, as `places` says make sees them. With a `bwrap`,
+/// under it: the host's root as it is, the kernel build tree and the
+/// toolchain bound read-only and the module's source read-write at
+/// [`FIXED`]. With a CPU list, under `taskset`.
+fn make_tool(host: &KernelModuleHost, places: &Places, compiler: &Compiler<'_>) -> Tool {
+    let (kernel, module) = (&places.kernel.1, &places.module.1);
+    let mut words: Vec<String> = Vec::new();
+    if !host.bwrap.is_empty() {
+        // The mount points: empty, and never removed; each build binds over
+        // them in its own namespace.
+        for dir in [kernel, &places.toolchain, module] {
+            let _ = fs::create_dir_all(dir);
+        }
+        words.extend([
+            host.bwrap.clone(),
+            "--dev-bind".into(),
+            "/".into(),
+            "/".into(),
+            "--ro-bind".into(),
+            path_string(&places.kernel.0),
+            path_string(kernel),
+            "--ro-bind".into(),
+            path_string(&places.real_toolchain),
+            path_string(&places.toolchain),
+            "--bind".into(),
+            path_string(&places.module.0),
+            path_string(module),
+            "--chdir".into(),
+            path_string(module),
+            "--die-with-parent".into(),
+            "--".into(),
+        ]);
+    }
+    if !host.cpus.is_empty() {
+        words.extend([host.taskset.clone(), "-c".into(), host.cpus.clone()]);
+    }
+    words.push(host.make.clone());
+    let mut words = words.into_iter();
+    let mut tool = Tool::new(words.next().unwrap_or_default())
+        .args(words)
+        .cwd(&places.module.0)
         .arg("-C")
-        .arg(build)
-        .arg(format!("M={}", source.display()))
+        .arg(kernel)
+        .arg(format!("M={}", module.display()))
         .arg(format!("ARCH={}", host.arch))
         .arg(format!("-j{}", host.jobs));
     for arg in compile_args(host, compiler) {
@@ -512,7 +620,7 @@ fn make_tool(
     tool.arg("modules")
         .env("PATH", path_env(compiler))
         .env("LC_ALL", "C")
-        .env("HOME", source.display().to_string())
+        .env("HOME", module.display().to_string())
         .env("KBUILD_BUILD_TIMESTAMP", BUILD_TIMESTAMP)
         .env("KBUILD_BUILD_USER", BUILD_USER)
         .env("KBUILD_BUILD_HOST", BUILD_HOST)
@@ -570,6 +678,7 @@ mod tests {
             taskset: "/usr/bin/taskset".into(),
             cpus: String::new(),
             jobs: 1,
+            bwrap: String::new(),
         }
     }
 
@@ -629,23 +738,134 @@ mod tests {
                 "BINDGEN=/t/bin/bindgen"
             ]
         );
-        let make = format!(
-            "{:?}",
-            make_tool(&host(), Path::new("/b"), Path::new("/s"), &rust)
-        );
+        let make = format!("{:?}", make_tool(&host(), &bare(), &rust));
         assert!(
             make.contains(r#"("LIBCLANG_PATH", "/t/opt/llvm-prebuilt/lib")"#),
             "{make}"
         );
         assert!(!make.contains(".cargo"), "{make}");
-        let gcc_make = format!(
-            "{:?}",
-            make_tool(&host(), Path::new("/b"), Path::new("/s"), &gcc)
-        );
+        let gcc_make = format!("{:?}", make_tool(&host(), &bare(), &gcc));
         assert!(
             !gcc_make.contains("LIBCLANG_PATH") && !gcc_make.contains("BINDGEN"),
             "{gcc_make}"
         );
+    }
+
+    /// The places of a build with no `bwrap`: where the trees are.
+    fn bare() -> Places {
+        Places::new(&host(), Path::new("/b"), Path::new("/t"), Path::new("/s"))
+    }
+
+    /// With a `bwrap`, make sees the kernel build tree, the toolchain and
+    /// the module's source at the fixed paths, whatever store they are in:
+    /// the trees bound there (the kernel and toolchain read-only), make
+    /// pointed there, and every compiler path the toolchain's under its
+    /// fixed place.
+    #[test]
+    fn make_sees_the_trees_at_the_fixed_paths() {
+        let mut sandboxed = host();
+        sandboxed.bwrap = "/usr/bin/bwrap".into();
+        let places = Places::new(
+            &sandboxed,
+            Path::new("/store/objects/tree/ab/kernel"),
+            Path::new("/store/objects/tree/cd/toolchain"),
+            Path::new("/store/scratch/7/src"),
+        );
+        let real = Path::new("/store/objects/tree/cd/toolchain");
+        let tools = RustTools {
+            rustc: real.join("bin/rustc"),
+            bindgen: real.join("bin/bindgen"),
+            libclang: real.join("opt/llvm-prebuilt/lib"),
+        };
+        let (cc, bin, llvm) = (
+            real.join("opt/llvm-prebuilt/bin/clang"),
+            real.join("bin"),
+            real.join("opt/llvm-prebuilt/bin"),
+        );
+        let compiler = Compiler {
+            cc: &cc,
+            bin: &bin,
+            llvm: Some(&llvm),
+            rust: Some(&tools),
+        };
+        let seen = SeenTools::new(&compiler, real, &places.toolchain);
+        let make = format!("{:?}", make_tool(&sandboxed, &places, &seen.compiler()));
+        let words: Vec<String> = make_words(&make);
+        let has = |pair: [&str; 3]| {
+            words
+                .windows(3)
+                .any(|w| w[0] == pair[0] && w[1] == pair[1] && w[2] == pair[2])
+        };
+        assert_eq!(words[0], "/usr/bin/bwrap", "{make}");
+        assert!(
+            has([
+                "--ro-bind",
+                "/store/objects/tree/ab/kernel",
+                "/dev/shm/gaia-kernel-module/kernel"
+            ]),
+            "{make}"
+        );
+        assert!(
+            has([
+                "--ro-bind",
+                "/store/objects/tree/cd/toolchain",
+                "/dev/shm/gaia-kernel-module/toolchain"
+            ]),
+            "{make}"
+        );
+        assert!(
+            has([
+                "--bind",
+                "/store/scratch/7/src",
+                "/dev/shm/gaia-kernel-module/module"
+            ]),
+            "{make}"
+        );
+        let after: Vec<&String> = words.iter().skip_while(|word| *word != "--").collect();
+        for word in [
+            "/dev/shm/gaia-kernel-module/kernel",
+            "M=/dev/shm/gaia-kernel-module/module",
+            "LLVM=/dev/shm/gaia-kernel-module/toolchain/opt/llvm-prebuilt/bin/",
+            "RUSTC=/dev/shm/gaia-kernel-module/toolchain/bin/rustc",
+            "BINDGEN=/dev/shm/gaia-kernel-module/toolchain/bin/bindgen",
+        ] {
+            assert!(after.iter().any(|w| *w == word), "{word}: {make}");
+        }
+        // What make runs with names no store path.
+        for word in &after {
+            assert!(!word.contains("/store/"), "{word}: {make}");
+        }
+        assert!(
+            make.contains(r#"("LIBCLANG_PATH", "/dev/shm/gaia-kernel-module/toolchain/opt/llvm-prebuilt/lib")"#),
+            "{make}"
+        );
+        assert!(
+            make.contains(r#"("PATH", "/dev/shm/gaia-kernel-module/toolchain/opt/llvm-prebuilt/bin:/dev/shm/gaia-kernel-module/toolchain/bin:"#),
+            "{make}"
+        );
+    }
+
+    /// The program and arguments of a [`Tool`]'s debug form, in order.
+    fn make_words(debug: &str) -> Vec<String> {
+        let mut words = Vec::new();
+        let program = debug
+            .split("program: \"")
+            .nth(1)
+            .and_then(|rest| rest.split('"').next())
+            .unwrap_or_default();
+        words.push(program.to_string());
+        if let Some(args) = debug
+            .split("args: [")
+            .nth(1)
+            .and_then(|rest| rest.split(']').next())
+        {
+            words.extend(
+                args.split(", ")
+                    .map(|word| word.trim_matches('"').to_string())
+                    .filter(|word| !word.is_empty()),
+            );
+        }
+        words
     }
 
     /// A toolchain missing any Rust tool is refused by name.
