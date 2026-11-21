@@ -81,6 +81,7 @@ mod config;
 mod contract;
 mod dev;
 mod dlpool;
+mod dtnames;
 mod host;
 mod jobs;
 mod kbuild;
@@ -472,6 +473,14 @@ fn assemble(
             (contract.clone(), file)
         })
         .collect();
+    // The device trees asked of the kernel build are in its tree, when the
+    // step is given that tree (the host plan has only its placeholder).
+    if let Some(kernel) = config.overrides.iter().find(|o| o.package == "LINUX")
+        && let Some((_, tree, _)) = dirs.iter().find(|(name, _, _)| *name == kernel.input)
+        && let Some(why) = dtnames::missing(&fragments, tree)
+    {
+        return Err(why);
+    }
     let defaults = config::defaults(&fragments);
     Ok(Prepared {
         src,

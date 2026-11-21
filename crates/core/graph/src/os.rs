@@ -13,7 +13,9 @@
 //!   Buildroot downloads nothing for it; the defconfig (`defconfig` is the
 //!   architecture's default), the fragment files, the in-tree device tree,
 //!   the board's device tree directory, and the overlays by name (built by
-//!   the kernel build; they come out with the device trees).
+//!   the kernel build; they come out with the device trees). The board's
+//!   extra in-tree device trees follow its own in the same option, which
+//!   Buildroot reads as a list whose first name is the one booted.
 //!   `toolchain = "llvm"` is `BR2_LINUX_KERNEL_LLVM` (the kernel built
 //!   with `LLVM=1`, the pinned LLVM and Rust; an option of Gaia's Buildroot
 //!   patch set).
@@ -292,8 +294,39 @@ pub(crate) fn plan(
         if kernel.toolchain.as_deref() == Some("llvm") {
             lines.push("BR2_LINUX_KERNEL_LLVM=y".into());
         }
+        let extra = kernel
+            .extra_device_trees
+            .as_deref()
+            .filter(|names| !names.is_empty());
+        if let Some(names) = extra {
+            if kernel.device_tree.is_none() {
+                return Err(Error::at(
+                    &board.file,
+                    "kernel.extra_device_trees",
+                    "extra device trees are built beside the board's own: the board names no `device_tree`",
+                ));
+            }
+            for (n, name) in names.iter().enumerate() {
+                if !device_tree_name(name) {
+                    return Err(Error::at(
+                        &board.file,
+                        format!("kernel.extra_device_trees[{n}]"),
+                        format!(
+                            "`{name}` is not a device tree's name: a path under the kernel's device tree directory, with no extension"
+                        ),
+                    ));
+                }
+            }
+        }
         if let Some(dt) = &kernel.device_tree {
-            lines.push(format!("BR2_LINUX_KERNEL_INTREE_DTS_NAME={}", quoted(dt)));
+            // The board's own first: Buildroot takes the first name as the
+            // one booted.
+            let mut all = vec![dt.as_str()];
+            all.extend(extra.unwrap_or_default().iter().map(String::as_str));
+            lines.push(format!(
+                "BR2_LINUX_KERNEL_INTREE_DTS_NAME={}",
+                quoted(&all.join(" "))
+            ));
         }
         if let Some(dir) = &kernel.device_tree_dir {
             let name = plan.dir(dir.path());
@@ -308,12 +341,7 @@ pub(crate) fn plan(
         // like an in-tree one.
         if let Some(overlays) = kernel.overlays.as_ref().filter(|o| !o.is_empty()) {
             for (n, name) in overlays.iter().enumerate() {
-                let plain = !name.is_empty()
-                    && !name.starts_with('/')
-                    && name.bytes().all(|b| {
-                        b.is_ascii_alphanumeric() || matches!(b, b'-' | b'_' | b'/' | b'.' | b',')
-                    });
-                if !plain || name.ends_with(".dtbo") || name.ends_with(".dts") {
+                if !device_tree_name(name) {
                     return Err(Error::at(
                         &board.file,
                         format!("kernel.overlays[{n}]"),
@@ -519,6 +547,22 @@ fn parallel_defaults() -> ConfigFragment {
 /// (given to make by the host, so no key holds it).
 fn defaults() -> Vec<ConfigFragment> {
     Vec::new()
+}
+
+/// Whether `name` names a device tree or overlay the kernel build makes: a
+/// relative path under its device tree directory, of plain characters, with
+/// no extension.
+fn device_tree_name(name: &str) -> bool {
+    let plain = !name.is_empty()
+        && !name.starts_with('/')
+        && name
+            .bytes()
+            .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'-' | b'_' | b'/' | b'.' | b','));
+    plain
+        && !name.split('/').any(|part| part.is_empty() || part == "..")
+        && ![".dtbo", ".dtb", ".dts", ".dtso"]
+            .iter()
+            .any(|ext| name.ends_with(ext))
 }
 
 /// The architecture's and the CPU's options.

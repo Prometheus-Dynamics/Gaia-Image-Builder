@@ -410,6 +410,64 @@ fn a_boards_overlays_are_built_by_the_kernel_build() {
     assert!(err.contains("with no extension"), "{err}");
 }
 
+/// A board's extra in-tree device trees follow its own in Buildroot's list
+/// (the first is the one booted); a name with an extension, one above the
+/// directory, or extras without the board's own device tree are refused at
+/// their key; a board without the key has its one name, as before.
+#[test]
+fn a_boards_extra_device_trees_follow_its_own() {
+    let dir = project();
+    let board = dir.path().join("examples/boards/zero-3e/board.toml");
+    let before = String::from_utf8_lossy(&plan(dir.path(), &[]).stdout).into_owned();
+    assert!(
+        before.contains("BR2_LINUX_KERNEL_INTREE_DTS_NAME=\"rockchip/rk3566-radxa-zero-3e\""),
+        "{before}"
+    );
+    edit(
+        &board,
+        "device_tree_dir = \"assets/dts\"",
+        "device_tree_dir = \"assets/dts\"\nextra_device_trees = [\"overlays/overlay_map\", \"overlays/hat_map\"]",
+    );
+    let out = plan(dir.path(), &[]);
+    assert!(out.status.success());
+    let text = String::from_utf8_lossy(&out.stdout);
+    assert!(
+        text.contains(
+            "BR2_LINUX_KERNEL_INTREE_DTS_NAME=\"rockchip/rk3566-radxa-zero-3e overlays/overlay_map overlays/hat_map\""
+        ),
+        "{text}"
+    );
+    for (bad, key, why) in [
+        (
+            "\"overlays/hat_map.dtb\"",
+            "kernel.extra_device_trees[1]",
+            "with no extension",
+        ),
+        (
+            "\"../hat_map\"",
+            "kernel.extra_device_trees[1]",
+            "with no extension",
+        ),
+    ] {
+        edit(&board, "\"overlays/hat_map\"", bad);
+        let out = plan(dir.path(), &[]);
+        assert_eq!(out.status.code(), Some(2), "{bad}");
+        let err = String::from_utf8_lossy(&out.stderr);
+        assert!(err.contains(key) && err.contains(why), "{bad}: {err}");
+        edit(&board, bad, "\"overlays/hat_map\"");
+    }
+    edit(
+        &board,
+        "device_tree = \"rockchip/rk3566-radxa-zero-3e\"",
+        "",
+    );
+    let out = plan(dir.path(), &[]);
+    assert_eq!(out.status.code(), Some(2));
+    let err = String::from_utf8_lossy(&out.stderr);
+    assert!(err.contains("kernel.extra_device_trees"), "{err}");
+    assert!(err.contains("the board names no `device_tree`"), "{err}");
+}
+
 #[test]
 fn a_big_little_pair_is_buildroots_option_and_the_little_core_for_rust() {
     let dir = project();
