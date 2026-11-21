@@ -108,8 +108,10 @@ impl Tool {
 
     /// Runs the tool, and everything it starts, at niceness `nice` (19 is
     /// the lowest priority): it gets the CPU the processes at the normal
-    /// priority leave idle. Set on the tool's process group as soon as it
-    /// is started, so what it starts after inherits it. It changes how fast
+    /// priority leave idle. The tool is started through `nice`, so it runs
+    /// at that niceness from its first instruction and what it starts
+    /// inherits it (where the machine has no `nice`, it is set on the
+    /// tool's process group as soon as it is started). It changes how fast
     /// the tool runs, never what it makes.
     pub fn nice(mut self, nice: i32) -> Self {
         self.nice = Some(nice);
@@ -136,6 +138,14 @@ impl Tool {
     }
 }
 
+/// The machine's `nice` (coreutils), by its path.
+fn nice_program() -> Option<&'static Path> {
+    ["/usr/bin/nice", "/bin/nice"]
+        .into_iter()
+        .map(Path::new)
+        .find(|path| path.is_file())
+}
+
 /// Runs `tool` to its end and adds the CPU time its process and the
 /// processes it waited for took, in nanoseconds, to `cpu_ns`. The time is
 /// read before the child is reaped, so it is also read when the run fails.
@@ -152,7 +162,21 @@ pub(crate) fn run(
         let why = format!("cannot write a run log in {}: {error}", logs.display());
         StepError::new(step, ErrorKind::Body(why), Vec::new())
     })?;
-    let mut command = Command::new(&tool.program);
+    // `nice` adds to the niceness it has, Gaia's: by how much more the tool
+    // is to have. Lowering one's own priority is always allowed.
+    let own = rustix::process::getpriority_process(None).unwrap_or(0);
+    let through_nice = tool
+        .nice
+        .filter(|&nice| nice > own)
+        .and_then(|nice| nice_program().map(|program| (program, nice - own)));
+    let mut command = match &through_nice {
+        Some((program, more)) => {
+            let mut command = Command::new(program);
+            command.arg("-n").arg(more.to_string()).arg(&tool.program);
+            command
+        }
+        None => Command::new(&tool.program),
+    };
     command
         .args(&tool.args)
         .env_clear()
@@ -169,7 +193,7 @@ pub(crate) fn run(
         StepError::new(step, ErrorKind::Spawn(why), Vec::new()).with_log(log.path.clone())
     })?;
     let group = child.id();
-    if let (Some(nice), Some(pid)) = (tool.nice, pid_of(group)) {
+    if let (Some(nice), Some(pid), None) = (tool.nice, pid_of(group), &through_nice) {
         // Lowering one's own child's priority is always allowed; were it
         // refused, the tool would run at the step's priority, as before.
         let _ = rustix::process::setpriority_pgrp(Some(pid), nice);
