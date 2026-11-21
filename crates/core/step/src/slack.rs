@@ -72,6 +72,11 @@ pub const HYSTERESIS: f64 = 0.10;
 /// more than this many times apart are not compared.
 pub const LOAD_APART: f32 = 2.0;
 
+/// How much more step CPU a yielded run may take than the unyielded one it
+/// is compared with before the joins line says so: past it, yielding is
+/// spending more of the machine, not using it better.
+pub const CPU_MORE: f64 = 0.10;
+
 /// The environment variable that turns yielding off: set to anything but
 /// empty or `0`, no step yields.
 pub const OFF: &str = "GAIA_NO_YIELD";
@@ -125,12 +130,14 @@ pub enum Why {
         mine_ns: i128,
         passed: Vec<(String, i128)>,
     },
-    /// The last yielded and unyielded joins, and what held the state when
-    /// they did not decide it.
+    /// The last yielded and unyielded joins, what held the state when they
+    /// did not decide it, and the step CPU of the two runs (yielded,
+    /// unyielded) when both recorded some.
     Joins {
         yielded_ns: i128,
         unyielded_ns: i128,
         held: Option<Held>,
+        cpu_ns: Option<(u128, u128)>,
     },
 }
 
@@ -232,6 +239,7 @@ impl fmt::Display for Decision {
                 yielded_ns,
                 unyielded_ns,
                 held,
+                cpu_ns,
             } => {
                 write!(
                     f,
@@ -239,6 +247,21 @@ impl fmt::Display for Decision {
                     secs(*yielded_ns),
                     secs(*unyielded_ns)
                 )?;
+                if let Some((yielded, unyielded)) = cpu_ns {
+                    let more = *yielded as f64 / *unyielded as f64 - 1.0;
+                    write!(
+                        f,
+                        " (step CPU {} against {}, {:+.0}%{})",
+                        secs(*yielded as i128),
+                        secs(*unyielded as i128),
+                        more * 100.0,
+                        if more > CPU_MORE {
+                            format!(": more than {} more of the machine", percent(CPU_MORE))
+                        } else {
+                            String::new()
+                        }
+                    )?;
+                }
                 match held {
                     None if self.yields => Ok(()),
                     None => write!(f, ", more than {} later", percent(HYSTERESIS)),
@@ -254,6 +277,16 @@ impl fmt::Display for Decision {
             }
         }
     }
+}
+
+/// The step CPU of a run: its tools' and its own code's, over its records.
+fn run_cpu(records: &[StepRecord], run: &[usize]) -> u128 {
+    run.iter()
+        .map(|&index| {
+            let report = &records[index].report;
+            u128::from(report.cpu_ns) + u128::from(report.own_cpu_ns)
+        })
+        .sum()
 }
 
 fn time(record: &StepRecord) -> i128 {
@@ -463,12 +496,17 @@ fn alone(
         }
         (Some((_, join_ns)), None) => stay(Why::Uncompared { join_ns }),
         (Some((y, yielded_ns)), Some((u, unyielded_ns))) => {
+            let cpu_ns = match (run_cpu(records, run_of(y)), run_cpu(records, run_of(u))) {
+                (yielded, unyielded) if yielded > 0 && unyielded > 0 => Some((yielded, unyielded)),
+                _ => None,
+            };
             let joins = |yields, held| Decision {
                 yields,
                 why: Why::Joins {
                     yielded_ns,
                     unyielded_ns,
                     held,
+                    cpu_ns,
                 },
             };
             // What the latest of the two runs did.
@@ -998,6 +1036,32 @@ mod tests {
                     time_ns: 763 * S as i128
                 }
             }
+        );
+    }
+
+    /// Both runs' step CPU is on the joins line, beside the joins, and a
+    /// yielded run that took more than [`CPU_MORE`] more says so.
+    #[test]
+    fn the_joins_line_carries_both_runs_step_cpu() {
+        let with_cpu = |mut run: Vec<StepRecord>, cpu: &[u64]| {
+            for (record, cpu) in run.iter_mut().zip(cpu) {
+                record.report.cpu_ns = cpu * S as u64;
+            }
+            run[0].report.own_cpu_ns = S as u64;
+            run
+        };
+        let mut records = with_cpu(the_run(1), &[900, 3200, 960, 99]);
+        records.extend(with_cpu(yielded_run(2, 800), &[900, 3400, 990, 99]));
+        assert_eq!(
+            kernel(&records).to_string(),
+            "last join 800 s yielded against 1008 s unyielded (step CPU 5390 s against 5160 s, \
+             +4%)"
+        );
+        records.extend(with_cpu(yielded_run(3, 800), &[900, 3800, 1000, 99]));
+        assert_eq!(
+            kernel(&records).to_string(),
+            "last join 800 s yielded against 1008 s unyielded (step CPU 5800 s against 5160 s, \
+             +12%: more than 10% more of the machine)"
         );
     }
 

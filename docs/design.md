@@ -147,7 +147,10 @@ A step learns only from runs that tell about it alone: its slack and its
 unyielded join from runs in which nothing yielded, its yielded join from runs
 in which it alone yielded. Of the steps that meet at one join, at most one
 yields in a run (the one with the most slack in the last clean run), and the
-others say whom they were passed over for.
+others say whom they were passed over for. A step comparing joins also names both
+runs' step CPU, and says when the yielded run took more than 10% more: the
+point where yielding would be spending more of the machine, not using it
+better.
 
 Measured: cold builds of one image at 26 jobs on a 32-processor box under
 other work (load 55 to 80), the join being the end of the later of the kernel
