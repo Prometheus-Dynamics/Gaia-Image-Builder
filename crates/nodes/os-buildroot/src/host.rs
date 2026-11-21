@@ -62,13 +62,20 @@ use std::sync::{Arc, Mutex};
 
 const PLAN: &str = "gaia.os.buildroot.host-plan";
 const NAME: &str = "gaia.os.buildroot.host";
-/// 4: built at the fixed path the build sees (`place`).
-const KEY_VERSION: u32 = 4;
+/// 4: built at the fixed path the build sees (`place`). 5: the same bytes
+/// from any store and any run: the source by a marker, the packages' file
+/// lists sorted, archives in deterministic mode, no bytecode written on import
+/// (`tools`).
+const KEY_VERSION: u32 = 5;
 /// The work directory a host-tools build expects when no earlier run recorded
 /// its size.
 const WORK_BYTES: u64 = 8 << 30;
 /// What stands for the output directory in the seed's text files.
 const MARKER: &str = "@GAIA_BUILDROOT_OUT@";
+/// What stands for the Buildroot source in the seed's text files: a
+/// package's applied patches are listed by their path in the source, and the
+/// source is a store object, at another path in another store.
+const SOURCE_MARKER: &str = "@GAIA_BUILDROOT_SOURCE@";
 /// Variables every host package is built with, beside its own.
 const SHARED_VARS: &str = "HOST_CFLAGS HOST_CPPFLAGS HOST_CXXFLAGS HOST_LDFLAGS HOST_MAKE_ENV \
     HOST_CONFIGURE_OPTS HOSTCC HOSTCXX";
@@ -439,33 +446,44 @@ fn plan(work: &mut Work<'_>, prepared: &Prepared, host: &BuildrootHost) -> Resul
             .arg(format!("VARS={}", patterns.join(" ")))
             .arg("PARALLEL_JOBS=1");
         let values = captured(work, tool)?;
-        let mut names: Vec<(String, String)> = vec![
-            (
-                crate::place::seen(host, &out).display().to_string(),
-                "@out@".into(),
-            ),
-            (src.display().to_string(), "@buildroot@".into()),
-            (host.download_dir.clone(), "@downloads@".into()),
-        ];
-        // The compiler cache's directory and the mirror are not in the key:
-        // a host tool's values name them, and the names do not change.
-        for (path, name) in [(&host.ccache_dir, "@ccache@"), (&host.mirror, "@mirror@")] {
-            if !path.is_empty() {
-                names.push((path.clone(), name.into()));
-            }
-        }
-        for (name, dir) in &prepared.paths {
-            names.push((dir.display().to_string(), format!("@{name}@")));
-        }
-        text.push_str(&named(&values, &names));
+        text.push_str(&named(&values, &run_names(prepared, host, &out)));
     }
     fs::write(dir.join("plan.txt"), text).map_err(|e| fail(format!("the plan: {e}")))
+}
+
+/// The paths of a run of the output directory `out` and their names: the
+/// output directory where the build sees it, the source, the downloads, the
+/// compiler cache and the mirror, and each input tree. The compiler cache's
+/// directory and the mirror are not in the key: a host tool's values name
+/// them, and the names do not change.
+pub(crate) fn run_names(
+    prepared: &Prepared,
+    host: &BuildrootHost,
+    out: &Path,
+) -> Vec<(String, String)> {
+    let mut names: Vec<(String, String)> = vec![
+        (
+            crate::place::seen(host, out).display().to_string(),
+            "@out@".into(),
+        ),
+        (prepared.src.display().to_string(), "@buildroot@".into()),
+        (host.download_dir.clone(), "@downloads@".into()),
+    ];
+    for (path, name) in [(&host.ccache_dir, "@ccache@"), (&host.mirror, "@mirror@")] {
+        if !path.is_empty() {
+            names.push((path.clone(), name.into()));
+        }
+    }
+    for (name, dir) in &prepared.paths {
+        names.push((dir.display().to_string(), format!("@{name}@")));
+    }
+    names
 }
 
 /// `values` with each path of `names` replaced by its name. Longest path
 /// first: one path may begin another. An empty path is none, and is skipped:
 /// replacing it would write the name between every character.
-fn named(values: &str, names: &[(String, String)]) -> String {
+pub(crate) fn named(values: &str, names: &[(String, String)]) -> String {
     let mut sorted: Vec<&(String, String)> =
         names.iter().filter(|(path, _)| !path.is_empty()).collect();
     sorted.sort_by_key(|(path, _)| std::cmp::Reverse(path.len()));
@@ -591,9 +609,25 @@ fn build_steps(
             }
         }
     }
-    let (relocs, links, binaries) =
-        unplant(&seed, &crate::place::seen(host, &out).display().to_string())
-            .map_err(io_fail("the seed's paths"))?;
+    // Buildroot appends to these lists as packages finish, in whatever order
+    // they did; it reads them as sets.
+    sort_lists(&build).map_err(io_fail("the packages' file lists"))?;
+    // Archives an archiver wrote with real dates, which the wrappers did not
+    // reach (`tools`): as `D` writes them, and named.
+    let rewritten =
+        crate::tools::deterministic_archives(&seed).map_err(io_fail("the seed's archives"))?;
+    work.detail(
+        "archives-rewritten",
+        serde_json::json!({ "seed": rewritten.len(), "first": rewritten.iter().take(5).collect::<Vec<_>>() }),
+    );
+    let (relocs, links, binaries) = unplant(
+        &seed,
+        &[
+            (crate::place::seen(host, &out).display().to_string(), MARKER),
+            (prepared.src.display().to_string(), SOURCE_MARKER),
+        ],
+    )
+    .map_err(io_fail("the seed's paths"))?;
     fs::write(seed.join("relocs"), relocs.join("\n")).map_err(io_fail("the seed"))?;
     fs::write(seed.join("links"), links.join("\n")).map_err(io_fail("the seed"))?;
     fs::write(seed.join("binaries"), binaries.join("\n")).map_err(io_fail("the seed"))?;
@@ -635,7 +669,20 @@ fn contains(haystack: &[u8], needle: &[u8]) -> bool {
 /// listed), symlinks whose target names it are removed (and listed as
 /// `path<TAB>target` with the marker), and binaries that name it are listed
 /// and left as they are.
-fn unplant(seed: &Path, out: &str) -> io::Result<(Vec<String>, Vec<String>, Vec<String>)> {
+fn unplant(
+    seed: &Path,
+    paths: &[(String, &str)],
+) -> io::Result<(Vec<String>, Vec<String>, Vec<String>)> {
+    let paths: Vec<(&str, &str)> = paths
+        .iter()
+        .filter(|(path, _)| !path.is_empty())
+        .map(|(path, marker)| (path.as_str(), *marker))
+        .collect();
+    let marked = |text: &str| {
+        paths.iter().fold(text.to_string(), |text, (path, marker)| {
+            text.replace(path, marker)
+        })
+    };
     let (mut relocs, mut links, mut binaries) = (Vec::new(), Vec::new(), Vec::new());
     for relative in files(seed)? {
         let path = seed.join(&relative);
@@ -643,25 +690,57 @@ fn unplant(seed: &Path, out: &str) -> io::Result<(Vec<String>, Vec<String>, Vec<
         let meta = fs::symlink_metadata(&path)?;
         if meta.file_type().is_symlink() {
             let target = fs::read_link(&path)?.display().to_string();
-            if target.contains(out) {
+            if paths.iter().any(|(path, _)| target.contains(path)) {
                 fs::remove_file(&path)?;
-                links.push(format!("{shown}\t{}", target.replace(out, MARKER)));
+                links.push(format!("{shown}\t{}", marked(&target)));
             }
             continue;
         }
         let bytes = fs::read(&path)?;
-        if !contains(&bytes, out.as_bytes()) {
+        if !paths
+            .iter()
+            .any(|(path, _)| contains(&bytes, path.as_bytes()))
+        {
             continue;
         }
         match String::from_utf8(bytes) {
             Ok(text) if !text.contains('\0') => {
-                write_keeping_mode(&path, &meta, text.replace(out, MARKER).as_bytes())?;
+                write_keeping_mode(&path, &meta, marked(&text).as_bytes())?;
                 relocs.push(shown);
             }
             _ => binaries.push(shown),
         }
     }
     Ok((relocs, links, binaries))
+}
+
+/// Each package's file lists in the seed's `build/` (`.files-list*.txt`)
+/// and the merged `packages-file-list-host.txt`, their lines sorted.
+fn sort_lists(build: &Path) -> io::Result<()> {
+    for relative in files(build)? {
+        let name = relative
+            .file_name()
+            .map(|name| name.to_string_lossy().into_owned())
+            .unwrap_or_default();
+        let list = (name.starts_with(".files-list") && name.ends_with(".txt"))
+            || name == "packages-file-list-host.txt";
+        let path = build.join(&relative);
+        if !list || fs::symlink_metadata(&path)?.file_type().is_symlink() {
+            continue;
+        }
+        let meta = fs::metadata(&path)?;
+        let text = fs::read_to_string(&path)?;
+        let mut lines: Vec<&str> = text.lines().collect();
+        lines.sort_unstable();
+        let mut sorted = lines.join("\n");
+        if !lines.is_empty() {
+            sorted.push('\n');
+        }
+        if sorted != text {
+            write_keeping_mode(&path, &meta, sorted.as_bytes())?;
+        }
+    }
+    Ok(())
 }
 
 /// Takes the path `out` out of a tree that is stored and never planted
@@ -707,12 +786,15 @@ pub(crate) fn write_keeping_mode(path: &Path, meta: &fs::Metadata, bytes: &[u8])
 
 /// Plants the seed in the output directory `out`, before Buildroot runs
 /// there: its `host/` and package marks, with `seen`, the path the build
-/// sees `out` at, where the marker is. An empty seed plants nothing.
-pub(crate) fn plant(seed: &Path, out: &Path, seen: &Path) -> io::Result<()> {
+/// sees `out` at, where the marker is, and `source`, the build's Buildroot
+/// source, where the source's marker is. An empty seed plants nothing.
+pub(crate) fn plant(seed: &Path, out: &Path, seen: &Path, source: &Path) -> io::Result<()> {
     if !seed.join("host").is_dir() {
         return Ok(());
     }
     let here = seen.display().to_string();
+    let source = source.display().to_string();
+    let put_back = |text: &str| text.replace(MARKER, &here).replace(SOURCE_MARKER, &source);
     for part in ["host", "build"] {
         crate::out::copy_tree(&seed.join(part), &out.join(part))?;
     }
@@ -727,11 +809,11 @@ pub(crate) fn plant(seed: &Path, out: &Path, seen: &Path) -> io::Result<()> {
         let path = out.join(&relative);
         let meta = fs::symlink_metadata(&path)?;
         let text = fs::read_to_string(&path)?;
-        write_keeping_mode(&path, &meta, text.replace(MARKER, &here).as_bytes())?;
+        write_keeping_mode(&path, &meta, put_back(&text).as_bytes())?;
     }
     for line in list("links")? {
         if let Some((relative, target)) = line.split_once('\t') {
-            std::os::unix::fs::symlink(target.replace(MARKER, &here), out.join(relative))?;
+            std::os::unix::fs::symlink(put_back(target), out.join(relative))?;
         }
     }
     // One time for every mark: make compares a package's marks with each

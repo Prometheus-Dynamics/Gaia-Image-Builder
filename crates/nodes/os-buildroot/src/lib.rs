@@ -92,6 +92,7 @@ mod pool;
 mod ppd;
 mod progress;
 mod times;
+mod tools;
 
 use daedalus::prelude::*;
 use daedalus_cpu_author::FanIn;
@@ -112,8 +113,11 @@ pub(crate) const NAME: &str = "gaia.os.buildroot";
 /// make sees its output directory at one fixed path, and a pinned source date
 /// (see `place`, `kbuild`). 7: the root filesystem is what Buildroot
 /// packed under fakeroot, its post-fakeroot scripts' changes included, not
-/// the target tree (see `perms`).
-const KEY_VERSION: u32 = 7;
+/// the target tree (see `perms`). 8: every make runs the deterministic `ar`
+/// and `ranlib` and writes no bytecode on import (`tools`); the stored config
+/// names the input trees, not their store paths; the planted seed names the
+/// source by a marker.
+const KEY_VERSION: u32 = 8;
 /// The work directory an OS build expects when no earlier run recorded its
 /// size: about what a full build leaves in its output directory.
 const WORK_BYTES: u64 = 24 << 30;
@@ -701,6 +705,7 @@ pub(crate) fn configure(
         move |error: io::Error| StepError::body(step, format!("{what}: {error}"))
     };
     let (src, vars) = (&prepared.src, &prepared.vars);
+    tools::write(out).map_err(io_fail("the deterministic archivers"))?;
     dlpool::before(step, work, src, host)?;
     work.run(&make_tool(host, src, out, vars, &["allnoconfig"], slot))?;
     let config = out.join(".config");
@@ -1000,8 +1005,15 @@ fn build_steps(
             .map_err(io_fail("U-Boot's config"))?;
     }
     fs::create_dir(dir.join("config")).map_err(io_fail("the config directory"))?;
-    gaia_store::copy_file(&config, dir.join("config/buildroot.config"))
-        .map_err(io_fail("the config"))?;
+    // The input trees, the source and the directories of this run by their
+    // names, as in the host plan: the same config from any store.
+    let text = fs::read_to_string(&config).map_err(io_fail("the config"))?;
+    let names = host::run_names(prepared, host, &out);
+    fs::write(
+        dir.join("config/buildroot.config"),
+        host::named(&text, &names),
+    )
+    .map_err(io_fail("the config"))?;
     match out::kernel_build_source(&out.join("build")).map_err(io_fail("the kernel build"))? {
         Some(source) => {
             out::copy_kernel_build(&source, &dir.join("kernel-build"))
@@ -1018,6 +1030,14 @@ fn build_steps(
                 &place::seen(host, &out).display().to_string(),
             )
             .map_err(io_fail("the toolchain's paths"))?;
+            // Archives an archiver wrote with real dates (a cross ar, which
+            // the wrappers do not reach), as `D` writes them.
+            let rewritten = tools::deterministic_archives(&dir.join("toolchain"))
+                .map_err(io_fail("the toolchain's archives"))?;
+            work.detail(
+                "archives-rewritten",
+                serde_json::json!({ "toolchain": rewritten.len(), "first": rewritten.iter().take(5).collect::<Vec<_>>() }),
+            );
         }
         None => {
             fs::create_dir(dir.join("kernel-build")).map_err(io_fail("the kernel build"))?;
@@ -1057,7 +1077,8 @@ fn fresh_out(
     fs::create_dir_all(out).map_err(io_fail("output directory"))?;
     // The host tools another step built, before Buildroot looks: it finds
     // them installed and builds none of them again.
-    host::plant(seed, out, &place::seen(host, out)).map_err(io_fail("the host tools"))?;
+    host::plant(seed, out, &place::seen(host, out), &prepared.src)
+        .map_err(io_fail("the host tools"))?;
     let resolved = configure(NAME, work, prepared, out, host, slot)?;
     // With per-package directories on, the seed's packages get their own
     // trees, complete and installed, before anything builds.
@@ -1306,8 +1327,13 @@ pub(crate) fn make_tool(
     let mut tool = Tool::new(program)
         .cwd(src)
         .args(words)
-        .env("PATH", PATH)
+        .env("PATH", tools::path(&seen))
         .env("LC_ALL", "C")
+        // A Python module imported during the build is compiled in memory,
+        // not written beside its source with that source's time in it (a
+        // host package's site-packages, imported by the next package's
+        // build). Bytecode a package compiles on purpose is not affected.
+        .env("PYTHONDONTWRITEBYTECODE", "1")
         .env("CCACHE_MAXSIZE", CCACHE_MAX_SIZE)
         .env("HOME", seen.display().to_string());
     for (name, value) in kbuild::env(src) {
@@ -1652,9 +1678,11 @@ mod bound_tests {
         assert_eq!(pinned.iter().filter(|arg| arg.starts_with("-j")).count(), 1);
     }
 
-    /// Every make runs with the fixed PATH, and nothing inherited: the host
-    /// tools Buildroot's `check-host-*` rules look for are in its dirs, and
-    /// no entry is empty, relative or ".", which Buildroot refuses.
+    /// Every make runs with the fixed PATH, after the deterministic
+    /// archivers (`tools`) in its output directory, and nothing inherited:
+    /// the host tools Buildroot's `check-host-*` rules look for are in its
+    /// dirs, and no entry is empty, relative or ".", which Buildroot refuses.
+    /// No module it imports writes bytecode.
     #[test]
     fn make_runs_with_the_fixed_path_only() {
         let pool = jobs::Jobserver::new(4, false).expect("a pool");
@@ -1669,7 +1697,11 @@ mod bound_tests {
         );
         let debug = format!("{tool:?}");
         assert!(
-            debug.contains(r#"("PATH", "/usr/local/bin:/usr/bin:/bin")"#),
+            debug.contains(r#"("PATH", "/out/.gaia-tools:/usr/local/bin:/usr/bin:/bin")"#),
+            "{debug}"
+        );
+        assert!(
+            debug.contains(r#"("PYTHONDONTWRITEBYTECODE", "1")"#),
             "{debug}"
         );
         assert_eq!(debug.matches(r#"("PATH", "#).count(), 1, "{debug}");

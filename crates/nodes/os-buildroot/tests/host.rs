@@ -45,12 +45,24 @@ host-a:
 \tprintf 'bin\\000%s' '$(O)' > $(O)/host/bin/a
 \tln -s $(O)/host/etc/a.conf $(O)/host/link
 \ttouch $(O)/build/host-a-1/.stamp_host_installed $(O)/build/host-a-1/src/big.o
+\tmkdir -p $(O)/host/lib/py
+\tprintf 'int a(void) { return 1; }\\n' > $(O)/build/host-a-1/src/a.c
+\tcc -c -o $(O)/build/host-a-1/src/a.o $(O)/build/host-a-1/src/a.c
+\tar rcs $(O)/host/lib/liba.a $(O)/build/host-a-1/src/a.o
+\t/usr/bin/ar rcs $(O)/host/lib/libplain.a $(O)/build/host-a-1/src/a.o
+\tprintf 'X = 1\\n' > $(O)/host/lib/py/m.py
+\tpython3 -c 'import sys; sys.path.insert(0, \"$(O)/host/lib/py\"); import m'
+\tprintf '%s/package/a/0001-fix.patch\\n' '$(CURDIR)' > $(O)/build/host-a-1/.applied_patches_list
+\tprintf 'host-a,./lib/liba.a\\nhost-a,./etc/a.conf\\n' > $(O)/build/host-a-1/.files-list-host.txt
 ";
 
 struct Fixture {
     _dir: tempfile::TempDir,
     store: PathBuf,
     root: PathBuf,
+    /// The sandbox every make runs in, as a real build's do: it sees its
+    /// output directory at one fixed path. Empty: none.
+    bwrap: String,
 }
 
 impl Fixture {
@@ -63,7 +75,18 @@ impl Fixture {
             _dir: dir,
             store,
             root,
+            bwrap: String::new(),
         }
+    }
+
+    /// A fixture whose makes run in the sandbox, at the fixed path, as a
+    /// real build's do; `None` where the machine has no bwrap.
+    fn sandboxed() -> Option<Self> {
+        let bwrap = "/usr/bin/bwrap";
+        std::path::Path::new(bwrap).exists().then(|| Self {
+            bwrap: bwrap.into(),
+            ..Self::new()
+        })
     }
 
     fn store(&self) -> String {
@@ -112,7 +135,7 @@ impl Fixture {
             mirror: String::new(),
             config_only: false,
             dev_reuse: String::new(),
-            bwrap: String::new(),
+            bwrap: self.bwrap.clone(),
         }
     }
 
@@ -204,7 +227,10 @@ fn the_seed_has_the_host_tools_without_the_path_they_were_built_at() {
         read("host/etc/a.conf"),
         "prefix=@GAIA_BUILDROOT_OUT@/host\n"
     );
-    assert_eq!(read("relocs"), "host/etc/a.conf");
+    assert_eq!(
+        read("relocs"),
+        "build/host-a-1/.applied_patches_list\nhost/etc/a.conf"
+    );
     assert_eq!(
         read("links"),
         "host/link\t@GAIA_BUILDROOT_OUT@/host/etc/a.conf"
@@ -217,6 +243,86 @@ fn the_seed_has_the_host_tools_without_the_path_they_were_built_at() {
     // The package's marks, and nothing it compiled.
     assert!(dir.join("build/host-a-1/.stamp_host_installed").is_file());
     assert!(!dir.join("build/host-a-1/src").exists());
+}
+
+/// The same host tools made in two stores, a second apart, are one tree:
+/// the source's store path is a marker, the file lists are sorted, the
+/// archives carry no date (the one `ar` on the build's `PATH` made, and the
+/// one an archiver run by its own path made, rewritten), and the module the
+/// build imported left no bytecode with its source's time in it.
+#[test]
+fn the_same_host_tools_made_in_two_stores_are_the_same_bytes() {
+    // In the sandbox, as a real build: the stand-in's binary names the
+    // output directory, and binaries keep the path they were built at.
+    let (Some(one), Some(two)) = (Fixture::sandboxed(), Fixture::sandboxed()) else {
+        eprintln!("skipped: no bwrap");
+        return;
+    };
+    let first = one.seed("BR2_X=y\n");
+    std::thread::sleep(std::time::Duration::from_millis(1100));
+    let second = two.seed("BR2_X=y\n");
+    let dir = one.path(&first);
+    let read = |name: &str| fs::read_to_string(dir.join(name)).expect(name);
+    assert_eq!(
+        read("build/host-a-1/.applied_patches_list"),
+        "@GAIA_BUILDROOT_SOURCE@/package/a/0001-fix.patch\n"
+    );
+    assert_eq!(
+        read("build/host-a-1/.files-list-host.txt"),
+        "host-a,./etc/a.conf\nhost-a,./lib/liba.a\n"
+    );
+    for archive in ["host/lib/liba.a", "host/lib/libplain.a"] {
+        let bytes = fs::read(dir.join(archive)).expect(archive);
+        let date = String::from_utf8_lossy(&bytes[8 + 16..8 + 28]).into_owned();
+        assert_eq!(date.trim(), "0", "{archive}: the symbol table's date");
+    }
+    assert!(
+        !dir.join("host/lib/py/__pycache__").exists(),
+        "no bytecode written on import"
+    );
+    // The wrapper made `liba.a` as it is kept; only the archive made by an
+    // archiver run by its own path was rewritten.
+    let store = Store::open(&one.store).expect("store");
+    let rewritten: Vec<serde_json::Value> = step_records(&logs_dir(&store))
+        .into_iter()
+        .filter(|record| record.step == "gaia.os.buildroot.host" && record.made)
+        .map(|record| record.report.details["archives-rewritten"].clone())
+        .collect();
+    assert_eq!(
+        rewritten,
+        [serde_json::json!({ "seed": 1, "first": ["host/lib/libplain.a"] })]
+    );
+    assert_eq!(
+        first.object,
+        second.object,
+        "the two seeds: {} and {}",
+        dir.display(),
+        two.path(&second).display()
+    );
+}
+
+/// The stored config names an input tree, not the store path it was at:
+/// the same config from any store.
+#[test]
+fn the_stored_config_names_its_input_trees() {
+    let f = Fixture::new();
+    let data = f.tree("data");
+    let built = build_os(
+        &f.store(),
+        f.source(),
+        &config_with("BR2_A_DATA=\"@data@\"\n", &["data"]),
+        std::slice::from_ref(&data),
+        &no_seed(&f.store()).expect("no seed"),
+        &f.host(),
+        &Ctx::new(),
+    )
+    .expect("the build");
+    let store = Store::open(&f.store).expect("store");
+    let config = fs::read_to_string(store.path(&built.6.object.object_ref().expect("stored")))
+        .expect("the config");
+    assert!(config.contains("BR2_A_DATA=\"@data@\""), "{config}");
+    let at = f.path(&data).display().to_string();
+    assert!(!config.contains(&at), "{config}");
 }
 
 #[test]
