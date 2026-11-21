@@ -649,8 +649,9 @@ mod wrap_kind_tests {
     fn describe_and_the_node_name_the_same_wrap_kinds() {
         let mut parsed = Vec::new();
         for name in gaia_describe::WRAP_KINDS {
-            let kind = gaia_k230_image::WrapKind::parse(name)
-                .unwrap_or_else(|why| panic!("describe names '{name}', the node refuses it: {why}"));
+            let kind = gaia_k230_image::WrapKind::parse(name).unwrap_or_else(|why| {
+                panic!("describe names '{name}', the node refuses it: {why}")
+            });
             assert_eq!(kind.name(), name);
             parsed.push(kind);
         }
@@ -659,7 +660,10 @@ mod wrap_kind_tests {
             gaia_k230_image::WrapKind::UBoot,
             gaia_k230_image::WrapKind::OpensbiUimage,
         ] {
-            assert!(parsed.contains(&kind), "the node has {kind:?}, describe does not name it");
+            assert!(
+                parsed.contains(&kind),
+                "the node has {kind:?}, describe does not name it"
+            );
         }
         assert_eq!(parsed.len(), 3);
     }

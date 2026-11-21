@@ -26,7 +26,7 @@
 use std::fmt;
 
 pub mod node;
-pub use node::{NODES, WrapKind, wrap_bytes, verify};
+pub use node::{NODES, WrapKind, verify, wrap_bytes};
 use std::io::Write;
 
 use sha2::{Digest, Sha256};
@@ -84,7 +84,9 @@ impl fmt::Display for Error {
             Error::Padding => write!(f, "bytes 44..528 of the header are not all zero"),
             Error::Digest => write!(f, "the payload's SHA-256 does not match the header"),
             Error::GzipShort => write!(f, "gzip stream shorter than its header and trailer"),
-            Error::GzipMethod(cm) => write!(f, "gzip CM byte is {cm:#04x}, not 0x08 or the priv marker"),
+            Error::GzipMethod(cm) => {
+                write!(f, "gzip CM byte is {cm:#04x}, not 0x08 or the priv marker")
+            }
             Error::GzipCheck => write!(f, "gzip stream does not inflate to its ISIZE and CRC-32"),
             Error::Name(n) => write!(f, "uImage name is {n} bytes, the field holds 31"),
             Error::TooLarge => write!(f, "data is larger than a uImage size field holds"),
@@ -129,7 +131,10 @@ pub fn wrap_firstage(data: &[u8]) -> Vec<u8> {
 /// the length against the image, and the payload's SHA-256.
 pub fn parse_firstage(image: &[u8]) -> Result<Firstage<'_>, Error> {
     if image.len() < HEADER_LEN {
-        return Err(Error::Short { need: HEADER_LEN, have: image.len() });
+        return Err(Error::Short {
+            need: HEADER_LEN,
+            have: image.len(),
+        });
     }
     if &image[0..4] != MAGIC {
         return Err(Error::Magic);
@@ -144,7 +149,10 @@ pub fn parse_firstage(image: &[u8]) -> Result<Firstage<'_>, Error> {
     }
     let end = HEADER_LEN + payload_len as usize;
     if image.len() < end {
-        return Err(Error::Short { need: end, have: image.len() });
+        return Err(Error::Short {
+            need: end,
+            have: image.len(),
+        });
     }
     let payload = &image[HEADER_LEN..end];
     let mut digest = [0u8; 32];
@@ -152,7 +160,11 @@ pub fn parse_firstage(image: &[u8]) -> Result<Firstage<'_>, Error> {
     if Sha256::digest(payload).as_slice() != digest {
         return Err(Error::Digest);
     }
-    Ok(Firstage { payload_len, digest, payload })
+    Ok(Firstage {
+        payload_len,
+        digest,
+        payload,
+    })
 }
 
 /// Makes an ordinary gzip stream of `raw` (header with no optional fields,
@@ -248,7 +260,11 @@ fn crc32(parts: &[&[u8]]) -> u32 {
 }
 
 /// The 64-byte uImage header for data of `size` bytes whose CRC-32 is `dcrc`.
-pub fn uimage_header(fields: &UImageFields<'_>, size: u32, dcrc: u32) -> Result<[u8; UIMAGE_HEADER_LEN], Error> {
+pub fn uimage_header(
+    fields: &UImageFields<'_>,
+    size: u32,
+    dcrc: u32,
+) -> Result<[u8; UIMAGE_HEADER_LEN], Error> {
     let name = fields.name.as_bytes();
     if name.len() > 31 {
         return Err(Error::Name(name.len()));
@@ -284,7 +300,16 @@ pub fn uimage(fields: &UImageFields<'_>, data: &[u8]) -> Result<Vec<u8>, Error> 
 pub fn uboot_uimage(raw: &[u8], time: u32) -> Result<Vec<u8>, Error> {
     let stream = priv_gzip(raw)?;
     uimage(
-        &UImageFields { os: OS_U_BOOT, arch: ARCH_RISCV, kind: TYPE_FIRMWARE, comp: COMP_GZIP, load: 0, entry: 0, time, name: "uboot" },
+        &UImageFields {
+            os: OS_U_BOOT,
+            arch: ARCH_RISCV,
+            kind: TYPE_FIRMWARE,
+            comp: COMP_GZIP,
+            load: 0,
+            entry: 0,
+            time,
+            name: "uboot",
+        },
         &stream,
     )
 }
@@ -293,7 +318,16 @@ pub fn uboot_uimage(raw: &[u8], time: u32) -> Result<Vec<u8>, Error> {
 /// kernel-type uImage over the raw `fw_jump.bin`, no compression.
 pub fn opensbi_uimage(raw: &[u8], time: u32) -> Result<Vec<u8>, Error> {
     uimage(
-        &UImageFields { os: OS_LINUX, arch: ARCH_RISCV, kind: TYPE_KERNEL, comp: COMP_NONE, load: 0, entry: 0, time, name: "linux" },
+        &UImageFields {
+            os: OS_LINUX,
+            arch: ARCH_RISCV,
+            kind: TYPE_KERNEL,
+            comp: COMP_NONE,
+            load: 0,
+            entry: 0,
+            time,
+            name: "linux",
+        },
         raw,
     )
 }
@@ -317,7 +351,10 @@ pub struct UImageInfo {
 /// its header CRC and, given the data, the data CRC.
 pub fn check_uimage(image: &[u8]) -> Result<UImageInfo, Error> {
     if image.len() < UIMAGE_HEADER_LEN {
-        return Err(Error::Short { need: UIMAGE_HEADER_LEN, have: image.len() });
+        return Err(Error::Short {
+            need: UIMAGE_HEADER_LEN,
+            have: image.len(),
+        });
     }
     let be = |o: usize| u32::from_be_bytes([image[o], image[o + 1], image[o + 2], image[o + 3]]);
     if be(0) != UIMAGE_MAGIC {
@@ -332,7 +369,10 @@ pub fn check_uimage(image: &[u8]) -> Result<UImageInfo, Error> {
     }
     let size = be(12) as usize;
     if image.len() < UIMAGE_HEADER_LEN + size {
-        return Err(Error::Short { need: UIMAGE_HEADER_LEN + size, have: image.len() });
+        return Err(Error::Short {
+            need: UIMAGE_HEADER_LEN + size,
+            have: image.len(),
+        });
     }
     if crc32(&[&image[UIMAGE_HEADER_LEN..UIMAGE_HEADER_LEN + size]]) != be(24) {
         return Err(Error::UImageDataCrc);
@@ -375,7 +415,10 @@ mod tests {
             hex(&SPL_HEADER[12..44]),
             "4999d7e5c39f3d40ad752fb34bea38f233f10b50b2f7eb45726332ed29f618bc"
         );
-        assert!(matches!(parse_firstage(SPL_HEADER), Err(Error::Short { .. })));
+        assert!(matches!(
+            parse_firstage(SPL_HEADER),
+            Err(Error::Short { .. })
+        ));
     }
 
     #[test]
@@ -429,7 +472,9 @@ mod tests {
 
     #[test]
     fn priv_gzip_round_trips_and_is_marked() {
-        let raw: Vec<u8> = (0..50_000u32).flat_map(|i| (i % 97).to_le_bytes()).collect();
+        let raw: Vec<u8> = (0..50_000u32)
+            .flat_map(|i| (i % 97).to_le_bytes())
+            .collect();
         let stream = priv_gzip(&raw).expect("compresses");
         assert_eq!(&stream[0..2], &[0x1f, 0x8b]);
         assert_eq!(stream[2], PRIV_GZIP_CM);
@@ -457,7 +502,8 @@ mod tests {
     }
 
     const UBOOT_UIMAGE_HEADER: &[u8] = include_bytes!("../tests/fixtures/uboot-uimage.header.bin");
-    const OPENSBI_UIMAGE_HEADER: &[u8] = include_bytes!("../tests/fixtures/opensbi-uimage.header.bin");
+    const OPENSBI_UIMAGE_HEADER: &[u8] =
+        include_bytes!("../tests/fixtures/opensbi-uimage.header.bin");
 
     #[test]
     fn uboot_uimage_header_reproduces_the_probe_bytes() {
@@ -465,8 +511,14 @@ mod tests {
         // 1794142272. The header is rebuilt from those fields and must be the
         // 64 bytes the image holds (its header CRC is checked too).
         let fields = UImageFields {
-            os: OS_U_BOOT, arch: ARCH_RISCV, kind: TYPE_FIRMWARE, comp: COMP_GZIP,
-            load: 0, entry: 0, time: 1_794_142_272, name: "uboot",
+            os: OS_U_BOOT,
+            arch: ARCH_RISCV,
+            kind: TYPE_FIRMWARE,
+            comp: COMP_GZIP,
+            load: 0,
+            entry: 0,
+            time: 1_794_142_272,
+            name: "uboot",
         };
         let h = uimage_header(&fields, 314_671, 0x9764_8f44).expect("header");
         assert_eq!(&h[..], UBOOT_UIMAGE_HEADER);
@@ -478,8 +530,14 @@ mod tests {
         // The probe's fw_jump_add_uboot_head.bin: size 139,656, data CRC
         // 0x91a98d33, time 1794142285, kernel type, no compression.
         let fields = UImageFields {
-            os: OS_LINUX, arch: ARCH_RISCV, kind: TYPE_KERNEL, comp: COMP_NONE,
-            load: 0, entry: 0, time: 1_794_142_285, name: "linux",
+            os: OS_LINUX,
+            arch: ARCH_RISCV,
+            kind: TYPE_KERNEL,
+            comp: COMP_NONE,
+            load: 0,
+            entry: 0,
+            time: 1_794_142_285,
+            name: "linux",
         };
         let h = uimage_header(&fields, 139_656, 0x91a9_8d33).expect("header");
         assert_eq!(&h[..], OPENSBI_UIMAGE_HEADER);
@@ -489,8 +547,14 @@ mod tests {
     fn check_uimage_reads_back_what_was_written() {
         let data = b"raw second stage".to_vec();
         let fields = UImageFields {
-            os: OS_LINUX, arch: ARCH_RISCV, kind: TYPE_KERNEL, comp: COMP_NONE,
-            load: 0, entry: 0, time: 0, name: "linux",
+            os: OS_LINUX,
+            arch: ARCH_RISCV,
+            kind: TYPE_KERNEL,
+            comp: COMP_NONE,
+            load: 0,
+            entry: 0,
+            time: 0,
+            name: "linux",
         };
         let image = uimage(&fields, &data).expect("uimage");
         let info = check_uimage(&image).expect("checks");
@@ -510,14 +574,20 @@ mod tests {
         let raw: Vec<u8> = (0..20_000u32).map(|i| (i % 211) as u8).collect();
         let uimage = uboot_uimage(&raw, 0).expect("uimage");
         let info = check_uimage(&uimage).expect("checks");
-        assert_eq!((info.os, info.kind, info.comp), (OS_U_BOOT, TYPE_FIRMWARE, COMP_GZIP));
+        assert_eq!(
+            (info.os, info.kind, info.comp),
+            (OS_U_BOOT, TYPE_FIRMWARE, COMP_GZIP)
+        );
         // The data is the priv-marked stream, which undoes to the raw U-Boot.
         let stream = &uimage[UIMAGE_HEADER_LEN..];
         assert_eq!(stream[2], PRIV_GZIP_CM);
         assert_eq!(undo_priv_gzip(stream).expect("inflates"), raw);
         // The first stage over it passes its own check.
         let image = wrap_firstage(&uimage);
-        assert_eq!(parse_firstage(&image).expect("parses").payload_len as usize, VERSION_LEN + uimage.len());
+        assert_eq!(
+            parse_firstage(&image).expect("parses").payload_len as usize,
+            VERSION_LEN + uimage.len()
+        );
     }
 
     const HEADER_LEN_FOR_TEST: usize = UIMAGE_HEADER_LEN + 3;

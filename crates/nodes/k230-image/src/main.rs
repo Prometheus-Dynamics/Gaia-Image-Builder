@@ -22,7 +22,10 @@ fn uimage_args(args: &[String]) -> Result<(gaia_k230_image::UImageFields<'_>, &s
     while i < args.len() {
         let flag = args[i].as_str();
         if let Some(_) = flag.strip_prefix("--") {
-            let value = args.get(i + 1).ok_or_else(|| format!("{flag} needs a value"))?.as_str();
+            let value = args
+                .get(i + 1)
+                .ok_or_else(|| format!("{flag} needs a value"))?
+                .as_str();
             match flag {
                 "--os" => os = Some(value),
                 "--type" => kind = Some(value),
@@ -79,10 +82,20 @@ fn uimage_args(args: &[String]) -> Result<(gaia_k230_image::UImageFields<'_>, &s
 
 fn main() -> ExitCode {
     let args: Vec<String> = std::env::args().skip(1).collect();
-    let result = match args.iter().map(String::as_str).collect::<Vec<_>>().as_slice() {
-        ["wrap", input, output] => std::fs::read(input)
-            .map_err(|e| e.to_string())
-            .and_then(|data| std::fs::write(output, gaia_k230_image::wrap_firstage(&data)).map_err(|e| e.to_string())),
+    let result = match args
+        .iter()
+        .map(String::as_str)
+        .collect::<Vec<_>>()
+        .as_slice()
+    {
+        ["wrap", input, output] => {
+            std::fs::read(input)
+                .map_err(|e| e.to_string())
+                .and_then(|data| {
+                    std::fs::write(output, gaia_k230_image::wrap_firstage(&data))
+                        .map_err(|e| e.to_string())
+                })
+        }
         ["priv-gzip", input, output] => std::fs::read(input)
             .map_err(|e| e.to_string())
             .and_then(|raw| gaia_k230_image::priv_gzip(&raw).map_err(|e| e.to_string()))
@@ -95,12 +108,14 @@ fn main() -> ExitCode {
                 std::fs::write(output, image).map_err(|e| e.to_string())
             })
         }
-        ["check", image] => std::fs::read(image).map_err(|e| e.to_string()).and_then(|bytes| {
-            let parsed = gaia_k230_image::parse_firstage(&bytes).map_err(|e| e.to_string())?;
-            let hex: String = parsed.digest.iter().map(|b| format!("{b:02x}")).collect();
-            println!("payload_len={} sha256={hex}", parsed.payload_len);
-            Ok(())
-        }),
+        ["check", image] => std::fs::read(image)
+            .map_err(|e| e.to_string())
+            .and_then(|bytes| {
+                let parsed = gaia_k230_image::parse_firstage(&bytes).map_err(|e| e.to_string())?;
+                let hex: String = parsed.digest.iter().map(|b| format!("{b:02x}")).collect();
+                println!("payload_len={} sha256={hex}", parsed.payload_len);
+                Ok(())
+            }),
         _ => Err("usage: k230-firstage wrap IN OUT | priv-gzip IN OUT | check IMAGE".to_string()),
     };
     match result {

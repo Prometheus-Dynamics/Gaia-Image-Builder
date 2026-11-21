@@ -18,8 +18,9 @@ device_tree_dir = "assets/dts"
 # second patch below, only the stdout-path line.
 [bootloader]
 defconfig = "k230d_canmv_junroc_ai_cam"
+# After the family's patches (the SDK's U-Boot overlay and the SPL start
+# fix), this board's console on UART0.
 patches = [
-  { file = "../k230/assets/patches/u-boot-v2022.10-k230d.patch" },
   { file = "assets/patches/u-boot-v2022.10-k230d-ai-cam-console-uart0.patch" },
 ]
 

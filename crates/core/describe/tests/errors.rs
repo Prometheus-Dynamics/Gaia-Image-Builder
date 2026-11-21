@@ -398,13 +398,21 @@ fn a_wrapped_area_parses_with_its_kind() {
         ("b/frag", ""),
     ]);
     let board = Board::read(&dir.path().join("b/board.toml")).expect("parses");
-    assert_eq!(board.partitions[0].wrap.as_deref(), Some("k230-first-stage"));
+    assert_eq!(
+        board.partitions[0].wrap.as_deref(),
+        Some("k230-first-stage")
+    );
 }
 
 fn board_with_area(area: &str) -> (Result<Board, Error>, tempfile::TempDir) {
     let dir = files(&[
         ("family.toml", FAMILY),
-        ("b/board.toml", &format!("version = 1\nname = \"b\"\n[target]\narch = \"riscv64\"\n[[partitions]]\nname = \"env\"\nrole = \"raw\"\noffset = \"3M\"\nin_table = false\n{area}\n")),
+        (
+            "b/board.toml",
+            &format!(
+                "version = 1\nname = \"b\"\n[target]\narch = \"riscv64\"\n[[partitions]]\nname = \"env\"\nrole = \"raw\"\noffset = \"3M\"\nin_table = false\n{area}\n"
+            ),
+        ),
         ("b/assets/env.bin", "x"),
         ("b/frag", ""),
     ]);
@@ -416,14 +424,24 @@ fn board_with_area(area: &str) -> (Result<Board, Error>, tempfile::TempDir) {
 fn an_area_given_both_a_file_and_content_is_refused() {
     let (read, dir) = board_with_area("file = \"assets/env.bin\"\ncontent = \"u-boot-env.bin\"");
     let error = read.expect_err("both");
-    assert_names(&error, &dir.path().join("b/board.toml"), "partitions[0].file", "not both");
+    assert_names(
+        &error,
+        &dir.path().join("b/board.toml"),
+        "partitions[0].file",
+        "not both",
+    );
 }
 
 #[test]
 fn a_file_for_an_area_that_is_missing_is_refused_at_its_key() {
     let (read, dir) = board_with_area("file = \"assets/absent.bin\"");
     let error = read.expect_err("missing");
-    assert_names(&error, &dir.path().join("b/board.toml"), "partitions[0].file", "no file");
+    assert_names(
+        &error,
+        &dir.path().join("b/board.toml"),
+        "partitions[0].file",
+        "no file",
+    );
 }
 
 #[test]
@@ -444,10 +462,18 @@ fn an_area_with_neither_parses_as_it_did() {
 fn a_file_on_a_table_partition_is_refused() {
     let dir = files(&[
         ("family.toml", FAMILY),
-        ("b/board.toml", "version = 1\nname = \"b\"\n[target]\narch = \"riscv64\"\n[[partitions]]\nname = \"rootfs\"\nrole = \"rootfs\"\ntype = \"x\"\nfile = \"assets/env.bin\"\n"),
+        (
+            "b/board.toml",
+            "version = 1\nname = \"b\"\n[target]\narch = \"riscv64\"\n[[partitions]]\nname = \"rootfs\"\nrole = \"rootfs\"\ntype = \"x\"\nfile = \"assets/env.bin\"\n",
+        ),
         ("b/assets/env.bin", "x"),
         ("b/frag", ""),
     ]);
     let error = Board::read(&dir.path().join("b/board.toml")).expect_err("in table");
-    assert_names(&error, &dir.path().join("b/board.toml"), "partitions[0].file", "in the table");
+    assert_names(
+        &error,
+        &dir.path().join("b/board.toml"),
+        "partitions[0].file",
+        "in the table",
+    );
 }

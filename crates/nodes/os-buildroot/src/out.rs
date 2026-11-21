@@ -344,7 +344,12 @@ mod tests {
 
     #[test]
     fn opensbi_firmware_is_a_bootloader_file() {
-        for name in ["fw_jump.bin", "fw_dynamic.bin", "fw_payload.bin", "fw_jump.elf"] {
+        for name in [
+            "fw_jump.bin",
+            "fw_dynamic.bin",
+            "fw_payload.bin",
+            "fw_jump.elf",
+        ] {
             assert_eq!(bucket(name, true), Bucket::Bootloader, "{name}");
         }
         // Not OpenSBI's: a name that merely contains "fw".

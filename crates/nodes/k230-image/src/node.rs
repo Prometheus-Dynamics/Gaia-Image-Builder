@@ -106,7 +106,11 @@ pub fn verify(kind: WrapKind, out: &[u8]) -> Result<(), String> {
 
 /// The node: the file `path` of the tree `from` (the bootloader output), wrapped
 /// as `kind` says, as a tree holding that file under the same name.
-#[node(id = "gaia.firmware.k230", inputs(store, from, path, kind), outputs(wrapped))]
+#[node(
+    id = "gaia.firmware.k230",
+    inputs(store, from, path, kind),
+    outputs(wrapped)
+)]
 pub fn firmware_k230(
     store: &str,
     from: &Artifact,
@@ -118,7 +122,9 @@ pub fn firmware_k230(
     let wrap = WrapKind::parse(kind).map_err(fail)?;
     let store = Store::open(store).map_err(StepError::store(NAME))?;
     if from.object.kind != gaia_types::ObjectKind::Tree {
-        return Err(fail("its source is a file, not a tree to pick a file from".into()));
+        return Err(fail(
+            "its source is a file, not a tree to pick a file from".into(),
+        ));
     }
     let object = from
         .object
@@ -142,7 +148,7 @@ pub fn firmware_k230(
     let made = Step::new(&store, cx, NAME, key).look_up_or_make(
         &[("tree", Path::new("tree"))],
         |work| {
-            let bytes = wrap_bytes(wrap, &raw).map_err(|why| fail(why))?;
+            let bytes = wrap_bytes(wrap, &raw).map_err(&fail)?;
             let dir = work.dir().join("tree");
             std::fs::create_dir(&dir).map_err(|e| StepError::body(NAME, e))?;
             std::fs::write(dir.join(path), bytes).map_err(|e| fail(format!("write: {e}")))
@@ -163,7 +169,11 @@ mod tests {
 
     #[test]
     fn kinds_parse_and_name_themselves() {
-        for kind in [WrapKind::FirstStage, WrapKind::UBoot, WrapKind::OpensbiUimage] {
+        for kind in [
+            WrapKind::FirstStage,
+            WrapKind::UBoot,
+            WrapKind::OpensbiUimage,
+        ] {
             assert_eq!(WrapKind::parse(kind.name()), Ok(kind));
         }
         let why = WrapKind::parse("k230-spl").expect_err("unknown");

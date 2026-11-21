@@ -675,14 +675,20 @@ fn check_refs(
                 return Err(Error::new(
                     path,
                     key,
-                    format!("area '{}' is in the table; a file is written only to an area outside it (`in_table = false`)", need.name),
+                    format!(
+                        "area '{}' is in the table; a file is written only to an area outside it (`in_table = false`)",
+                        need.name
+                    ),
                 ));
             }
             if need.wrap.is_some() {
                 return Err(Error::new(
                     path,
                     key,
-                    format!("area '{}': a `wrap` applies to the bootloader's file; a board file is written as it is", need.name),
+                    format!(
+                        "area '{}': a `wrap` applies to the bootloader's file; a board file is written as it is",
+                        need.name
+                    ),
                 ));
             }
             if !beside.path().is_file() {
@@ -698,10 +704,7 @@ fn check_refs(
                 return Err(Error::new(
                     path,
                     format!("partitions[{index}].wrap"),
-                    format!(
-                        "'{wrap}' is not a wrap kind: use {}",
-                        WRAP_KINDS.join(", ")
-                    ),
+                    format!("'{wrap}' is not a wrap kind: use {}", WRAP_KINDS.join(", ")),
                 ));
             }
             if need.content.is_none() || need.in_table {

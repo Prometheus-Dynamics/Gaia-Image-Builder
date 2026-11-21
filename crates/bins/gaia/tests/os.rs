@@ -37,7 +37,12 @@ fn plan(dir: &Path, extra: &[&str]) -> Output {
 
 /// `plan` with environment variables set for the run.
 fn plan_env(dir: &Path, extra: &[&str], env: &[(&str, &str)]) -> Output {
-    plan_product_env(dir, "examples/products/zero-3e-demo/product.toml", extra, env)
+    plan_product_env(
+        dir,
+        "examples/products/zero-3e-demo/product.toml",
+        extra,
+        env,
+    )
 }
 
 fn plan_product(dir: &Path, product: &str, extra: &[&str]) -> Output {
@@ -2249,7 +2254,11 @@ fn without_users_or_services_there_is_no_accounts_or_services_layer() {
 #[test]
 fn the_k230_wrapped_areas_go_through_firmware_k230() {
     let dir = project();
-    let out = plan_product(dir.path(), "examples/products/k230d-ai-cam/product.toml", &[]);
+    let out = plan_product(
+        dir.path(),
+        "examples/products/k230d-ai-cam/product.toml",
+        &[],
+    );
     assert_eq!(out.status.code(), Some(0));
     let text = String::from_utf8_lossy(&out.stdout);
     for line in [
