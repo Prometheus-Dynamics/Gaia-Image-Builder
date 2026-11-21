@@ -731,7 +731,10 @@ fn build(
     };
     // How full the shared pool was while this build ran.
     let sampler = crate::jobs::sample(&host.make, usize::try_from(host.jobs).unwrap_or(usize::MAX));
-    let result = build_steps(work, prepared, seed, host, warm);
+    let label = part_label(prepared);
+    let result = in_slot(NAME, work, host, label, |work, slot| {
+        build_steps(work, prepared, seed, host, warm, slot)
+    });
     if let Some(sampler) = sampler {
         work.detail(crate::jobs::SAMPLE_DETAIL, sampler.finish());
     }
@@ -745,10 +748,8 @@ fn build_steps(
     seed: &Path,
     host: &BuildrootHost,
     warm: Option<&dev::Warm>,
+    slot: &jobs::Slot<'_>,
 ) -> Result<(), StepError> {
-    // The builds of this process share one job count: this build's slot in
-    // it, held until the build's last make is done.
-    let slot = admit(NAME, host, &|| work.cancelled())?;
     let fail = |why: String| StepError::body(NAME, why);
     let io_fail = |what: &'static str| {
         move |error: io::Error| StepError::body(NAME, format!("{what}: {error}"))
@@ -758,11 +759,11 @@ fn build_steps(
     let (out, resolved, manifest) = match warm {
         None => {
             let out = dir.join("out");
-            let resolved = fresh_out(work, prepared, seed, host, &slot, &out)?;
+            let resolved = fresh_out(work, prepared, seed, host, slot, &out)?;
             (out, resolved, None)
         }
         Some(warm) => {
-            let (resolved, manifest) = warm_out(work, prepared, seed, host, &slot, warm)?;
+            let (resolved, manifest) = warm_out(work, prepared, seed, host, slot, warm)?;
             (warm.out(), resolved, Some(manifest))
         }
     };
@@ -808,7 +809,7 @@ fn build_steps(
             continue;
         }
         let goal = format!("{package}-configure");
-        work.run(&make_tool(host, src, &out, vars, &[goal.as_str()], &slot))?;
+        work.run(&make_tool(host, src, &out, vars, &[goal.as_str()], slot))?;
         let mut fragments = Vec::new();
         for file in complete.into_iter().chain(files.split_whitespace()) {
             let text = fs::read_to_string(file)
@@ -855,7 +856,7 @@ fn build_steps(
 
     let shown = Arc::new(Mutex::new(String::new()));
     let sink = shown.clone();
-    let order = make_tool(host, src, &out, vars, &["show-build-order"], &slot).on_line(
+    let order = make_tool(host, src, &out, vars, &["show-build-order"], slot).on_line(
         move |stream, line| {
             if stream == Stream::Stdout
                 && let Ok(mut text) = sink.lock()
@@ -877,7 +878,7 @@ fn build_steps(
     let jobs_sink = jobs.clone();
     let mismatches = dlpool::Mismatches::default();
     let seen = mismatches.clone();
-    let build = make_tool(host, src, &out, vars, &[], &slot).on_line(move |_, line| {
+    let build = make_tool(host, src, &out, vars, &[], slot).on_line(move |_, line| {
         pool::feed(&jobs_sink, line);
         seen.line(line);
         if let Some(name) = progress::installed_to_target(line)
@@ -1157,12 +1158,66 @@ pub(crate) fn admit(
     step: &'static str,
     host: &BuildrootHost,
     cancelled: &dyn Fn() -> bool,
+    yields: bool,
+    label: &str,
 ) -> Result<jobs::Slot<'static>, StepError> {
     let jobs = usize::try_from(host.jobs).unwrap_or(usize::MAX);
-    jobs::admit(&host.make, jobs, cancelled).map_err(|refused| match refused {
+    jobs::admit(&host.make, jobs, cancelled, yields, label).map_err(|refused| match refused {
         jobs::Refused::Cancelled => StepError::new(step, ErrorKind::Cancelled, Vec::new()),
         jobs::Refused::Pool(why) => StepError::body(step, why),
     })
+}
+
+/// Runs `body` in this build's slot in the process's jobserver, held until
+/// the build's last make is done. The slot yields to the builds without
+/// slack when the step's records say this one has some (see
+/// `gaia_step::slack`), and the step records what that did, or why it did
+/// not yield, as [`jobs::YIELD_DETAIL`]. `label` names the build in the
+/// other builds' records.
+pub(crate) fn in_slot<T>(
+    step: &'static str,
+    work: &mut Work<'_>,
+    host: &BuildrootHost,
+    label: &str,
+    body: impl FnOnce(&mut Work<'_>, &jobs::Slot<'_>) -> Result<T, StepError>,
+) -> Result<T, StepError> {
+    // Runs are compared at the same job count, so the record has it first.
+    work.jobs(host.jobs);
+    let decision = work.slack();
+    let slot = admit(step, host, &|| work.cancelled(), decision.yields(), label)?;
+    let result = body(work, &slot);
+    let detail = match slot.yielded() {
+        Some(done) => {
+            work.yielded();
+            done.detail(&decision.to_string())
+        }
+        None if decision.yields() => serde_json::json!({
+            "yielded": false,
+            "why": format!(
+                "shares the main pool: {} ({decision})",
+                slot.shares().unwrap_or("no yielding pool")
+            ),
+        }),
+        None => serde_json::json!({ "yielded": false, "why": decision.to_string() }),
+    };
+    let mut detail = detail;
+    detail["label"] = label.into();
+    work.detail(jobs::YIELD_DETAIL, detail);
+    result
+}
+
+/// Which of an image's Buildroot builds `prepared` is, for the records: the
+/// kernel's and the bootloader's have the board's fragment of that name
+/// (see the graph's OS split), and the root filesystem's has neither.
+fn part_label(prepared: &Prepared) -> &'static str {
+    let has = |name: &str| prepared.fragments.iter().any(|f| f.name == name);
+    if has("board.kernel") {
+        "kernel"
+    } else if has("board.bootloader") {
+        "bootloader"
+    } else {
+        "root filesystem"
+    }
 }
 
 /// The make command for `goals`: its arguments, in order, for a test to
@@ -1244,6 +1299,11 @@ pub(crate) fn make_tool(
     for (name, value) in kbuild::env(src) {
         tool = tool.env(name, value);
     }
+    // A yielding build runs at the lowest priority (see `jobs`).
+    let tool = match slot.nice() {
+        Some(nice) => tool.nice(nice),
+        None => tool,
+    };
     match slot.makeflags() {
         Some(flags) => {
             let mut tool = tool.env("MAKEFLAGS", flags);

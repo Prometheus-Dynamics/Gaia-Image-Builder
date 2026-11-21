@@ -144,6 +144,19 @@ pub struct Report {
     /// What the body reported with [`crate::Work::detail`], by name.
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub details: BTreeMap<String, serde_json::Value>,
+    /// The step's shape (`sha256:...`): its kind and the names of its key's
+    /// config entries and inputs. What a later run knows the step by, since
+    /// its key changes with its content. See [`crate::slack`].
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub shape: Option<String>,
+    /// The digests of the inputs its key was made from (`sha256:...`):
+    /// with the other steps' outputs, the run's graph as it ran.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub inputs: Vec<String>,
+    /// Whether the step yielded the shared job pool to the steps on the
+    /// run's critical path (see [`crate::slack`]).
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub yielded: bool,
 }
 
 /// The way work directory sizes are measured now. 2: a file with many

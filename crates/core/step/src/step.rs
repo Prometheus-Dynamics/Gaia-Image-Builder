@@ -260,8 +260,13 @@ impl<'a> Step<'a> {
         report: Report,
         work_bytes: Option<u64>,
     ) -> std::io::Result<crate::StepRecord> {
+        let shape = crate::key::shape_of(&self.key);
         let report = Report {
             size_measure: work_bytes.map(|_| crate::log::SIZE_MEASURE),
+            shape: shape.as_ref().map(|shape| shape.shape.to_string()),
+            inputs: shape
+                .map(|shape| shape.inputs.iter().map(ToString::to_string).collect())
+                .unwrap_or_default(),
             ..report
         };
         let record = crate::StepRecord {
@@ -376,6 +381,32 @@ impl Work<'_> {
     /// make, say.
     pub fn jobs(&mut self, jobs: u32) {
         self.report.jobs = Some(jobs);
+    }
+
+    /// Whether this step yields the shared job pool to the steps on the
+    /// run's critical path, from the step records of its shape at the job
+    /// count set with [`Work::jobs`] (see [`crate::slack`]); never when
+    /// [`crate::slack::OFF`] is set. Read when asked: the records are read
+    /// whole.
+    pub fn slack(&self) -> crate::slack::Decision {
+        if crate::slack::off(std::env::var_os(crate::slack::OFF).as_deref()) {
+            return crate::slack::Decision {
+                yields: false,
+                why: crate::slack::Why::Off,
+            };
+        }
+        let shape = crate::key::shape_of(&self.key).map(|shape| shape.shape.to_string());
+        crate::slack::decide(
+            &crate::step_records(self.logs),
+            shape.as_deref(),
+            self.report.jobs,
+        )
+    }
+
+    /// Marks the step's record as having yielded (see [`crate::slack`]), so
+    /// the next run can tell whether it ended in time.
+    pub fn yielded(&mut self) {
+        self.report.yielded = true;
     }
 
     /// Adds `value` to the step's record under `name`, replacing an earlier

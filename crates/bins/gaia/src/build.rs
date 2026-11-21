@@ -133,9 +133,13 @@ fn build_one(options: &args::Project) -> Result<Run, Stop> {
     let pid = std::process::id();
     // A step without a job count of its own was given the build's budget.
     let budget = u32::try_from(jobs).unwrap_or(u32::MAX);
-    let steps: Vec<record::Step> = step_records(&logs_dir(&store))
+    let records: Vec<gaia_step::StepRecord> = step_records(&logs_dir(&store))
         .into_iter()
         .filter(|r| r.pid == pid && r.start_ns >= start_ns)
+        .collect();
+    let yields = timing::yield_summary(&records);
+    let steps: Vec<record::Step> = records
+        .into_iter()
         .map(|r| record::Step {
             step: r.step,
             key: r.key.0.to_string(),
@@ -245,6 +249,9 @@ fn build_one(options: &args::Project) -> Result<Run, Stop> {
     eprint!("{}", timing::report(&items, &run.critical_path));
     if let Some(pool) = &pool {
         eprintln!("{pool}");
+    }
+    if let Some(yields) = &yields {
+        eprintln!("{yields}");
     }
     println!(
         "{outcome} in {:.1} s; recorded in {}",

@@ -60,7 +60,8 @@ pub use entry::{StepEntry, StepKey};
 pub use fsutil::{copy_file, used_bytes};
 pub use object::{Kind, ObjectRef};
 pub use placement::{
-    MemoryHold, Mode, Room, Settings, held_memory, hold_memory, parse_size, ram_root,
+    MemoryHold, Mode, RESERVE_BYTES, Room, Settings, held_memory, hold_memory, parse_mem_available,
+    parse_size, ram_root,
 };
 pub use retain::{Keep, RetainReport};
 pub use scratch::Scratch;

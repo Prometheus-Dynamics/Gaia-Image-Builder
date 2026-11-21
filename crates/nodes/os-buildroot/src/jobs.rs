@@ -29,6 +29,32 @@
 //! the build's sandbox (bwrap, in its own user namespace) may not open
 //! another process's descriptors, and would fall back to one job.
 //!
+//! Yielding. A build with slack (see `gaia_step::slack`) takes a yielding
+//! slot: its make reads a second fifo, with tokens of its own (as many as
+//! the main fifo's), and runs at the lowest priority ([`NICE`]). The builds
+//! without slack keep every token of the main fifo, and the processor goes
+//! to them first: a yielding build's jobs run on the CPU they leave idle,
+//! and at full speed when they leave it all. A yielding make has its own
+//! first job like any other. Its jobs are beside the bound: they take only
+//! what the builds of the bound leave, so what is beyond it is processes
+//! waiting, not CPU taken from them. (Tokens are not lent from one fifo to
+//! the other: a make takes a token it gives back again at once, so tokens
+//! once lent could not be taken back for the builds without slack.) A
+//! [`Yield`] says how many of its tokens a yielding build held, over time,
+//! while builds without slack ran beside it.
+//!
+//! The yielding fifo is made with the first yielding build, and only where
+//! the lowest priority takes effect ([`nice_takes_effect`]): under cgroup
+//! v1, or in a cgroup without the cpu controller, the kernel's autogroups
+//! give each session (each sandbox) an equal share whatever its niceness,
+//! and a second pool there would be plain oversubscription. Then a yielding
+//! build shares the main fifo as any build does, and says why. Its tokens
+//! are sized from memory as well as jobs ([`yield_tokens`]), since its jobs
+//! are beside the bound: as many as the main fifo's, but no more than the
+//! memory available beyond Gaia's reserve holds at [`JOB_BYTES`] a job, and
+//! none when that is less than one. A yielding make always has its first
+//! job.
+//!
 //! How full the pool is, over a build: a [`Sampler`] reads the fifo's byte
 //! count (its free tokens) every [`SAMPLE`] while the build runs, and the
 //! build records the series as the [`SAMPLE_DETAIL`] detail. A pool at zero
@@ -63,6 +89,20 @@ const SAMPLE: Duration = Duration::from_secs(1);
 /// The detail a build records its pool's free tokens under.
 pub(crate) const SAMPLE_DETAIL: &str = "job-pool-free";
 
+/// The niceness a yielding build's make runs at: the lowest priority.
+pub(crate) const NICE: i32 = 19;
+
+/// The memory one job of a yielding build is taken to need, for sizing its
+/// fifo: a compiler job of a large C or C++ file. A link of a large program
+/// takes more, and is one job among many.
+pub(crate) const JOB_BYTES: u64 = 1 << 30;
+
+/// How often the count of a yielding build's held tokens is read.
+const COUNT: Duration = Duration::from_millis(100);
+
+/// The detail a build records what yielding did under.
+pub(crate) const YIELD_DETAIL: &str = "job-pool-yield";
+
 /// The pool's name for each fifo it makes, unique within the process.
 static FIFOS: AtomicUsize = AtomicUsize::new(0);
 
@@ -77,12 +117,127 @@ pub(crate) struct Jobserver {
     /// Slots not taken.
     free: Mutex<usize>,
     released: Condvar,
+    /// The yielding fifo, made with the first yielding slot of a pool with a
+    /// fifo; or why the yielding builds share the main one.
+    yielding: Arc<OnceLock<Result<Yielding, String>>>,
+    /// How the yielding fifo's tokens are counted: [`yield_size`], or a
+    /// test's.
+    size: fn(usize) -> Result<usize, String>,
+    /// The builds running, and what the yielding ones held.
+    count: Arc<Mutex<Count>>,
+    /// The counting thread, started with the yielding fifo.
+    counting: OnceLock<()>,
+}
+
+/// The second fifo of a pool, for the builds that yield.
+struct Yielding {
+    /// The fifo's descriptor, held so the pipe lives.
+    pipe: File,
+    /// Its tokens when none is taken.
+    tokens: u64,
+    makeflags: String,
+}
+
+/// The builds running, and what the yielding ones held beside main builds.
+#[derive(Debug, Default)]
+struct Count {
+    /// The labels of the main builds running, one entry per slot.
+    main: Vec<String>,
+    /// The yielding builds running.
+    yielding: usize,
+    /// The yielding fifo's tokens held while main builds ran, summed over
+    /// time, in token-nanoseconds.
+    beside_ns: u128,
+    /// The labels of the main builds seen running beside a yielding one.
+    seen: Vec<String>,
 }
 
 /// One build's slot. Held while its make runs, and given back when dropped,
 /// on success, failure or unwinding alike.
 pub(crate) struct Slot<'a> {
     pool: &'a Jobserver,
+    /// Whether the build yields, and its label.
+    yields: bool,
+    label: String,
+    /// Why a build asked to yield shares the main fifo, when it does.
+    shares: Option<String>,
+    /// The count when the slot was taken.
+    beside_ns: u128,
+}
+
+/// What yielding did over one yielding build: the main builds it yielded
+/// to, the jobs of the yielding pool (its tokens and a make's own job), and
+/// the token-seconds the yielding builds held while main builds ran beside
+/// them, at the lowest priority.
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) struct Yield {
+    pub(crate) to: Vec<String>,
+    pub(crate) pool_jobs: u64,
+    pub(crate) beside_token_s: f64,
+}
+
+/// Whether the lowest priority takes effect for this process's children,
+/// from the autogroup switch (`/proc/sys/kernel/sched_autogroup_enabled`,
+/// `None` when absent), `/proc/self/cgroup`, and the `cgroup.controllers`
+/// of a cgroup v2 path. With autogroups off it does. With them on, a
+/// process in the root cgroup, or under cgroup v1, has its session's
+/// autogroup weighed against the others' whatever its niceness; in a cgroup
+/// v2 group with the cpu controller, the group is weighed and niceness
+/// counts within it.
+pub(crate) fn nice_takes_effect(
+    autogroup: Option<&str>,
+    cgroup: &str,
+    controllers: impl Fn(&str) -> Option<String>,
+) -> Result<(), String> {
+    if autogroup.is_none_or(|on| on.trim() == "0") {
+        return Ok(());
+    }
+    let mut lines = cgroup.lines().filter(|line| !line.is_empty());
+    let path = match (
+        lines.next().and_then(|line| line.strip_prefix("0::")),
+        lines.next(),
+    ) {
+        (Some(path), None) => path.trim(),
+        _ => return Err("cgroup v1, where autogroups ignore niceness".into()),
+    };
+    if path == "/" {
+        return Err("the root cgroup, where autogroups ignore niceness".into());
+    }
+    let delegated = controllers(path).is_some_and(|list| {
+        list.split_whitespace()
+            .any(|controller| controller == "cpu")
+    });
+    if delegated {
+        Ok(())
+    } else {
+        Err(format!(
+            "no cpu controller in cgroup {path}, where autogroups ignore niceness"
+        ))
+    }
+}
+
+/// The tokens of a yielding fifo: the main fifo's `main_tokens`, but no
+/// more than `available` bytes of memory (MemAvailable, less what this
+/// process holds) beyond Gaia's reserve (`gaia_store::RESERVE_BYTES`) hold
+/// at [`JOB_BYTES`] a job; none when the memory is unknown.
+pub(crate) fn yield_tokens(main_tokens: usize, available: Option<u64>) -> usize {
+    let headroom = available.map_or(0, |bytes| bytes.saturating_sub(gaia_store::RESERVE_BYTES));
+    main_tokens.min(usize::try_from(headroom / JOB_BYTES).unwrap_or(usize::MAX))
+}
+
+/// This machine's yielding fifo size for a pool of `main_tokens` tokens, or
+/// why there is none.
+fn yield_size(main_tokens: usize) -> Result<usize, String> {
+    let autogroup = fs::read_to_string("/proc/sys/kernel/sched_autogroup_enabled").ok();
+    let cgroup = fs::read_to_string("/proc/self/cgroup").unwrap_or_default();
+    nice_takes_effect(autogroup.as_deref(), &cgroup, |path| {
+        fs::read_to_string(format!("/sys/fs/cgroup{path}/cgroup.controllers")).ok()
+    })?;
+    let available = fs::read_to_string("/proc/meminfo")
+        .ok()
+        .and_then(|text| gaia_store::parse_mem_available(&text))
+        .map(|bytes| bytes.saturating_sub(gaia_store::held_memory()));
+    Ok(yield_tokens(main_tokens, available))
 }
 
 /// The pool of this process for `jobs` jobs, made with `make` on first use.
@@ -153,14 +308,59 @@ impl Jobserver {
             _pipe: pipe,
             free: Mutex::new(builds),
             released: Condvar::new(),
+            yielding: Arc::new(OnceLock::new()),
+            size: yield_size,
+            count: Arc::new(Mutex::new(Count::default())),
+            counting: OnceLock::new(),
         })
+    }
+
+    /// This pool with its yielding fifo sized by `size` instead of
+    /// [`yield_size`].
+    #[cfg(test)]
+    fn sized(mut self, size: fn(usize) -> Result<usize, String>) -> Self {
+        self.size = size;
+        self
+    }
+
+    /// The yielding fifo, made now if it is not yet; or why there is none.
+    fn yielding(&self) -> Result<&Yielding, &str> {
+        let made = self.yielding.get_or_init(|| {
+            if self.makeflags.is_none() {
+                return Err("the pool has no fifo".into());
+            }
+            let tokens = (self.size)(tokens(self.jobs, builds_for(self.jobs)))?;
+            let (pipe, auth) =
+                fifo_pipe(tokens).map_err(|error| format!("the yielding fifo: {error}"))?;
+            Ok(Yielding {
+                pipe,
+                tokens: tokens as u64,
+                makeflags: format!("-j --jobserver-auth={auth}"),
+            })
+        });
+        made.as_ref().map_err(String::as_str)
+    }
+
+    /// [`Jobserver::admit_as`] for a main build with no label.
+    #[cfg(test)]
+    pub(crate) fn admit(&self, cancelled: &dyn Fn() -> bool) -> Result<Slot<'_>, Refused> {
+        self.admit_as(cancelled, false, "")
     }
 
     /// Waits for a slot, and takes it. The wait ends early, with
     /// [`Refused::Cancelled`], when `cancelled` says the run has been cut
     /// short (Ctrl-C, or a sibling step that faulted under fail-fast): a
     /// build that never got a slot then never starts its make.
-    pub(crate) fn admit(&self, cancelled: &dyn Fn() -> bool) -> Result<Slot<'_>, Refused> {
+    ///
+    /// With `yields`, the build yields to the main builds (see the module's
+    /// notes), when the pool has a fifo; `label` names the build in the
+    /// other builds' [`Yield`].
+    pub(crate) fn admit_as(
+        &self,
+        cancelled: &dyn Fn() -> bool,
+        yields: bool,
+        label: &str,
+    ) -> Result<Slot<'_>, Refused> {
         let mut free = self.free.lock().unwrap_or_else(PoisonError::into_inner);
         loop {
             if cancelled() {
@@ -168,7 +368,8 @@ impl Jobserver {
             }
             if *free > 0 {
                 *free -= 1;
-                return Ok(Slot { pool: self });
+                drop(free);
+                return Ok(self.slot(yields, label));
             }
             free = self
                 .released
@@ -179,16 +380,146 @@ impl Jobserver {
     }
 }
 
+impl Jobserver {
+    /// A slot taken from the count, registered with the count of the
+    /// builds; a yielding one makes the yielding fifo, or shares the main
+    /// one and says why.
+    fn slot(&self, yields: bool, label: &str) -> Slot<'_> {
+        let (yields, shares) = match yields.then(|| self.yielding()) {
+            Some(Ok(_)) => (true, None),
+            Some(Err(why)) => (false, Some(why.to_string())),
+            None => (false, None),
+        };
+        let mut count = self.count.lock().unwrap_or_else(PoisonError::into_inner);
+        if yields {
+            count.yielding += 1;
+            if count.yielding == 1 {
+                count.seen.clear();
+            }
+            let main = count.main.clone();
+            count.seen.extend(main);
+            count.seen.sort();
+            count.seen.dedup();
+        } else {
+            count.main.push(label.to_string());
+            if count.yielding > 0 && !count.seen.iter().any(|seen| seen == label) {
+                count.seen.push(label.to_string());
+            }
+        }
+        let beside_ns = count.beside_ns;
+        drop(count);
+        if yields {
+            self.counting.get_or_init(|| self.start_count());
+        }
+        Slot {
+            pool: self,
+            yields,
+            label: label.to_string(),
+            shares,
+            beside_ns,
+        }
+    }
+
+    /// Starts the thread that counts, every [`COUNT`] for the life of the
+    /// process, the yielding fifo's tokens held while main builds run.
+    fn start_count(&self) {
+        let Ok(yielding) = self.yielding() else {
+            return;
+        };
+        let Ok(pipe) = yielding.pipe.try_clone() else {
+            return;
+        };
+        let (tokens, count) = (yielding.tokens, Arc::clone(&self.count));
+        std::thread::spawn(move || {
+            let mut last = Instant::now();
+            loop {
+                std::thread::sleep(COUNT);
+                let now = Instant::now();
+                let held =
+                    tokens.saturating_sub(rustix::io::ioctl_fionread(&pipe).unwrap_or(tokens));
+                let mut count = count.lock().unwrap_or_else(PoisonError::into_inner);
+                if count.yielding > 0 && !count.main.is_empty() {
+                    count.beside_ns += u128::from(held) * now.duration_since(last).as_nanos();
+                }
+                last = now;
+            }
+        });
+    }
+}
+
 impl Slot<'_> {
     /// `MAKEFLAGS` for the make this slot runs; `None` without a fifo, when
-    /// the make takes its count on its command line.
+    /// the make takes its count on its command line. A yielding slot's make
+    /// reads the yielding fifo.
     pub(crate) fn makeflags(&self) -> Option<&str> {
-        self.pool.makeflags.as_deref()
+        match (self.yields, self.pool.yielding.get()) {
+            (true, Some(Ok(yielding))) => Some(&yielding.makeflags),
+            _ => self.pool.makeflags.as_deref(),
+        }
+    }
+
+    /// The niceness this slot's make runs at, when not the step's own: the
+    /// lowest, for a yielding build.
+    pub(crate) fn nice(&self) -> Option<i32> {
+        self.yields.then_some(NICE)
+    }
+
+    /// Why this build, asked to yield, shares the main fifo instead.
+    pub(crate) fn shares(&self) -> Option<&str> {
+        self.shares.as_deref()
+    }
+
+    /// What yielding did since this yielding slot was taken; `None` for a
+    /// main slot.
+    pub(crate) fn yielded(&self) -> Option<Yield> {
+        let Some(Ok(yielding)) = self.pool.yielding.get().filter(|_| self.yields) else {
+            return None;
+        };
+        let count = self
+            .pool
+            .count
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner);
+        Some(Yield {
+            to: count.seen.clone(),
+            pool_jobs: yielding.tokens + 1,
+            beside_token_s: (count.beside_ns - self.beside_ns) as f64 / 1e9,
+        })
+    }
+}
+
+impl Yield {
+    /// As the step records it.
+    pub(crate) fn detail(&self, why: &str) -> serde_json::Value {
+        serde_json::json!({
+            "yielded": true,
+            "why": why,
+            "to": self.to,
+            "nice": NICE,
+            "pool_jobs": self.pool_jobs,
+            "pool_rule": format!(
+                "min(main tokens, (MemAvailable - {} GiB reserve) / {} GiB a job) tokens, and make's own job",
+                gaia_store::RESERVE_BYTES >> 30,
+                JOB_BYTES >> 30
+            ),
+            "beside_token_s": (self.beside_token_s * 10.0).round() / 10.0,
+        })
     }
 }
 
 impl Drop for Slot<'_> {
     fn drop(&mut self) {
+        let mut count = self
+            .pool
+            .count
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner);
+        if self.yields {
+            count.yielding = count.yielding.saturating_sub(1);
+        } else if let Some(at) = count.main.iter().position(|label| *label == self.label) {
+            count.main.remove(at);
+        }
+        drop(count);
         let mut free = self
             .pool
             .free
@@ -209,42 +540,57 @@ pub(crate) enum Refused {
 }
 
 /// This process's slot for a build with `make` and `jobs` jobs, waiting until
-/// one of the process's builds gives its own back, or the run is cancelled.
+/// one of the process's builds gives its own back, or the run is cancelled;
+/// a yielding one with `yields` (see [`Jobserver::admit_as`]).
 pub(crate) fn admit(
     make: &str,
     jobs: usize,
     cancelled: &dyn Fn() -> bool,
+    yields: bool,
+    label: &str,
 ) -> Result<Slot<'static>, Refused> {
-    pool(make, jobs).map_err(Refused::Pool)?.admit(cancelled)
+    pool(make, jobs)
+        .map_err(Refused::Pool)?
+        .admit_as(cancelled, yields, label)
 }
 
-/// Reads a pool's free tokens at a steady interval until it is finished.
+/// Reads a pool's free tokens at a steady interval until it is finished:
+/// the main fifo's, and the yielding fifo's apart.
 pub(crate) struct Sampler {
     tokens: usize,
     every: Duration,
     stop: Arc<AtomicBool>,
-    thread: std::thread::JoinHandle<Vec<u64>>,
+    thread: std::thread::JoinHandle<(Vec<u64>, Vec<Option<u64>>)>,
 }
 
 impl Sampler {
     /// Starts reading `pipe` (the pool's fifo, holding `tokens` when none is
     /// taken) every `every`.
-    fn start(pipe: File, tokens: usize, every: Duration) -> Self {
+    fn start(
+        pipe: File,
+        low: Arc<OnceLock<Result<Yielding, String>>>,
+        tokens: usize,
+        every: Duration,
+    ) -> Self {
         let stop = Arc::new(AtomicBool::new(false));
         let stopped = Arc::clone(&stop);
         let thread = std::thread::spawn(move || {
             let begun = Instant::now();
-            let mut free = Vec::new();
+            let (mut free, mut free_yielding) = (Vec::new(), Vec::new());
             let mut next = begun;
             while !stopped.load(Ordering::Relaxed) {
                 // A read that fails is the one value no pool holds.
                 free.push(rustix::io::ioctl_fionread(&pipe).unwrap_or(u64::MAX));
+                free_yielding.push(match low.get() {
+                    Some(Ok(low)) => rustix::io::ioctl_fionread(&low.pipe).ok(),
+                    _ => None,
+                });
                 next += every;
                 if let Some(wait) = next.checked_duration_since(Instant::now()) {
                     std::thread::park_timeout(wait);
                 }
             }
-            free
+            (free, free_yielding)
         });
         Self {
             tokens,
@@ -256,11 +602,13 @@ impl Sampler {
 
     /// Stops reading, and gives the series as the detail: `{tokens,
     /// every_s, free: [...], empty_s, mean_free}`, `empty_s` the samples
-    /// with no token free times the interval.
+    /// with no token free times the interval, all of the main fifo; and
+    /// `free_yielding: [...]`, the yielding fifo's once it is made (null
+    /// before), when it was made in that time.
     pub(crate) fn finish(self) -> serde_json::Value {
         self.stop.store(true, Ordering::Relaxed);
         self.thread.thread().unpark();
-        let free = self.thread.join().unwrap_or_default();
+        let (free, free_yielding) = self.thread.join().unwrap_or_default();
         let read: Vec<u64> = free.iter().copied().filter(|n| *n != u64::MAX).collect();
         let empty = read.iter().filter(|n| **n == 0).count();
         let mean = if read.is_empty() {
@@ -268,13 +616,19 @@ impl Sampler {
         } else {
             read.iter().sum::<u64>() as f64 / read.len() as f64
         };
-        serde_json::json!({
+        let mut detail = serde_json::json!({
             "tokens": self.tokens,
             "every_s": self.every.as_secs_f64(),
             "free": free,
             "empty_s": empty as f64 * self.every.as_secs_f64(),
             "mean_free": (mean * 100.0).round() / 100.0,
-        })
+        });
+        // The yielding fifo's, once it was made, when a build ran in it in
+        // this one's time (null before it was made).
+        if free_yielding.iter().any(Option::is_some) {
+            detail["free_yielding"] = free_yielding.into();
+        }
+        detail
     }
 }
 
@@ -285,6 +639,7 @@ impl Jobserver {
         let pipe = self._pipe.as_ref()?.try_clone().ok()?;
         Some(Sampler::start(
             pipe,
+            Arc::clone(&self.yielding),
             tokens(self.jobs, builds_for(self.jobs)),
             every,
         ))
@@ -320,6 +675,7 @@ fn fifo_pipe(tokens: usize) -> io::Result<(File, String)> {
 mod tests {
     use super::*;
     use std::io::Read;
+    use std::os::unix::process::CommandExt;
 
     /// The Makefile of the bound tests: sixteen targets, each one logging
     /// its start and its end to `LOGFILE` and sleeping in between. A failing
@@ -652,6 +1008,290 @@ t%:
             drop(held);
             assert_eq!(seen, Ok(true), "the waiting build did not see the cancel");
         });
+    }
+
+    /// The Makefile of the yield tests: `main` (8 recipes) and `side` (24),
+    /// each recipe burning the processor for a while and logging its start
+    /// and end with the time in nanoseconds.
+    const BURN: &str = "\
+main: a1 a2 a3 a4 a5 a6 a7 a8
+side: b1 b2 b3 b4 b5 b6 b7 b8 b9 b10 b11 b12 b13 b14 b15 b16 b17 b18 b19 b20 b21 b22 b23 b24
+a% b%:
+\t@echo start $$(date +%s%N) >> $(LOGFILE); i=0; while [ $$i -lt 40000 ]; do i=$$((i+1)); done; echo end $$(date +%s%N) >> $(LOGFILE)
+";
+
+    /// The free tokens in each fifo of `pool`: main, yielding.
+    fn free(pool: &Jobserver) -> (u64, u64) {
+        let main = pool._pipe.as_ref().expect("a fifo");
+        let low = &pool
+            .yielding
+            .get()
+            .expect("made")
+            .as_ref()
+            .expect("a yielding fifo")
+            .pipe;
+        (
+            rustix::io::ioctl_fionread(main).expect("main"),
+            rustix::io::ioctl_fionread(low).expect("low"),
+        )
+    }
+
+    /// A yielding build's make reads a fifo of its own, sized as the pool
+    /// says (here as many tokens as the main one), and runs at the lowest
+    /// priority; a main build's make reads the main fifo at the step's own.
+    /// The tokens it holds while a main build runs are counted, and the main
+    /// builds it ran beside named.
+    #[test]
+    fn a_yielding_build_has_a_fifo_of_its_own_and_the_lowest_priority() {
+        let pool = Jobserver::new(13, true).expect("a pool").sized(Ok);
+        let main = pool
+            .admit_as(&|| false, false, "path")
+            .expect("a main slot");
+        let low = pool
+            .admit_as(&|| false, true, "beside")
+            .expect("a yielding slot");
+        assert_ne!(main.makeflags(), low.makeflags());
+        assert!(
+            low.makeflags()
+                .is_some_and(|flags| flags.starts_with("-j --jobserver-auth=fifo:"))
+        );
+        assert_eq!((main.nice(), low.nice()), (None, Some(NICE)));
+        assert_eq!(free(&pool), (10, 10), "13 jobs less 3 builds, in each");
+        let mut taker = pool
+            .yielding
+            .get()
+            .expect("made")
+            .as_ref()
+            .expect("a yielding fifo")
+            .pipe
+            .try_clone()
+            .expect("dup");
+        let mut taken = [0_u8; 3];
+        taker.read_exact(&mut taken).expect("three tokens");
+        std::thread::sleep(Duration::from_millis(500));
+        let done = low.yielded().expect("a yielding slot");
+        assert_eq!(done.to, vec!["path".to_string()]);
+        assert_eq!(done.pool_jobs, 11, "ten tokens and make's own job");
+        assert!(
+            (0.9..=2.1).contains(&done.beside_token_s),
+            "three tokens for about half a second: {done:?}"
+        );
+        assert!(main.yielded().is_none());
+        // With no main build beside it, nothing more is counted.
+        drop(main);
+        std::thread::sleep(Duration::from_millis(300));
+        let after = low.yielded().expect("a yielding slot").beside_token_s;
+        assert!(after - done.beside_token_s < 0.4, "{after} after {done:?}");
+        taker.write_all(&taken).expect("given back");
+        assert_eq!(free(&pool), (10, 10));
+        // A pool without a fifo has no yielding slot.
+        let turns = Jobserver::new(4, false).expect("no fifo");
+        let slot = turns.admit_as(&|| false, true, "beside").expect("a slot");
+        assert_eq!((slot.nice(), slot.makeflags()), (None, None));
+        assert_eq!(slot.shares(), Some("the pool has no fifo"));
+    }
+
+    /// Where the lowest priority would not take effect, a build asked to
+    /// yield shares the main fifo at the step's own priority, and says why.
+    #[test]
+    fn where_niceness_has_no_effect_a_yielding_build_shares_the_main_fifo() {
+        let pool = Jobserver::new(13, true)
+            .expect("a pool")
+            .sized(|_| Err("cgroup v1, where autogroups ignore niceness".into()));
+        let main = pool
+            .admit_as(&|| false, false, "path")
+            .expect("a main slot");
+        let asked = pool.admit_as(&|| false, true, "beside").expect("a slot");
+        assert_eq!(asked.makeflags(), main.makeflags());
+        assert_eq!(asked.nice(), None);
+        assert!(asked.yielded().is_none());
+        assert_eq!(
+            asked.shares(),
+            Some("cgroup v1, where autogroups ignore niceness")
+        );
+    }
+
+    /// With little memory beyond the reserve the yielding fifo is small, and
+    /// with none it is empty: the yielding make runs its own job only.
+    #[test]
+    fn a_plant_with_little_memory_gives_a_small_yielding_pool() {
+        const GIB: u64 = 1 << 30;
+        let reserve = gaia_store::RESERVE_BYTES;
+        assert_eq!(
+            yield_tokens(23, Some(reserve + 100 * GIB)),
+            23,
+            "jobs bound it"
+        );
+        assert_eq!(yield_tokens(23, Some(reserve + 4 * GIB + GIB / 2)), 4);
+        assert_eq!(yield_tokens(23, Some(reserve)), 0);
+        assert_eq!(yield_tokens(23, Some(8 * GIB)), 0, "a 16 GB machine");
+        assert_eq!(yield_tokens(23, None), 0, "memory unknown");
+        let pool = Jobserver::new(13, true).expect("a pool").sized(|_| Ok(0));
+        let low = pool.admit_as(&|| false, true, "beside").expect("a slot");
+        assert_eq!(low.nice(), Some(NICE));
+        assert_eq!(free(&pool).1, 0);
+        assert_eq!(low.yielded().expect("yielding").pool_jobs, 1);
+    }
+
+    /// Niceness takes effect with autogroups off, or in a cgroup v2 group
+    /// with the cpu controller; not under cgroup v1, in the root cgroup, or
+    /// in a group without the cpu controller.
+    #[test]
+    fn niceness_takes_effect_only_where_the_cpu_controller_weighs_it() {
+        let with_cpu = |path: &str| {
+            (path == "/user.slice/app.slice/gaia-x.service")
+                .then(|| "cpu io memory pids\n".to_string())
+        };
+        let v2 = "0::/user.slice/app.slice/gaia-x.service\n";
+        assert_eq!(nice_takes_effect(Some("1\n"), v2, with_cpu), Ok(()));
+        assert_eq!(
+            nice_takes_effect(Some("0\n"), "12:cpu,cpuacct:/\n0::/\n", |_| None),
+            Ok(())
+        );
+        assert_eq!(nice_takes_effect(None, "0::/\n", |_| None), Ok(()));
+        assert!(
+            nice_takes_effect(
+                Some("1"),
+                "12:cpu,cpuacct:/user\n1:name=systemd:/user\n",
+                |_| None
+            )
+            .is_err_and(|why| why.starts_with("cgroup v1"))
+        );
+        assert!(
+            nice_takes_effect(Some("1"), "0::/\n", |_| None)
+                .is_err_and(|why| why.starts_with("the root cgroup"))
+        );
+        assert!(
+            nice_takes_effect(Some("1"), v2, |_| Some("io memory pids".into()))
+                .is_err_and(|why| why.starts_with("no cpu controller"))
+        );
+    }
+
+    /// The first two CPUs this process may run on.
+    fn two_cpus() -> Option<String> {
+        let status = std::fs::read_to_string("/proc/self/status").ok()?;
+        let list = status
+            .lines()
+            .find_map(|line| line.strip_prefix("Cpus_allowed_list:"))?
+            .trim()
+            .to_string();
+        let mut cpus = Vec::new();
+        for part in list.split(',') {
+            let (from, to) = part.split_once('-').unwrap_or((part, part));
+            let (from, to): (u32, u32) = (from.parse().ok()?, to.parse().ok()?);
+            cpus.extend(from..=to);
+        }
+        (cpus.len() >= 2).then(|| format!("{},{}", cpus[0], cpus[1]))
+    }
+
+    /// The (start, end) times of each recipe in a timed log, in nanoseconds.
+    fn spans(log: &str) -> Vec<(u128, u128)> {
+        let (mut starts, mut ends) = (Vec::new(), Vec::new());
+        for line in log.lines() {
+            let mut words = line.split_whitespace();
+            let (Some(what), Some(time)) = (words.next(), words.next()) else {
+                continue;
+            };
+            let time: u128 = time.parse().expect("a time");
+            if what == "start" {
+                starts.push(time);
+            } else {
+                ends.push(time);
+            }
+        }
+        starts.sort_unstable();
+        ends.sort_unstable();
+        starts.into_iter().zip(ends).collect()
+    }
+
+    /// Two real builds at once on two CPUs, the main one (`main`) starting
+    /// 200 ms after the other (`side`), which yields when `yields`: its make
+    /// started as the step starts a yielding one, at the slot's niceness.
+    /// The main build's wall time, from its first recipe's start to its
+    /// last's end.
+    fn pair(pool: &Jobserver, cpus: &str, yields: bool) -> u128 {
+        let dirs: Vec<_> = (0..2)
+            .map(|_| tempfile::tempdir().expect("a directory"))
+            .collect();
+        for dir in &dirs {
+            std::fs::write(dir.path().join("Makefile"), BURN).expect("the Makefile");
+        }
+        std::thread::scope(|scope| {
+            for (index, dir) in dirs.iter().enumerate() {
+                scope.spawn(move || {
+                    let side = index == 1;
+                    let label = if side { "side" } else { "main" };
+                    let slot = pool
+                        .admit_as(&|| false, side && yields, label)
+                        .expect("a slot");
+                    if !side {
+                        std::thread::sleep(Duration::from_millis(200));
+                    }
+                    let make = build_make(dir.path(), &slot, 13, label);
+                    let mut command = Command::new("/usr/bin/taskset");
+                    command
+                        .arg("-c")
+                        .arg(cpus)
+                        .arg(make.get_program())
+                        .args(make.get_args())
+                        .current_dir(dir.path())
+                        .env_clear()
+                        .process_group(0);
+                    for (key, value) in make.get_envs() {
+                        if let Some(value) = value {
+                            command.env(key, value);
+                        }
+                    }
+                    let mut child = command.spawn().expect("make");
+                    if let (Some(nice), Some(pid)) = (
+                        slot.nice(),
+                        rustix::process::Pid::from_raw(child.id() as i32),
+                    ) {
+                        rustix::process::setpriority_pgrp(Some(pid), nice).expect("renice");
+                    }
+                    let status = child.wait().expect("make");
+                    assert!(status.success(), "{status}");
+                });
+            }
+        });
+        let main_log = std::fs::read_to_string(dirs[0].path().join("log")).unwrap_or_default();
+        let side_log = std::fs::read_to_string(dirs[1].path().join("log")).unwrap_or_default();
+        assert_eq!(spans(&side_log).len(), 24, "the side build did not finish");
+        let main_ran = spans(&main_log);
+        assert_eq!(main_ran.len(), 8, "the main build did not finish");
+        main_ran.iter().map(|span| span.1).max().unwrap_or(0)
+            - main_ran.iter().map(|span| span.0).min().unwrap_or(0)
+    }
+
+    /// The builds without slack have the first claim on the processor:
+    /// beside a yielding build on the same two CPUs the main build runs much
+    /// faster than beside an equal one, and the yielding build still
+    /// finishes.
+    #[test]
+    fn a_yielding_build_leaves_the_processor_to_the_main_build() {
+        let Some(pool) = fifo_pool(13) else { return };
+        // Where niceness has no effect a yielding build shares the main
+        // fifo instead (the test above), and there is nothing to measure.
+        if let Err(why) = yield_size(10) {
+            eprintln!("skipped: {why}");
+            return;
+        }
+        let pool = pool.sized(Ok);
+        let Some(cpus) = two_cpus() else {
+            eprintln!("skipped: fewer than two CPUs");
+            return;
+        };
+        let equal = pair(&pool, &cpus, false);
+        let yielded = pair(&pool, &cpus, true);
+        eprintln!(
+            "measured: on CPUs {cpus}, main build {:.2} s beside an equal build, {:.2} s beside a yielding one",
+            equal as f64 / 1e9,
+            yielded as f64 / 1e9
+        );
+        assert!(
+            yielded * 10 < equal * 7,
+            "beside a yielding build the main build took {yielded} ns, beside an equal one {equal} ns"
+        );
     }
 
     /// The slot is given back when dropped, so a waiting build gets it.

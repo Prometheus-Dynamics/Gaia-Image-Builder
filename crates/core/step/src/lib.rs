@@ -44,6 +44,7 @@ mod error;
 mod key;
 mod log;
 pub mod pins;
+pub mod slack;
 mod step;
 mod tool;
 mod version;

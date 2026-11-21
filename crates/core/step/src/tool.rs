@@ -42,6 +42,8 @@ pub struct Tool {
     on_line: Option<LineSink>,
     /// Lines that fail the run as soon as the tool prints them, and why.
     refused: Vec<(String, String)>,
+    /// The niceness the tool runs at, when not the step's own.
+    nice: Option<i32>,
 }
 
 impl fmt::Debug for Tool {
@@ -64,6 +66,7 @@ impl Tool {
             cwd: None,
             on_line: None,
             refused: Vec::new(),
+            nice: None,
         }
     }
 
@@ -100,6 +103,16 @@ impl Tool {
     /// thing or make it the wrong way.
     pub fn refuse_line(mut self, text: impl Into<String>, why: impl Into<String>) -> Self {
         self.refused.push((text.into(), why.into()));
+        self
+    }
+
+    /// Runs the tool, and everything it starts, at niceness `nice` (19 is
+    /// the lowest priority): it gets the CPU the processes at the normal
+    /// priority leave idle. Set on the tool's process group as soon as it
+    /// is started, so what it starts after inherits it. It changes how fast
+    /// the tool runs, never what it makes.
+    pub fn nice(mut self, nice: i32) -> Self {
+        self.nice = Some(nice);
         self
     }
 }
@@ -156,6 +169,11 @@ pub(crate) fn run(
         StepError::new(step, ErrorKind::Spawn(why), Vec::new()).with_log(log.path.clone())
     })?;
     let group = child.id();
+    if let (Some(nice), Some(pid)) = (tool.nice, pid_of(group)) {
+        // Lowering one's own child's priority is always allowed; were it
+        // refused, the tool would run at the step's priority, as before.
+        let _ = rustix::process::setpriority_pgrp(Some(pid), nice);
+    }
     let stdout = child.stdout.take();
     let stderr = child.stderr.take();
     let sink = tool.on_line.as_deref();

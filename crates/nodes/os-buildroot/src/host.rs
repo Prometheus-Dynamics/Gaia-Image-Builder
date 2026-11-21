@@ -399,7 +399,7 @@ fn overrides_goal(package: &str, goal: &str) -> bool {
 /// with, with this run's paths replaced by names.
 fn plan(work: &mut Work<'_>, prepared: &Prepared, host: &BuildrootHost) -> Result<(), StepError> {
     let fail = |why: String| StepError::body(PLAN, why);
-    let slot = admit(PLAN, host, &|| work.cancelled())?;
+    let slot = admit(PLAN, host, &|| work.cancelled(), false, "host plan")?;
     let dir = work.dir().to_path_buf();
     let out = dir.join("out");
     fs::create_dir(&out).map_err(|e| fail(format!("output directory: {e}")))?;
@@ -471,7 +471,9 @@ fn build(
     let out = work.dir().join("out");
     // How full the shared pool was while this build ran.
     let sampler = crate::jobs::sample(&host.make, usize::try_from(host.jobs).unwrap_or(usize::MAX));
-    let result = build_steps(work, prepared, goals, host);
+    let result = crate::in_slot(NAME, work, host, "host tools", |work, slot| {
+        build_steps(work, prepared, goals, host, slot)
+    });
     if let Some(sampler) = sampler {
         work.detail(crate::jobs::SAMPLE_DETAIL, sampler.finish());
     }
@@ -484,10 +486,8 @@ fn build_steps(
     prepared: &Prepared,
     goals: &[&str],
     host: &BuildrootHost,
+    slot: &crate::jobs::Slot<'_>,
 ) -> Result<(), StepError> {
-    // This build's slot in the process's make jobserver, shared with the
-    // other builds of the process (see `jobs`).
-    let slot = admit(NAME, host, &|| work.cancelled())?;
     let io_fail = |what: &'static str| {
         move |error: io::Error| StepError::body(NAME, format!("{what}: {error}"))
     };
@@ -499,14 +499,14 @@ fn build_steps(
     }
     let out = dir.join("out");
     fs::create_dir(&out).map_err(io_fail("output directory"))?;
-    let resolved = configure(NAME, work, prepared, &out, host, &slot)?;
+    let resolved = configure(NAME, work, prepared, &out, host, slot)?;
     let (src, vars) = (&prepared.src, &prepared.vars);
     let jobs = crate::pool::Shared::default();
     let jobs_sink = jobs.clone();
     let mismatches = crate::dlpool::Mismatches::default();
     let seen = mismatches.clone();
     let made = work.run(
-        &make_tool(host, src, &out, vars, goals, &slot).on_line(move |_, line| {
+        &make_tool(host, src, &out, vars, goals, slot).on_line(move |_, line| {
             crate::pool::feed(&jobs_sink, line);
             seen.line(line);
         }),

@@ -46,6 +46,79 @@ pub fn pool_summary(steps: &[Step]) -> Option<String> {
     })
 }
 
+/// The detail a step records what yielding did under (see the Buildroot
+/// step's job pool).
+const YIELD: &str = "job-pool-yield";
+
+/// One line for the build: each step that yielded the shared job pool,
+/// why (the decision of `gaia_step::slack`), to which steps, the
+/// token-seconds it held beside them at the lowest priority, and its join
+/// this run; or that nothing yielded, and why. `None` when no step recorded
+/// what yielding did. `records` are this run's step records.
+pub fn yield_summary(records: &[gaia_step::StepRecord]) -> Option<String> {
+    let label = |record: &gaia_step::StepRecord| {
+        let detail = &record.report.details[YIELD];
+        detail["label"].as_str().unwrap_or(&record.step).to_string()
+    };
+    let with: Vec<usize> = (0..records.len())
+        .filter(|&index| records[index].report.details.contains_key(YIELD))
+        .collect();
+    if with.is_empty() {
+        return None;
+    }
+    let yielded: Vec<usize> = with
+        .iter()
+        .copied()
+        .filter(|&index| records[index].report.yielded)
+        .collect();
+    if yielded.is_empty() {
+        let mut why: BTreeMap<String, Vec<String>> = BTreeMap::new();
+        for &index in &with {
+            let reason = records[index].report.details[YIELD]["why"]
+                .as_str()
+                .unwrap_or("?")
+                .to_string();
+            why.entry(reason).or_default().push(label(&records[index]));
+        }
+        let why: Vec<String> = why
+            .into_iter()
+            .map(|(reason, labels)| format!("{}: {reason}", labels.join(", ")))
+            .collect();
+        return Some(format!("yield: nothing yielded ({})", why.join("; ")));
+    }
+    let run: Vec<usize> = (0..records.len()).collect();
+    let parts: Vec<String> = yielded
+        .iter()
+        .map(|&index| {
+            let detail = &records[index].report.details[YIELD];
+            let to: Vec<&str> = detail["to"]
+                .as_array()
+                .into_iter()
+                .flatten()
+                .filter_map(|name| name.as_str())
+                .collect();
+            let mut part = format!(
+                "{} yields: {}; to {}: its own pool of {} jobs at nice {}, {:.0} token-s held beside them",
+                label(&records[index]),
+                detail["why"].as_str().unwrap_or("?"),
+                if to.is_empty() {
+                    "nothing".to_string()
+                } else {
+                    to.join(", ")
+                },
+                detail["pool_jobs"].as_u64().unwrap_or(0),
+                detail["nice"].as_i64().unwrap_or(0),
+                detail["beside_token_s"].as_f64().unwrap_or(0.0),
+            );
+            if let Some(join) = gaia_step::slack::join(records, &run, index) {
+                part.push_str(&format!("; join this run {:.0} s", join as f64 / 1e9));
+            }
+            part
+        })
+        .collect();
+    Some(format!("yield: {}", parts.join("; ")))
+}
+
 /// The graph the steps came from: every node's id, and the ids of the nodes
 /// it takes from directly.
 #[derive(Debug, Default, Clone, PartialEq, Eq)]
@@ -245,6 +318,109 @@ pub fn report(items: &[Item], path: &[PathStep]) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A step record of one run for the yield line: `name` from `start` to
+    /// `end` seconds, taking the outputs of `inputs`, with what yielding did.
+    fn yield_record(
+        name: &str,
+        start: u128,
+        end: u128,
+        inputs: &[&str],
+        detail: Option<serde_json::Value>,
+    ) -> gaia_step::StepRecord {
+        let digest = |of: &str| gaia_store::Digest::of_bytes(format!("out {of}").as_bytes());
+        let mut report = gaia_step::Report {
+            inputs: inputs.iter().map(|from| digest(from).to_string()).collect(),
+            ..gaia_step::Report::default()
+        };
+        if let Some(detail) = detail {
+            report.yielded = detail["yielded"] == true;
+            report.details.insert(YIELD.into(), detail);
+        }
+        gaia_step::StepRecord {
+            start_ns: start * 1_000_000_000,
+            end_ns: end * 1_000_000_000,
+            pid: 1,
+            made: true,
+            step: "gaia.os.buildroot".into(),
+            key: gaia_store::StepKey(gaia_store::Digest::of_bytes(name.as_bytes())),
+            outputs: [(
+                "out".to_string(),
+                format!("tree:{}", digest(name)).parse().expect("a ref"),
+            )]
+            .into(),
+            work_bytes: None,
+            report,
+        }
+    }
+
+    fn stayed(label: &str, why: &str) -> Option<serde_json::Value> {
+        Some(serde_json::json!({ "yielded": false, "why": why, "label": label }))
+    }
+
+    fn went(label: &str) -> Option<serde_json::Value> {
+        Some(serde_json::json!({
+            "yielded": true, "why": "last join 432 s yielded against 649 s unyielded", "label": label,
+            "to": ["root filesystem"], "nice": 19, "pool_jobs": 24, "beside_token_s": 3456.7,
+        }))
+    }
+
+    #[test]
+    fn the_yield_line_says_nothing_yielded_and_why() {
+        let records = vec![
+            yield_record("host", 0, 100, &[], stayed("host tools", "no history")),
+            yield_record(
+                "kernel",
+                100,
+                863,
+                &["host"],
+                stayed("kernel", "no history"),
+            ),
+            yield_record(
+                "rootfs",
+                100,
+                1108,
+                &["host"],
+                stayed("root filesystem", "no history"),
+            ),
+            yield_record("image", 1108, 1130, &["kernel", "rootfs"], None),
+        ];
+        assert_eq!(
+            yield_summary(&records).as_deref(),
+            Some("yield: nothing yielded (host tools, kernel, root filesystem: no history)")
+        );
+        assert_eq!(yield_summary(&records[3..]), None);
+    }
+
+    #[test]
+    fn the_yield_line_names_what_yielded_why_to_what_and_its_join() {
+        let records = vec![
+            yield_record(
+                "host",
+                0,
+                100,
+                &[],
+                stayed("host tools", "slack 0 s over 100 s"),
+            ),
+            yield_record("kernel", 100, 900, &["host"], went("kernel")),
+            yield_record(
+                "rootfs",
+                100,
+                1108,
+                &["host"],
+                stayed("root filesystem", "slack 0 s"),
+            ),
+            yield_record("image", 1108, 1130, &["kernel", "rootfs"], None),
+        ];
+        assert_eq!(
+            yield_summary(&records).as_deref(),
+            Some(
+                "yield: kernel yields: last join 432 s yielded against 649 s unyielded; to root \
+                 filesystem: its own pool of 24 jobs at nice 19, 3457 token-s held beside them; \
+                 join this run 1008 s"
+            )
+        );
+    }
     use std::collections::BTreeMap;
 
     fn step(name: &str, start_s: u64, end_s: u64) -> Step {
