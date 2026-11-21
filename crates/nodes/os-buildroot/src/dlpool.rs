@@ -208,8 +208,8 @@ pub(crate) fn before(
     let fail = |e: io::Error| {
         gaia_step::StepError::body(step, format!("the download pool {}: {e}", pool.display()))
     };
-    fs::create_dir_all(pool).map_err(fail)?;
-    fs::create_dir_all(dl).map_err(fail)?;
+    made_dir(pool).map_err(fail)?;
+    made_dir(dl).map_err(fail)?;
     if let Some(note) = copy_note(dl, pool).map_err(fail)? {
         // Once a process: every step of a build would say the same.
         static SAID: Mutex<BTreeSet<(PathBuf, PathBuf)>> = Mutex::new(BTreeSet::new());
@@ -316,6 +316,31 @@ impl Mismatches {
             )
         })
     }
+}
+
+/// `fs::create_dir_all`, except that a path through a link to nothing (the
+/// link left behind when its target was removed) is named with its target,
+/// where the system's error says only that the file exists.
+fn made_dir(path: &Path) -> io::Result<()> {
+    fs::create_dir_all(path).map_err(|e| {
+        let dangling = path.ancestors().find_map(|at| {
+            let link = fs::symlink_metadata(at).ok()?.file_type().is_symlink();
+            (link && fs::metadata(at).is_err())
+                .then(|| fs::read_link(at).ok().map(|to| (at.to_path_buf(), to)))
+                .flatten()
+        });
+        match dangling {
+            Some((at, to)) => io::Error::new(
+                e.kind(),
+                format!(
+                    "{} is a link to {}, which does not exist",
+                    at.display(),
+                    to.display()
+                ),
+            ),
+            None => e,
+        }
+    })
 }
 
 #[cfg(test)]
@@ -449,6 +474,29 @@ mod tests {
             .map(|e| e.file_name().to_string_lossy().into_owned())
             .collect();
         assert_eq!(names, ["zlib-1.3.tar.xz"], "no temporary copy is left");
+    }
+
+    /// A pool under a link whose target was removed is named with the link
+    /// and its target, not as "File exists"; the same path once the target
+    /// is back is made.
+    #[test]
+    fn a_pool_under_a_link_to_nothing_names_the_link() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let (link, gone) = (dir.path().join("cache"), dir.path().join("gone"));
+        std::os::unix::fs::symlink(&gone, &link).expect("link");
+        let pool = link.join("gaia/pool");
+        let why = made_dir(&pool).expect_err("a dangling link").to_string();
+        assert_eq!(
+            why,
+            format!(
+                "{} is a link to {}, which does not exist",
+                link.display(),
+                gone.display()
+            )
+        );
+        fs::create_dir(&gone).expect("the target back");
+        made_dir(&pool).expect("made");
+        assert!(gone.join("gaia/pool").is_dir());
     }
 
     #[test]
