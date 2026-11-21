@@ -65,8 +65,8 @@ const NAME: &str = "gaia.os.buildroot.host";
 /// 4: built at the fixed path the build sees (`place`). 5: the same bytes
 /// from any store and any run: the source by a marker, the packages' file
 /// lists sorted, archives in deterministic mode, no bytecode written on import
-/// (`tools`).
-const KEY_VERSION: u32 = 5;
+/// (`tools`). 6: the host Python's packages compiled once, hash-based.
+const KEY_VERSION: u32 = 6;
 /// The work directory a host-tools build expects when no earlier run recorded
 /// its size.
 const WORK_BYTES: u64 = 8 << 30;
@@ -578,6 +578,7 @@ fn build_steps(
             .env("PARALLEL_JOBS", host.jobs.to_string());
         work.run(&fix)?;
     }
+    compile_site_packages(work, host, src, &out)?;
     fs::rename(out.join("host"), seed.join("host")).map_err(io_fail("the host directory"))?;
     fs::write(seed.join(ppd::PACKAGES_FILE), goals.join("\n"))
         .map_err(io_fail("the seed's packages"))?;
@@ -631,6 +632,78 @@ fn build_steps(
     fs::write(seed.join("relocs"), relocs.join("\n")).map_err(io_fail("the seed"))?;
     fs::write(seed.join("links"), links.join("\n")).map_err(io_fail("the seed"))?;
     fs::write(seed.join("binaries"), binaries.join("\n")).map_err(io_fail("the seed"))?;
+    Ok(())
+}
+
+/// The host Python's installed packages compiled once, as Buildroot compiles
+/// its standard library: hash-based bytecode (`checked-hash`, valid while
+/// the source's bytes are the same), so it is the same in every store.
+/// Makes run with `PYTHONDONTWRITEBYTECODE` and write no bytecode of their
+/// own (an import would write the source's time into it); without this, a
+/// build from the seed would compile meson and the rest in memory on every
+/// run (about a second of CPU per meson run). Run by the host's own Python,
+/// in the sandbox, so each file names where builds see it.
+fn compile_site_packages(
+    work: &mut Work<'_>,
+    host: &BuildrootHost,
+    src: &Path,
+    out: &Path,
+) -> Result<(), StepError> {
+    let io_fail =
+        |error: io::Error| StepError::body(NAME, format!("the host's Python packages: {error}"));
+    if !out.join("host/bin/python3").exists() {
+        return Ok(());
+    }
+    let seen = crate::place::seen(host, out);
+    let mut dirs = Vec::new();
+    for entry in fs::read_dir(out.join("host/lib")).map_err(io_fail)? {
+        let name = entry
+            .map_err(io_fail)?
+            .file_name()
+            .to_string_lossy()
+            .into_owned();
+        if name.starts_with("python3.")
+            && out
+                .join("host/lib")
+                .join(&name)
+                .join("site-packages")
+                .is_dir()
+        {
+            dirs.push(
+                seen.join("host/lib")
+                    .join(&name)
+                    .join("site-packages")
+                    .display()
+                    .to_string(),
+            );
+        }
+    }
+    if dirs.is_empty() {
+        return Ok(());
+    }
+    dirs.sort();
+    let mut words = vec![
+        seen.join("host/bin/python3").display().to_string(),
+        "-m".to_string(),
+        "compileall".to_string(),
+        "-q".to_string(),
+        "-f".to_string(),
+        "-j0".to_string(),
+        "--invalidation-mode".to_string(),
+        "checked-hash".to_string(),
+    ];
+    words.extend(dirs);
+    let mut words = crate::place::wrapped(host, out, words).into_iter();
+    let compile = Tool::new(words.next().unwrap_or_default())
+        .args(words)
+        .cwd(src)
+        .env("PATH", crate::PATH)
+        .env("LC_ALL", "C")
+        // For an older host Python whose marshal writes a set constant in
+        // hash order; Python 3.14 (Buildroot 2026.02's) sorts them and gives
+        // the same bytes under any seed, so the tests cannot show this.
+        .env("PYTHONHASHSEED", "0");
+    work.run(&compile)?;
     Ok(())
 }
 

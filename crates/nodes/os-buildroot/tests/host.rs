@@ -52,6 +52,9 @@ host-a:
 \t/usr/bin/ar rcs $(O)/host/lib/libplain.a $(O)/build/host-a-1/src/a.o
 \tprintf 'X = 1\\n' > $(O)/host/lib/py/m.py
 \tpython3 -c 'import sys; sys.path.insert(0, \"$(O)/host/lib/py\"); import m'
+\tln -s \"$$(command -v python3)\" $(O)/host/bin/python3
+\tmkdir -p $(O)/host/lib/python3.x/site-packages
+\tprintf 'def f(v):\\n    return v in {\"a\", \"b\", \"c\", \"d\", \"e\", \"f\"}\\n' > $(O)/host/lib/python3.x/site-packages/s.py
 \tprintf '%s/package/a/0001-fix.patch\\n' '$(CURDIR)' > $(O)/build/host-a-1/.applied_patches_list
 \tprintf 'host-a,./lib/liba.a\\nhost-a,./etc/a.conf\\n' > $(O)/build/host-a-1/.files-list-host.txt
 ";
@@ -235,7 +238,16 @@ fn the_seed_has_the_host_tools_without_the_path_they_were_built_at() {
         read("links"),
         "host/link\t@GAIA_BUILDROOT_OUT@/host/etc/a.conf"
     );
-    assert_eq!(read("binaries"), "host/bin/a");
+    // The bytecode names its source where builds see it, as a binary does.
+    let binaries = read("binaries");
+    let binaries: Vec<&str> = binaries.lines().collect();
+    assert_eq!(binaries.len(), 2, "{binaries:?}");
+    assert_eq!(binaries[0], "host/bin/a");
+    assert!(
+        binaries[1].starts_with("host/lib/python3.x/site-packages/__pycache__/s.")
+            && binaries[1].ends_with(".pyc"),
+        "{binaries:?}"
+    );
     assert!(
         fs::symlink_metadata(dir.join("host/link")).is_err(),
         "the link is made when the seed is planted"
@@ -279,6 +291,18 @@ fn the_same_host_tools_made_in_two_stores_are_the_same_bytes() {
     assert!(
         !dir.join("host/lib/py/__pycache__").exists(),
         "no bytecode written on import"
+    );
+    // The installed packages compiled once, hash-based (flags 3: checked
+    // hash), as the standard library is: the same bytes in any store.
+    let cache = dir.join("host/lib/python3.x/site-packages/__pycache__");
+    let compiled: Vec<_> = fs::read_dir(&cache)
+        .expect("the packages compiled")
+        .map(|entry| entry.expect("entry").path())
+        .collect();
+    assert_eq!(compiled.len(), 1, "{compiled:?}");
+    assert_eq!(
+        fs::read(&compiled[0]).expect("the bytecode")[4..8],
+        [3, 0, 0, 0]
     );
     // The wrapper made `liba.a` as it is kept; only the archive made by an
     // archiver run by its own path was rewritten.
