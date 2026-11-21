@@ -1,7 +1,9 @@
-# BPI-CanMV-K230D-Zero (bench product). NOT BOOTABLE, not built tonight: the
-# environment area (u-boot-env.bin, 3 MiB) has no producer yet (the gaia.uboot.env
-# node is not wired to a board key), so the build fails at that area's blob. The SPL,
-# U-Boot and OpenSBI wraps are the family's, as for the AI-CAM. SD card only.
+# BPI-CanMV-K230D-Zero (bench product). Builds (2026-11-21, mainline 7.3.3
+# with LLVM, Buildroot 2026.08); NOT known bootable: no U-Boot environment is
+# written (the family gives no environment file and this board none), so U-Boot
+# starts with its compiled-in default environment, whose bootcmd is not this
+# image's. The SPL, U-Boot and OpenSBI wraps are the family's, as for the
+# AI-CAM. SD card only. Untested on board.
 version = 1
 name = "k230d-zero"
 
