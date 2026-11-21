@@ -1,9 +1,8 @@
 # BPI-CanMV-K230D-Zero (bench product). Builds (2026-11-21, mainline 7.3.3
-# with LLVM, Buildroot 2026.08); NOT known bootable: no U-Boot environment is
-# written (the family gives no environment file and this board none), so U-Boot
-# starts with its compiled-in default environment, whose bootcmd is not this
-# image's. The SPL, U-Boot and OpenSBI wraps are the family's, as for the
-# AI-CAM. SD card only. Untested on board.
+# with LLVM, Buildroot 2026.08). The U-Boot environment is the board's
+# (assets/u-boot-env.txt): OpenSBI from the raw area, the kernel and this
+# board's device tree from /boot on partition 1. The SPL, U-Boot and OpenSBI
+# wraps are the family's, as for the AI-CAM. SD card only. Untested on board.
 version = 1
 name = "k230d-zero"
 

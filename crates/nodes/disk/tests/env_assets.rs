@@ -1,5 +1,5 @@
-//! The K230D AI-CAM's U-Boot environment blobs, committed under
-//! examples/boards/k230d-ai-cam/assets: the writer's output for the text beside them.
+//! The K230D boards' U-Boot environment blobs, committed under
+//! examples/boards/<board>/assets: the writer's output for the text beside them.
 //!
 //! Regenerate both after editing `u-boot-env.txt`:
 //!   cargo test -p gaia-disk --test env_assets -- --ignored regenerate
@@ -11,18 +11,24 @@ use std::path::{Path, PathBuf};
 
 const SIZE: u64 = 0x2000;
 
-fn assets() -> PathBuf {
-    Path::new(env!("CARGO_MANIFEST_DIR")).join("../../../examples/boards/k230d-ai-cam/assets")
+/// The boards with committed environment blobs.
+const BOARDS: [&str; 2] = ["k230d-ai-cam", "k230d-zero"];
+
+fn assets(board: &str) -> PathBuf {
+    Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../../../examples/boards")
+        .join(board)
+        .join("assets")
 }
 
-fn text_vars() -> Vec<UbootVar> {
-    let text = std::fs::read_to_string(assets().join("u-boot-env.txt")).expect("the env text");
+fn text_vars(board: &str) -> Vec<UbootVar> {
+    let text = std::fs::read_to_string(assets(board).join("u-boot-env.txt")).expect("the env text");
     parse_env_text(&text).expect("parses")
 }
 
 /// The blob both copies are: the writer's redundant image of the text.
-fn expected() -> Vec<u8> {
-    uboot_env_image(&text_vars(), SIZE, true).expect("writes")
+fn expected(board: &str) -> Vec<u8> {
+    uboot_env_image(&text_vars(board), SIZE, true).expect("writes")
 }
 
 /// CRC-32 (IEEE, reflected), as U-Boot's crc32() computes it.
@@ -43,20 +49,29 @@ fn crc32(data: &[u8]) -> u32 {
 
 #[test]
 fn the_committed_copies_are_the_writers_output() {
-    let want = expected();
-    for name in ["u-boot-env.bin", "u-boot-env-redund.bin"] {
-        let got = std::fs::read(assets().join(name)).unwrap_or_else(|e| panic!("{name}: {e}"));
-        assert_eq!(got.len(), SIZE as usize, "{name} is 0x2000 bytes");
-        assert!(
-            got == want,
-            "{name} differs from the writer's output of u-boot-env.txt: regenerate it"
-        );
+    for board in BOARDS {
+        let want = expected(board);
+        for name in ["u-boot-env.bin", "u-boot-env-redund.bin"] {
+            let got = std::fs::read(assets(board).join(name))
+                .unwrap_or_else(|e| panic!("{board}/{name}: {e}"));
+            assert_eq!(got.len(), SIZE as usize, "{board}/{name} is 0x2000 bytes");
+            assert!(
+                got == want,
+                "{board}/{name} differs from the writer's output of u-boot-env.txt: regenerate it"
+            );
+        }
     }
 }
 
 #[test]
 fn the_blobs_parse_back_as_u_boot_reads_them() {
-    let blob = std::fs::read(assets().join("u-boot-env.bin")).expect("blob");
+    for board in BOARDS {
+        parses_back(board);
+    }
+}
+
+fn parses_back(board: &str) {
+    let blob = std::fs::read(assets(board).join("u-boot-env.bin")).expect("blob");
     let stored_crc = u32::from_le_bytes([blob[0], blob[1], blob[2], blob[3]]);
     assert_eq!(blob[4], 1, "the flag byte of the active copy");
     let data = &blob[5..];
@@ -78,8 +93,8 @@ fn the_blobs_parse_back_as_u_boot_reads_them() {
             value: value.into(),
         });
     }
-    let want = text_vars();
-    assert_eq!(parsed.len(), want.len());
+    let want = text_vars(board);
+    assert_eq!(parsed.len(), want.len(), "{board}");
     for (got, want) in parsed.iter().zip(&want) {
         assert_eq!((&got.name, &got.value), (&want.name, &want.value));
     }
@@ -88,8 +103,10 @@ fn the_blobs_parse_back_as_u_boot_reads_them() {
 #[test]
 #[ignore = "rewrites the committed blobs from u-boot-env.txt"]
 fn regenerate() {
-    let image = expected();
-    for name in ["u-boot-env.bin", "u-boot-env-redund.bin"] {
-        std::fs::write(assets().join(name), &image).expect("write");
+    for board in BOARDS {
+        let image = expected(board);
+        for name in ["u-boot-env.bin", "u-boot-env-redund.bin"] {
+            std::fs::write(assets(board).join(name), &image).expect("write");
+        }
     }
 }

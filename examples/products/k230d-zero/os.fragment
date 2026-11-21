@@ -20,6 +20,10 @@ BR2_PACKAGE_HOST_EROFS_UTILS=y
 # Buildroot's host OpenSSL supplies it. This U-Boot config has no binman and builds its own dtc.
 BR2_TARGET_UBOOT_NEEDS_OPENSSL=y
 
+# The kernel Image and the board's device tree into the root filesystem's /boot,
+# which the environment's bootcmd loads (ext4load mmc 1:1 /boot/Image).
+BR2_LINUX_KERNEL_INSTALL_TARGET=y
+
 # The bootloader's binaries into images/ for the family's wrapped areas (SPL, U-Boot,
 # OpenSBI fw_jump.bin), as the AI-CAM's fragment has them.
 BR2_TARGET_UBOOT_SPL=y
