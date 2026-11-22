@@ -3,11 +3,14 @@
 # plugged into, with nothing set up for it. It loads the host kernel's own
 # USB/IP, CDC NCM and CDC ACM drivers, attaches the board's gadget, leases an
 # address on the gadget's network interface as any host would, and pings
-# the server the lease names. Every result line starts "stock-host:"; the
+# the server the lease names, and with gaia.connect-port= opens a TCP
+# connection to that port on it, as a host's program would. Every result line starts "stock-host:"; the
 # kernel's own log follows "stock-host: kernel log". Then it powers off.
 #
 # Kernel command line: gaia.vsock-port=P (the relay's port for this side),
-# gaia.wait=S (how long to wait for the interface, default 600).
+# gaia.wait=S (how long to wait for the device to link and for its network
+# interface, each; default 600),
+# gaia.connect-port=N (the TCP port to connect to on the lease's server).
 /bin/busybox mkdir -p /bin /sbin /proc /sys /dev /tmp
 /bin/busybox --install -s /bin
 mount -t proc proc /proc
@@ -15,10 +18,12 @@ mount -t sysfs sysfs /sys
 mount -t devtmpfs devtmpfs /dev
 port=""
 wait=600
+connect=""
 for word in $(cat /proc/cmdline); do
 	case $word in
 	gaia.vsock-port=*) port=${word#*=} ;;
 	gaia.wait=*) wait=${word#*=} ;;
+	gaia.connect-port=*) connect=${word#*=} ;;
 	esac
 done
 done_() {
@@ -32,7 +37,7 @@ for m in $(cat /lib/modules/order); do
 	insmod "/lib/modules/$m.ko" || echo "stock-host: insmod $m failed"
 done
 [ -n "$port" ] || { echo "stock-host: no gaia.vsock-port= on the command line"; done_; }
-/bin/vhci-attach "$port" || done_
+/bin/vhci-attach "$port" "$wait" || done_
 
 # What the device gave the host: its descriptors as read (device, then each
 # configuration), in hex, and the interfaces and endpoints of the
@@ -45,6 +50,8 @@ done
 sleep 2
 if [ -s /sys/bus/usb/devices/1-1/descriptors ]; then
 	echo "stock-host: descriptors $(od -An -tx1 -v /sys/bus/usb/devices/1-1/descriptors | tr -d ' \n')"
+	d=/sys/bus/usb/devices/1-1
+	echo "stock-host: device $(cat $d/idVendor):$(cat $d/idProduct) manufacturer \"$(cat $d/manufacturer 2> /dev/null)\" product \"$(cat $d/product 2> /dev/null)\" serial \"$(cat $d/serial 2> /dev/null)\""
 	echo "stock-host: configuration set: $(cat /sys/bus/usb/devices/1-1/bConfigurationValue)"
 	for f in /sys/bus/usb/devices/1-1:*; do
 		[ -d "$f" ] || continue
@@ -119,5 +126,15 @@ if ping -c 3 -W 3 "$serverid" > /tmp/ping.log 2>&1; then
 else
 	sed 's/^/stock-host: ping: /' /tmp/ping.log
 	echo "stock-host: ping $serverid (the lease's server): failed"
+fi
+if [ -n "$connect" ]; then
+	# Connect, send nothing, keep what the server sends in 5 s.
+	if nc -w 5 "$serverid" "$connect" < /dev/null > /tmp/connect.out 2> /tmp/connect.log; then
+		echo "stock-host: connect $serverid:$connect: ok, $(wc -c < /tmp/connect.out) bytes from the server"
+		[ -s /tmp/connect.out ] && echo "stock-host: connect: first bytes $(head -c 256 /tmp/connect.out | od -An -c -v | tr -s ' \n' ' ')"
+	else
+		sed 's/^/stock-host: connect: /' /tmp/connect.log
+		echo "stock-host: connect $serverid:$connect: failed"
+	fi
 fi
 done_

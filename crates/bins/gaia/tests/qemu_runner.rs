@@ -1120,3 +1120,352 @@ fn the_boot_says_whether_the_kernel_has_seccomp() {
     assert!(ok, "{out}");
     assert!(out.contains("\nseccomp: unknown\n"), "{out}");
 }
+
+/// A RAM boot's directory: the EEPROM's config.txt (`outer`) and boot.img, a
+/// FAT image laid out as a boot partition, whose device tree has the
+/// board's power-management block.
+fn ram_boot(dir: &Path, outer: &str) -> PathBuf {
+    let set = dir.join("set");
+    std::fs::create_dir_all(&set).expect("mkdir");
+    std::fs::write(set.join("config.txt"), outer).expect("write");
+    let fat = set.join("boot.img");
+    let fat_arg = fat.to_str().expect("utf-8");
+    run(
+        "mformat",
+        &[
+            "-C", "-i", fat_arg, "-T", "16384", "-h", "2", "-s", "16", "::",
+        ],
+    );
+    let dts = dir.join("ram.dts");
+    std::fs::write(
+        &dts,
+        "/dts-v1/;\n/ { #address-cells = <2>; #size-cells = <2>;\n soc@107c000000 { compatible = \"simple-bus\"; #address-cells = <1>; #size-cells = <1>; ranges = <0x0 0x10 0x0 0x80000000>; watchdog@7d200000 { compatible = \"brcm,bcm2712-pm\"; reg = <0x7d200000 0x308>; }; };\n};\n",
+    )
+    .expect("write");
+    let dtb = dir.join("ram.dtb");
+    run(
+        "dtc",
+        &[
+            "-q",
+            "-I",
+            "dts",
+            "-O",
+            "dtb",
+            "-o",
+            dtb.to_str().expect("utf-8"),
+            dts.to_str().expect("utf-8"),
+        ],
+    );
+    let files: [(&str, &[u8]); 4] = [
+        (
+            "config.txt",
+            b"kernel=kernel8.img\ninitramfs initramfs.cpio followkernel\nkernel_watchdog_timeout=15\n",
+        ),
+        ("cmdline.txt", b"rdinit=/init panic=5\n"),
+        ("kernel8.img", &[1u8; 64]),
+        ("initramfs.cpio", &[2u8; 64]),
+    ];
+    for (name, bytes) in files {
+        let file = dir.join("file");
+        std::fs::write(&file, bytes).expect("write");
+        run(
+            "mcopy",
+            &[
+                "-o",
+                "-i",
+                fat_arg,
+                file.to_str().expect("utf-8"),
+                &format!("::{name}"),
+            ],
+        );
+    }
+    run(
+        "mcopy",
+        &[
+            "-o",
+            "-i",
+            fat_arg,
+            dtb.to_str().expect("utf-8"),
+            "::board.dtb",
+        ],
+    );
+    set
+}
+
+/// A RAM boot (the board profile, a directory as the image): boot.img is the
+/// boot partition, read from a copy; boot mode 3; no partition in
+/// /chosen/bootloader; a blank eMMC, its controller at --emmc-at; the
+/// firmware's watchdog as for a disk. Refused: another profile, an outer
+/// config that does not say boot_ramdisk=1, no boot.img, --ssh-key.
+#[test]
+fn a_ram_boot_boots_boot_img_with_a_blank_emmc() {
+    if !tools_here(&[
+        "mformat",
+        "mcopy",
+        "mtype",
+        "mdir",
+        "fdtput",
+        "fdtget",
+        "dtc",
+        "python3",
+        "qemu-system-aarch64",
+    ]) {
+        return;
+    }
+    let dir = tempfile::tempdir().expect("tempdir");
+    let set = ram_boot(
+        dir.path(),
+        "# the EEPROM's\n  boot_ramdisk=1 # over USB\r\n",
+    );
+    let boot_img = std::fs::read(set.join("boot.img")).expect("boot.img");
+    let emmc = "/soc@107c000000/mmc@fff000";
+    let board = [
+        "--profile",
+        "board",
+        "--fresh",
+        "--disk-size",
+        "16M",
+        "--emmc-at",
+        emmc,
+    ];
+    let (ok, out) = runner(dir.path(), &set, &[&board[..], &["--dtb"]].concat());
+    assert!(ok, "{out}");
+    let dtb = out
+        .lines()
+        .last()
+        .expect("the device tree's path")
+        .to_string();
+    let get = |args: &[&str]| {
+        let out = Command::new("fdtget")
+            .arg(&dtb)
+            .args(args)
+            .output()
+            .expect("fdtget");
+        (
+            out.status.success(),
+            String::from_utf8_lossy(&out.stdout).trim().to_string(),
+        )
+    };
+    assert_eq!(get(&[emmc, "compatible"]).1, "pci-host-ecam-generic");
+    assert_eq!(get(&["-t", "x", "/chosen/bootloader", "boot-mode"]).1, "3");
+    assert_eq!(get(&["-t", "x", "/chosen/bootloader", "count"]).1, "1");
+    assert!(
+        !get(&["/chosen/bootloader", "partition"]).0,
+        "a partition on a RAM boot"
+    );
+    let wdt = "/soc@107c000000/watchdog@7d200000";
+    assert_eq!(get(&[wdt, "compatible"]).1, "gaia,firmware-watchdog");
+    assert_eq!(get(&["-t", "i", wdt, "timeout-sec"]).1, "15");
+
+    // The eMMC: hardware areas and user area, all blank; boot.img untouched.
+    let copy = std::fs::read(dir.path().join("state/disk.img")).expect("the eMMC");
+    assert_eq!(copy.len(), (12 << 20) + (16 << 20));
+    assert!(copy.iter().all(|b| *b == 0), "the eMMC is blank");
+    assert_eq!(
+        std::fs::read(set.join("boot.img")).expect("boot.img"),
+        boot_img
+    );
+    let copy = dir.path().join("state/boot.img");
+    assert_eq!(std::fs::read(&copy).expect("the copy"), boot_img);
+    assert!(
+        std::fs::metadata(&copy)
+            .expect("the copy")
+            .permissions()
+            .readonly(),
+        "the copy of boot.img is writable"
+    );
+
+    // The plan says what was booted, and --boot-mode still chooses.
+    let (ok, out) = runner(
+        dir.path(),
+        &set,
+        &[
+            "--profile",
+            "board",
+            "--emmc-at",
+            emmc,
+            "--boot-mode",
+            "4",
+            "--print",
+        ],
+    );
+    assert!(ok, "{out}");
+    let sha = {
+        let out = Command::new("sha256sum")
+            .arg(set.join("boot.img"))
+            .output()
+            .expect("sha256sum");
+        String::from_utf8_lossy(&out.stdout)
+            .split_whitespace()
+            .next()
+            .expect("a digest")
+            .to_string()
+    };
+    for want in [
+        "boot mode: 4",
+        "partition: none (a RAM boot)",
+        &format!("boot.img sha256 {sha}"),
+        &format!("emmc at: {emmc}"),
+        "from: config.txt: kernel8.img, initramfs.cpio, cmdline.txt",
+        "cmdline: rdinit=/init panic=5",
+    ] {
+        assert!(out.contains(want), "{want}: {out}");
+    }
+    // Without --fresh, a disk copy is not taken for a RAM boot's eMMC.
+    let disk = disk(dir.path());
+    let (ok, out) = runner(dir.path(), &disk, &["--profile", "board", "--print"]);
+    assert!(
+        !ok && out.contains("was made for a RAM boot (--profile board): add --fresh to make it again for --profile board"),
+        "{out}"
+    );
+
+    // The default eMMC is 32 GiB, sparse.
+    let (ok, out) = runner(
+        dir.path(),
+        &set,
+        &["--profile", "board", "--fresh", "--print"],
+    );
+    assert!(
+        ok && out.contains(&format!("user area {} bytes", 32u64 << 30)),
+        "{out}"
+    );
+
+    // Refused.
+    for (outer, args, want) in [
+        (
+            "boot_ramdisk=1\n",
+            &["--print"][..],
+            "a RAM boot, which needs --profile board",
+        ),
+        (
+            "boot_ramdisk=0\n",
+            &["--profile", "board", "--print"][..],
+            "does not say boot_ramdisk=1",
+        ),
+        (
+            "#boot_ramdisk=1\n",
+            &["--profile", "board", "--print"][..],
+            "does not say boot_ramdisk=1",
+        ),
+        (
+            "boot_ramdisk=1\n",
+            &["--profile", "board", "--ssh-key", "key", "--print"][..],
+            "a RAM boot's boot.img is only read",
+        ),
+        (
+            "boot_ramdisk=1\n",
+            &["--profile", "board", "--emmc-at", "soc/mmc", "--print"][..],
+            "--emmc-at is a device-tree path",
+        ),
+    ] {
+        std::fs::write(set.join("config.txt"), outer).expect("write");
+        let (ok, out) = runner(dir.path(), &set, args);
+        assert!(!ok && out.contains(want), "{outer:?} {args:?}: {out}");
+    }
+    // A config written on Windows: CRLF (the CR is trailing whitespace), no comment.
+    std::fs::write(set.join("config.txt"), "boot_ramdisk=1\r\n").expect("write");
+    std::fs::write(set.join("boot.img"), [0u8; 4096]).expect("write");
+    let (ok, out) = runner(dir.path(), &set, &["--profile", "board", "--print"]);
+    assert!(
+        !ok && out.contains("is not a FAT image with a config.txt"),
+        "{out}"
+    );
+    std::fs::remove_file(set.join("boot.img")).expect("rm");
+    let (ok, out) = runner(dir.path(), &set, &["--profile", "board", "--print"]);
+    assert!(
+        !ok && out.contains("holds config.txt and boot.img"),
+        "{out}"
+    );
+}
+
+/// The stock host's options: how long it waits, and the TCP port it
+/// connects to, on its command line and in the boot's record; refused
+/// without --usb-host, or when not numbers.
+#[test]
+fn the_stock_hosts_wait_and_connect_are_options() {
+    if !tools_here(&[
+        "mformat", "mcopy", "mtype", "sfdisk", "fdtput", "dtc", "python3",
+    ]) {
+        return;
+    }
+    let dir = tempfile::tempdir().expect("tempdir");
+    let disk = disk(dir.path());
+    for (args, want) in [
+        (
+            &["--usb-host-wait", "30", "--print"][..],
+            "--usb-host-wait and --usb-host-connect need --usb-host",
+        ),
+        (
+            &["--usb-host-connect", "9200", "--print"][..],
+            "--usb-host-wait and --usb-host-connect need --usb-host",
+        ),
+        (
+            &["--usb-host-wait", "x", "--print"][..],
+            "--usb-host-wait is a number of seconds",
+        ),
+        (
+            &["--emmc-at", "/soc@107c000000/mmc@fff000", "--print"][..],
+            "--emmc-at needs --profile board",
+        ),
+        (
+            &["--usb-host-connect", "x", "--print"][..],
+            "--usb-host-connect is a TCP port",
+        ),
+    ] {
+        let (ok, out) = runner(dir.path(), &disk, args);
+        assert!(!ok && out.contains(want), "{args:?}: {out}");
+    }
+    // The plan, with a stand-in stock host (only --print reads it).
+    let host = dir.path().join("host");
+    std::fs::create_dir(&host).expect("mkdir");
+    std::fs::write(host.join("kernel"), b"").expect("write");
+    std::fs::write(host.join("initramfs.cpio.gz"), b"").expect("write");
+    let host_arg = host.to_str().expect("utf-8");
+    // A tree whose dwc2 is a device, for the UDC the stock host needs.
+    put_tree(
+        dir.path(),
+        &disk,
+        "slots/bay0/board.dtb",
+        "/dts-v1/;\n/ { #address-cells = <2>; #size-cells = <2>;\n soc@107c000000 { compatible = \"simple-bus\"; #address-cells = <1>; #size-cells = <1>; ranges = <0x0 0x10 0x0 0x80000000>; watchdog@7d200000 { compatible = \"brcm,bcm2712-pm\"; reg = <0x7d200000 0x308>; }; };\n axi { compatible = \"simple-bus\"; #address-cells = <2>; #size-cells = <2>; ranges; usb@480000 { compatible = \"brcm,bcm2835-usb\"; reg = <0x10 0x480000 0x0 0x10000>; status = \"okay\"; dr_mode = \"peripheral\"; }; };\n};\n",
+        false,
+    );
+    let (ok, out) = runner(
+        dir.path(),
+        &disk,
+        &[
+            "--profile",
+            "board",
+            "--fresh",
+            "--usb-host",
+            host_arg,
+            "--print",
+        ],
+    );
+    assert!(
+        ok && out.contains("waits 600 s for the gadget to link")
+            && out.contains(" gaia.wait=600")
+            && !out.contains("gaia.connect-port"),
+        "{out}"
+    );
+    let (ok, out) = runner(
+        dir.path(),
+        &disk,
+        &[
+            "--profile",
+            "board",
+            "--fresh",
+            "--usb-host",
+            host_arg,
+            "--usb-host-wait",
+            "30",
+            "--usb-host-connect",
+            "9200",
+            "--print",
+        ],
+    );
+    assert!(
+        ok && out.contains("then connects to TCP 9200 on the lease server")
+            && out.contains(" gaia.wait=30 gaia.connect-port=9200"),
+        "{out}"
+    );
+}

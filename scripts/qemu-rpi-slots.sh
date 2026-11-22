@@ -12,6 +12,7 @@
 #
 #   scripts/qemu-rpi-slots.sh helios-...-qemu.img.xz
 #   scripts/qemu-rpi-slots.sh --kernel Image --print board.img.xz
+#   scripts/qemu-rpi-slots.sh --profile board --kernel Image <dir with config.txt and boot.img>
 #
 # What it emulates, per boot, from the image's first FAT partition:
 # - config.txt (tryboot.txt on a tryboot), its `include` lines and the
@@ -145,6 +146,23 @@
 # The default profile (--profile virt) is unchanged: a virtio disk, and no
 # count, rsts or partition in the device tree.
 #
+# A RAM boot (the board profile, with a directory as the image): what the
+# board's EEPROM does when it boots over USB (rpiboot) or the network. The
+# directory holds the config.txt it asks for first, which must say
+# boot_ramdisk=1 (comments and blank lines aside, nothing else is read of
+# it), and boot.img, the FAT image it then boots as it would a boot
+# partition: config.txt, tryboot.txt, the kernel, initramfs, command line,
+# device trees and overlays all come from boot.img, as above. Differences:
+# - the boot mode is 3 (USB device boot) unless --boot-mode says;
+# - the eMMC is there, blank (a sparse 32 GiB user area, or --disk-size),
+#   for an image that writes it, and no boot reads it; --emmc-at PATH puts
+#   its controller (the PCI host's node) at the image's path for it (on a
+#   CM5: /soc@107c000000/mmc@fff000), as the boot source's path does on a
+#   disk boot;
+# - /chosen/bootloader has no partition: nothing was booted from one;
+# - boot.img is copied into the state directory and only read.
+# The firmware watchdog, the UDC and --usb-host are as for a disk.
+#
 # The image is never written: its contents are copied (sparse) to
 # <state>/disk.img once, and the guest writes that copy. --fresh copies again.
 # Nothing is added to the copy unless asked: --ssh-key FILE puts FILE at
@@ -165,7 +183,9 @@
 #   --ssh-key FILE  a public key for board/authorized_keys (default: none)
 #   --boot-count N  the boot count the config sections test (default 0);
 #                   with --profile board, the count before the first boot
-#   --boot-mode N   the firmware's boot mode (default 1)
+#   --boot-mode N   the firmware's boot mode (default 1; 3 for a RAM boot)
+#   --emmc-at PATH  with --profile board: the eMMC controller's device-tree
+#                   path when the boot names none (a RAM boot)
 #   --watchdog-scale P  with --profile board: the firmware watchdog's
 #                   hardware counts P percent of each second (100-10000,
 #                   default 100; see above)
@@ -173,6 +193,10 @@
 #                   by scripts/qemu-stock-host.sh into the UDC (see above;
 #                   needs socat and qemu-system-x86_64, $QEMU_X86 names
 #                   another)
+#   --usb-host-wait S  how long the stock host waits for the gadget to link,
+#                   and then for its network (default 600 s each)
+#   --usb-host-connect PORT  the stock host also connects to TCP PORT on
+#                   the lease's server, as a host's program would
 #   --hostfwd H:G   with --net user: forward host TCP port H to guest port
 #                   G (repeatable; replaces the defaults)
 #   --append ARGS   add ARGS to every boot's kernel command line
@@ -228,7 +252,10 @@ mac=52:54:00:77:00:02
 serial=1000000052540077
 ssh_key=""
 boot_count=0
-boot_mode=1
+boot_mode=""
+emmc_at=""
+usb_host_wait=600
+usb_host_connect=""
 tryboot=0
 max_boots=0
 watchdog=1
@@ -259,6 +286,9 @@ while [[ $# -gt 0 ]]; do
 	--ssh-key) ssh_key="$2"; shift 2 ;;
 	--boot-count) boot_count="$2"; shift 2 ;;
 	--boot-mode) boot_mode="$2"; shift 2 ;;
+	--emmc-at) emmc_at="$2"; shift 2 ;;
+	--usb-host-wait) usb_host_wait="$2"; shift 2 ;;
+	--usb-host-connect) usb_host_connect="$2"; shift 2 ;;
 	--tryboot) tryboot=1; shift ;;
 	--max-boots) max_boots="$2"; shift 2 ;;
 	--no-watchdog) watchdog=0; shift ;;
@@ -280,6 +310,24 @@ while [[ $# -gt 0 ]]; do
 done
 [[ -n $image ]] || { usage >&2; exit 2; }
 [[ -r $image ]] || { echo "cannot read $image" >&2; exit 2; }
+# A directory: a RAM boot (see above).
+ramdisk=0
+if [[ -d $image ]]; then
+	ramdisk=1
+	image=$(cd "$image" && pwd)
+	[[ $profile == board ]] || { echo "$image is a directory: a RAM boot, which needs --profile board" >&2; exit 2; }
+	[[ -r $image/config.txt && -r $image/boot.img ]] ||
+		{ echo "$image: a RAM boot's directory holds config.txt and boot.img" >&2; exit 2; }
+	sed 's/#.*//;s/^[[:space:]]*//;s/[[:space:]]*$//' "$image/config.txt" | grep -qx 'boot_ramdisk=1' ||
+		{ echo "$image/config.txt does not say boot_ramdisk=1: the firmware would not boot boot.img" >&2; exit 2; }
+	[[ -z $ssh_key || $ssh_key == none ]] || { echo "--ssh-key writes a boot partition; a RAM boot's boot.img is only read" >&2; exit 2; }
+	[[ -n $boot_mode ]] || boot_mode=3
+fi
+[[ -n $boot_mode ]] || boot_mode=1
+[[ $usb_host_wait =~ ^[0-9]+$ ]] || { echo "--usb-host-wait is a number of seconds" >&2; exit 2; }
+[[ -z $usb_host_connect || $usb_host_connect =~ ^[0-9]+$ ]] || { echo "--usb-host-connect is a TCP port" >&2; exit 2; }
+[[ -z $emmc_at || $profile == board ]] || { echo "--emmc-at needs --profile board" >&2; exit 2; }
+[[ -z $emmc_at || $emmc_at == /* ]] || { echo "--emmc-at is a device-tree path, /..." >&2; exit 2; }
 [[ ${#hostfwds[@]} -gt 0 ]] || hostfwds=(15800:5800 15899:5899 19200:9200 2222:22)
 if [[ $net == auto ]]; then
 	net=netns
@@ -306,6 +354,8 @@ virt | board) ;;
 *) echo "--profile is virt or board, not $profile" >&2; exit 2 ;;
 esac
 qemu_x86=${QEMU_X86:-qemu-system-x86_64}
+[[ -n $usb_host || ( $usb_host_wait == 600 && -z $usb_host_connect ) ]] ||
+	{ echo "--usb-host-wait and --usb-host-connect need --usb-host" >&2; exit 2; }
 if [[ -n $usb_host ]]; then
 	[[ $profile == board ]] || { echo "--usb-host needs --profile board" >&2; exit 2; }
 	[[ -r $usb_host/kernel && -r $usb_host/initramfs.cpio.gz ]] ||
@@ -322,6 +372,8 @@ if [[ -n $usb_host ]]; then
 	usb_cid_host=$((usb_cid_device + 1))
 	usb_port_device=$((40000 + (RANDOM % 10000) * 2))
 	usb_port_host=$((usb_port_device + 1))
+	# The stock host's init reads its options from here (scripts/qemu-stock-host/init).
+	usb_host_cmdline="console=ttyS0 loglevel=7 panic=-1 gaia.vsock-port=$usb_port_host gaia.wait=$usb_host_wait${usb_host_connect:+ gaia.connect-port=$usb_host_connect}"
 fi
 # Where the image starts in the disk file: after the eMMC's two boot areas
 # and its RPMB area, the order QEMU's emmc keeps them in its backing file.
@@ -377,14 +429,26 @@ fi
 new_copy=0
 # A copy is laid out for its profile (the image at 0, or after the eMMC's
 # hardware areas): one made for the other is not booted.
-if [[ $fresh -eq 0 && -e $disk && $(cat "$state/disk.profile" 2> /dev/null || echo virt) != "$profile" ]]; then
-	echo "$disk was made for --profile $(cat "$state/disk.profile" 2> /dev/null || echo virt): add --fresh to copy the image again for --profile $profile" >&2
+disk_kind=$profile
+[[ $ramdisk -eq 0 ]] || disk_kind=board-ramdisk
+# What a copy was made for, as said.
+made_for() {
+	case $1 in
+	board-ramdisk) echo "a RAM boot (--profile board)" ;;
+	*) echo "--profile $1" ;;
+	esac
+}
+if [[ $fresh -eq 0 && -e $disk && $(cat "$state/disk.profile" 2> /dev/null || echo virt) != "$disk_kind" ]]; then
+	echo "$disk was made for $(made_for "$(cat "$state/disk.profile" 2> /dev/null || echo virt)"): add --fresh to make it again for $(made_for "$disk_kind")" >&2
 	exit 2
 fi
 if [[ $fresh -eq 1 || ! -e $disk ]]; then
 	new_copy=1
 	rm -f "$disk" "$state/tryboot-next" "$state/disk.profile"
-	if [[ $user_off -eq 0 ]]; then
+	if [[ $ramdisk -eq 1 ]]; then
+		# A blank eMMC: its hardware areas and user area, all zeros (sparse).
+		truncate -s "$user_off" "$disk"
+	elif [[ $user_off -eq 0 ]]; then
 		case "$image" in
 		*.xz) xz -dc "$image" | cp --sparse=always /dev/stdin "$disk" ;;
 		*) cp --sparse=always "$image" "$disk" ;;
@@ -397,7 +461,7 @@ if [[ $fresh -eq 1 || ! -e $disk ]]; then
 		*) cat "$image" ;;
 		esac | dd of="$disk" bs=1M seek=$((user_off >> 20)) conv=sparse,notrunc status=none
 	fi
-	echo "$profile" > "$state/disk.profile"
+	echo "$disk_kind" > "$state/disk.profile"
 fi
 if [[ $user_off -eq 0 ]]; then
 	[[ -z $disk_size ]] || truncate -s ">$disk_size" "$disk"
@@ -408,6 +472,9 @@ else
 		want=$(numfmt --from=iec "${disk_size%B}")
 		[[ $((want & (want - 1))) -eq 0 ]] || { echo "--disk-size $disk_size: an eMMC's user area is a power of two (QEMU)" >&2; exit 2; }
 		[[ $want -ge $have ]] || { echo "--disk-size $disk_size is smaller than the image ($have bytes)" >&2; exit 2; }
+	elif [[ $ramdisk -eq 1 ]]; then
+		# The CM5's 32 GB eMMC fits in 32 GiB, the power of two above it.
+		want=$((32 << 30))
 	else
 		want=1
 		while [[ $want -lt $have ]]; do want=$((want * 2)); done
@@ -841,10 +908,10 @@ make_dtb() {
 	if [[ $profile == board ]]; then
 		fdtput -t x "$state/virt.dtb" /chosen/bootloader count "$(printf %x "$count")"
 		fdtput -t x "$state/virt.dtb" /chosen/bootloader rsts "$(printf %x "$rsts")"
-		fdtput -t x "$state/virt.dtb" /chosen/bootloader partition "$(printf %x "$fat_part")"
+		[[ -z $fat_part ]] || fdtput -t x "$state/virt.dtb" /chosen/bootloader partition "$(printf %x "$fat_part")"
 	fi
 	emulate_marker
-	move_node "$3" || return 1
+	move_node "${3:-$emmc_at}" || return 1
 	if [[ $profile == board ]]; then
 		firmware_wdt=""
 		if [[ -n $boot_watchdog ]]; then
@@ -920,9 +987,19 @@ MOVE
 	fi
 }
 
-read -r fat_at fat_part < <(fat_offset) || true
-[[ -n ${fat_at:-} ]] || { echo "$image has no FAT boot partition" >&2; exit 1; }
-fat="$disk@@$fat_at"
+if [[ $ramdisk -eq 1 ]]; then
+	# What the EEPROM loads: boot.img, read from a copy.
+	rm -f "$state/boot.img"
+	cp "$image/boot.img" "$state/boot.img"
+	chmod a-w "$state/boot.img"
+	fat="$state/boot.img"
+	fat_part=""
+	mtype -i "$fat" ::config.txt > /dev/null 2>&1 || { echo "$image/boot.img is not a FAT image with a config.txt" >&2; exit 1; }
+else
+	read -r fat_at fat_part < <(fat_offset) || true
+	[[ -n ${fat_at:-} ]] || { echo "$image has no FAT boot partition" >&2; exit 1; }
+	fat="$disk@@$fat_at"
+fi
 
 if [[ $new_copy -eq 1 && -n $ssh_key && $ssh_key != none ]]; then
 	[[ -r $ssh_key ]] || { echo "cannot read --ssh-key $ssh_key" >&2; exit 2; }
@@ -954,7 +1031,7 @@ kernel_seccomp() {
 		return
 	fi
 	# gzip stops at the end of the embedded stream and warns of the bytes after.
-	config=$("${read[@]}" < "$image" 2>/dev/null | tail -c +$((offset + 9)) | gzip -dc 2>/dev/null || true)
+	config=$("${read[@]}" < "$image" 2>/dev/null | tail -c +$((offset + 9)) 2>/dev/null | gzip -dc 2>/dev/null || true)
 	if [[ -z $config ]]; then
 		echo unknown
 	elif grep -qx 'CONFIG_SECCOMP=y' <<<"$config" && grep -qx 'CONFIG_SECCOMP_FILTER=y' <<<"$config"; then
@@ -995,7 +1072,9 @@ while :; do
 		if [[ $profile == board ]]; then
 			echo "disk: emmc, user area $emmc_user bytes, boot0 and boot1 $emmc_boot bytes, rpmb $emmc_rpmb bytes"
 			echo "rsts: $rsts"
-			echo "partition: $fat_part"
+			echo "partition: ${fat_part:-none (a RAM boot)}"
+			[[ $ramdisk -eq 0 ]] || echo "ram boot: $image/config.txt (boot_ramdisk=1), boot.img sha256 $(sha256sum < "$fat" | cut -d' ' -f1)"
+			echo "emmc at: ${boot_from:-${emmc_at:-not moved}}"
 			echo "kernel_watchdog_timeout: ${boot_watchdog:-none}"
 		fi
 		echo "boot source: ${boot_from:-none}"
@@ -1006,6 +1085,7 @@ while :; do
 		echo "seccomp: $(kernel_seccomp "$boot_kernel")"
 		echo "cmdline: $boot_cmdline"
 		echo "overlays: ${boot_overlays[*]:-none}"
+		[[ -z $usb_host ]] || echo "usb host: $usb_host; waits $usb_host_wait s for the gadget to link and $usb_host_wait s for its network${usb_host_connect:+, then connects to TCP $usb_host_connect on the lease server}; its command line: $usb_host_cmdline"
 		printf 'qemu:'
 		printf ' %q' "$qemu" "${args[@]}" -dtb "$state/virt.dtb" "${qemu_extra[@]}"
 		echo
@@ -1026,8 +1106,13 @@ while :; do
 		echo "device tree $state/virt.dtb sha256 $(sha256sum < "$state/virt.dtb" | cut -d' ' -f1) (the virt machine's; not the image's)"
 		echo "$marker_note"
 		if [[ $profile == board ]]; then
-			echo "disk: QEMU emmc on sdhci-pci, user area $emmc_user bytes (a power of two; not the board's size), boot0/boot1 $emmc_boot bytes, rpmb $emmc_rpmb bytes; its PCI host at the boot source's path ${boot_from:-(none named)}"
-			echo "firmware: count $count, rsts $rsts, partition $fat_part, boot-mode $boot_mode, tryboot $this_tryboot"
+			if [[ $ramdisk -eq 1 ]]; then
+				echo "ram boot: $image/config.txt says boot_ramdisk=1; boot.img sha256 $(sha256sum < "$fat" | cut -d' ' -f1) ($image/boot.img)"
+				echo "disk: QEMU emmc on sdhci-pci, blank, user area $emmc_user bytes (a power of two; not the board's size), boot0/boot1 $emmc_boot bytes, rpmb $emmc_rpmb bytes; its PCI host at ${emmc_at:-(not moved: --emmc-at)}"
+			else
+				echo "disk: QEMU emmc on sdhci-pci, user area $emmc_user bytes (a power of two; not the board's size), boot0/boot1 $emmc_boot bytes, rpmb $emmc_rpmb bytes; its PCI host at the boot source's path ${boot_from:-(none named)}"
+			fi
+			echo "firmware: count $count, rsts $rsts, partition ${fat_part:-none (a RAM boot)}, boot-mode $boot_mode, tryboot $this_tryboot"
 			if [[ -n $firmware_wdt ]]; then
 				echo "firmware watchdog: armed, $boot_watchdog s (kernel_watchdog_timeout in $boot_config), node gaia,firmware-watchdog at ${firmware_wdt%% *} (the image's power-management block, CPU address ${firmware_wdt#* })"
 				[[ $watchdog_scale -eq 100 ]] || echo "firmware watchdog: NOT like the board: its hardware counts $watchdog_scale% of each second asked (--watchdog-scale), for a guest slower than the board"
@@ -1039,6 +1124,7 @@ while :; do
 				echo "usb device controller: NOT like the board: no dwc2 hardware; the device is served over USB/IP, at high speed"
 				if [[ -n $usb_host ]]; then
 					echo "usb host: the stock host in $usb_host, over vsock (guest CIDs $usb_cid_device and $usb_cid_host, relay ports $usb_port_device and $usb_port_host); its log $state/boot-$((boots)).usb-host.log"
+					echo "usb host: waits $usb_host_wait s for the gadget to link and $usb_host_wait s for its network${usb_host_connect:+, then connects to TCP $usb_host_connect on the lease server}; its command line: $usb_host_cmdline"
 					sed 's/^/usb host: /' "$usb_host/SOURCES" 2> /dev/null || true
 				else
 					echo "usb host: none plugged in (--usb-host)"
@@ -1111,7 +1197,7 @@ QMP
 		accel=tcg
 		[[ ! -r /dev/kvm || ! -w /dev/kvm ]] || accel=kvm
 		"$qemu_x86" -M "q35,accel=$accel" -m 512M -smp 2 -kernel "$usb_host/kernel" -initrd "$usb_host/initramfs.cpio.gz" \
-			-append "console=ttyS0 loglevel=7 panic=-1 gaia.vsock-port=$usb_port_host" \
+			-append "$usb_host_cmdline" \
 			-device "vhost-vsock-pci,guest-cid=$usb_cid_host" -display none -monitor none -no-reboot \
 			-serial "file:$state/boot-$boots.usb-host.log" &
 		usb_pids+=($!)

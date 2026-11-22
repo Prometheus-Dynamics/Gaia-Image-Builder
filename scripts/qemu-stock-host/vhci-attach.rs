@@ -1,10 +1,11 @@
 //! The stock host's USB/IP attach, for scripts/qemu-stock-host.sh's guest:
 //! connects a vsock stream to the host (CID 2) on PORT, retrying each second
-//! until the relay takes it, and gives it to vhci_hcd as a high-speed device
+//! until the relay takes it (at most WAIT seconds, when given: no device
+//! linked by then exits 3), and gives it to vhci_hcd as a high-speed device
 //! on port 0. There is no usbipd handshake: the far end is a usbip-vudc
 //! that starts USB/IP on the stream as it is.
 //!
-//!   vhci-attach PORT
+//!   vhci-attach PORT [WAIT]
 //!
 //! Built with rustc alone (no crates) for a static musl binary.
 
@@ -40,10 +41,11 @@ fn main() {
     let port: c_uint = match std::env::args().nth(1).and_then(|p| p.parse().ok()) {
         Some(p) => p,
         None => {
-            eprintln!("usage: vhci-attach PORT");
+            eprintln!("usage: vhci-attach PORT [WAIT]");
             std::process::exit(2);
         }
     };
+    let wait: Option<u32> = std::env::args().nth(2).and_then(|w| w.parse().ok());
     let addr = SockaddrVm {
         svm_family: AF_VSOCK as c_ushort,
         svm_reserved1: 0,
@@ -68,6 +70,10 @@ fn main() {
         // SAFETY: as above.
         unsafe { close(fd) };
         tries += 1;
+        if wait.is_some_and(|w| tries > w) {
+            println!("stock-host: no device on vsock port {port} after {tries} s");
+            std::process::exit(3);
+        }
         if tries % 30 == 1 {
             println!(
                 "stock-host: waiting for the device on vsock port {port}: {}",

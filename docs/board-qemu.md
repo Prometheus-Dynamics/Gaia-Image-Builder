@@ -43,6 +43,26 @@ scripts/qemu-rpi-slots.sh --profile board --fresh --net user --max-boots 1 \
 - With `--usb-host`, the stock host's serial log is `<work dir>/boot-N.usb-host.log`, and its `stock-host:` lines are
   printed when the boot ends. When the stock host is done, it powers off, the board guest is quit and the run ends.
 
+A RAM boot (the EEPROM booting `boot.img` over USB or the network, as for a flasher): the image is a directory with
+the EEPROM's `config.txt` (it must say `boot_ramdisk=1`) and `boot.img`:
+
+```
+scripts/qemu-rpi-slots.sh --profile board --fresh --net user --max-boots 1 \
+    --kernel <out>/Image --watchdog-scale 459 --emmc-at /soc@107c000000/mmc@fff000 \
+    --usb-host <host dir> --usb-host-wait 300 --usb-host-connect 9200 --state <work dir> <set dir>
+```
+
+- The kernel's place, the initramfs, the command line, the device trees and the overlays come from `boot.img`'s own
+  `config.txt` and `tryboot.txt`, as from a boot partition. `boot.img` is copied into `<work dir>` and only read.
+- The boot mode is 3 (USB device boot) unless `--boot-mode` says. `/chosen/bootloader` has no `partition`.
+- The eMMC is there and blank (a sparse 32 GiB user area, or `--disk-size`), for the image to write; nothing boots from
+  it. `--emmc-at` puts its controller at the board's path for it, since a RAM boot's command line names no boot source.
+- The firmware watchdog, the UDC and the stock host are as for a disk. `--usb-host-wait S` is how long the stock host
+  waits for the gadget to link, and then for its network (600 s each by default); with no gadget by then it says
+  `no device on vsock port`. `--usb-host-connect PORT` has it open a TCP connection to PORT on the lease's server after
+  the ping, and say what came back.
+- `--ssh-key` is refused: it writes a boot partition.
+
 The guest's sysfs against a board's, while the guest runs (without `--usb-host`, which ends the run early). The
 image's console must let root log in without a password:
 
