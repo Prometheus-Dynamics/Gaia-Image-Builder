@@ -52,6 +52,14 @@ scripts/qemu-rpi-slots.sh --profile board --fresh --net user --max-boots 1 \
     --usb-host <host dir> --usb-host-wait 300 --usb-host-connect 9200 --state <work dir> <set dir>
 ```
 
+The whole flash, with the client on the PC (`127.0.0.1:19201` is the flasher's 9200), and the reboot into the slot:
+
+```
+scripts/qemu-rpi-slots.sh --profile board --fresh --net user --max-boots 3 \
+    --kernel <out>/Image --watchdog-scale 459 --serial <board serial> --emmc-at /soc@107c000000/mmc@fff000 \
+    --usb-host <host dir> --usb-host-forward 19201:9200 --state <work dir> <set dir>
+```
+
 - The kernel's place, the initramfs, the command line, the device trees and the overlays come from `boot.img`'s own
   `config.txt` and `tryboot.txt`, as from a boot partition. `boot.img` is copied into `<work dir>` and only read.
 - The boot mode is 3 (USB device boot) unless `--boot-mode` says. `/chosen/bootloader` has no `partition`.
@@ -62,6 +70,25 @@ scripts/qemu-rpi-slots.sh --profile board --fresh --net user --max-boots 1 \
   `no device on vsock port`. `--usb-host-connect PORT` has it open a TCP connection to PORT on the lease's server after
   the ping, and say what came back.
 - `--ssh-key` is refused: it writes a boot partition.
+- `--usb-host-forward H:P` lets a real client on the PC reach the flasher. The PC's `127.0.0.1:H` goes, over vsock,
+  to the stock host, which joins it to TCP P on the lease's server. With it, the stock host stays up until the boot
+  ends instead of powering off. Each boot gets a new stock host, so the gadget is plugged in again after a restart, on
+  the same PC port. Its log has a `stock-host: forward N:` line for each connection.
+- A restart boots the eMMC as the RAM boot left it. This covers the guest's reboot, a tryboot reboot and the watchdog.
+  It is the same eMMC image, now booted as a disk:
+  - boot mode 1;
+  - its boot partition's `config.txt` (or `tryboot.txt`);
+  - the PCI host at the path the slot's command line names;
+  - count 2 and rsts 0x20.
+  It is recorded as `boot-2.*` of the same run. If the eMMC has no FAT boot partition by then, the run ends, since
+  the firmware would go on to its next boot mode. So the whole flash can run in emulation: the RAM boot, the client's
+  push through the forward, the flasher writing and checking the eMMC, the reboot, and the slot's first boot.
+- Unlike the board, and recorded in `boot-N.replaced`:
+  - The eMMC is QEMU's, on PCI. It writes at the host file's speed, and its user area is a power of two, not the
+    board's size.
+  - The gadget is usbip-vudc over USB/IP at high speed, not the dwc2.
+  - The PC reaches the gadget's network through the stock host, not through an NCM interface of its own.
+  - The kernel is the virt kernel, not `kernel8.img`.
 
 The guest's sysfs against a board's, while the guest runs (without `--usb-host`, which ends the run early). The
 image's console must let root log in without a password:

@@ -11,8 +11,8 @@
 # <out>/kernel and <out>/initramfs.cpio.gz are made, and <out>/SOURCES says
 # where each byte came from (with SHA-256). The initramfs holds a static
 # busybox (--busybox: a static x86_64 one; none is built here), the attach
-# helper (scripts/qemu-stock-host/vhci-attach.rs, built with rustc for
-# x86_64-unknown-linux-musl), the init, and the kernel's own modules for
+# and forward helpers (scripts/qemu-stock-host/vhci-attach.rs and
+# vsock-forward.rs, built with rustc for x86_64-unknown-linux-musl), the init, and the kernel's own modules for
 # USB/IP's host side, CDC NCM, CDC ACM and virtio vsock, decompressed.
 #
 # Options:
@@ -60,12 +60,16 @@ cp "$busybox" "$root/bin/busybox"
 chmod 755 "$root/bin/busybox"
 cp "$here/qemu-stock-host/init" "$root/init"
 chmod 755 "$root/init"
-rustc --edition 2021 -O --target x86_64-unknown-linux-musl -C panic=abort -C strip=symbols \
-	-o "$root/bin/vhci-attach" "$here/qemu-stock-host/vhci-attach.rs"
+for helper in vhci-attach vsock-forward; do
+	rustc --edition 2021 -O --target x86_64-unknown-linux-musl -C panic=abort -C strip=symbols \
+		-o "$root/bin/$helper" "$here/qemu-stock-host/$helper.rs"
+done
 {
 	echo "kernel $kernel sha256 $(sha256sum < "$kernel" | cut -d' ' -f1)"
 	echo "busybox $busybox sha256 $(sha256sum < "$busybox" | cut -d' ' -f1)"
-	echo "vhci-attach from scripts/qemu-stock-host/vhci-attach.rs sha256 $(sha256sum < "$here/qemu-stock-host/vhci-attach.rs" | cut -d' ' -f1) ($(rustc --version))"
+	for helper in vhci-attach vsock-forward; do
+		echo "$helper from scripts/qemu-stock-host/$helper.rs sha256 $(sha256sum < "$here/qemu-stock-host/$helper.rs" | cut -d' ' -f1) ($(rustc --version))"
+	done
 	echo "init scripts/qemu-stock-host/init sha256 $(sha256sum < "$here/qemu-stock-host/init" | cut -d' ' -f1)"
 } > "$out/SOURCES"
 for m in "${order[@]}"; do

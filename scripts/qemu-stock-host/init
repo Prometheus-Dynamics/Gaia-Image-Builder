@@ -4,13 +4,17 @@
 # USB/IP, CDC NCM and CDC ACM drivers, attaches the board's gadget, leases an
 # address on the gadget's network interface as any host would, and pings
 # the server the lease names, and with gaia.connect-port= opens a TCP
-# connection to that port on it, as a host's program would. Every result line starts "stock-host:"; the
+# connection to that port on it, as a host's program would. With
+# gaia.forward=V:P it then stays up, joining each stream the PC opens on
+# vsock port V to TCP port P on that server, until the run stops it.
+# Every result line starts "stock-host:"; the
 # kernel's own log follows "stock-host: kernel log". Then it powers off.
 #
 # Kernel command line: gaia.vsock-port=P (the relay's port for this side),
 # gaia.wait=S (how long to wait for the device to link and for its network
 # interface, each; default 600),
-# gaia.connect-port=N (the TCP port to connect to on the lease's server).
+# gaia.connect-port=N (the TCP port to connect to on the lease's server),
+# gaia.forward=V:P (the forward).
 /bin/busybox mkdir -p /bin /sbin /proc /sys /dev /tmp
 /bin/busybox --install -s /bin
 mount -t proc proc /proc
@@ -19,11 +23,13 @@ mount -t devtmpfs devtmpfs /dev
 port=""
 wait=600
 connect=""
+forward=""
 for word in $(cat /proc/cmdline); do
 	case $word in
 	gaia.vsock-port=*) port=${word#*=} ;;
 	gaia.wait=*) wait=${word#*=} ;;
 	gaia.connect-port=*) connect=${word#*=} ;;
+	gaia.forward=*) forward=${word#*=} ;;
 	esac
 done
 done_() {
@@ -136,5 +142,10 @@ if [ -n "$connect" ]; then
 		sed 's/^/stock-host: connect: /' /tmp/connect.log
 		echo "stock-host: connect $serverid:$connect: failed"
 	fi
+fi
+if [ -n "$forward" ]; then
+	# Serves until the run ends this host; ending sooner is a failure.
+	/bin/vsock-forward "${forward%%:*}" "$serverid" "${forward#*:}"
+	echo "stock-host: forward ended"
 fi
 done_

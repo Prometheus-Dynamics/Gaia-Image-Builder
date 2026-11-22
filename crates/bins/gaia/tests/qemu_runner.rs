@@ -1392,12 +1392,20 @@ fn the_stock_hosts_wait_and_connect_are_options() {
     let disk = disk(dir.path());
     for (args, want) in [
         (
+            &["--usb-host-forward", "19200:9200", "--print"][..],
+            "--usb-host-wait, --usb-host-connect and --usb-host-forward need --usb-host",
+        ),
+        (
+            &["--usb-host-forward", "9200", "--print"][..],
+            "--usb-host-forward is HOST-PORT:BOARD-PORT",
+        ),
+        (
             &["--usb-host-wait", "30", "--print"][..],
-            "--usb-host-wait and --usb-host-connect need --usb-host",
+            "--usb-host-wait, --usb-host-connect and --usb-host-forward need --usb-host",
         ),
         (
             &["--usb-host-connect", "9200", "--print"][..],
-            "--usb-host-wait and --usb-host-connect need --usb-host",
+            "--usb-host-wait, --usb-host-connect and --usb-host-forward need --usb-host",
         ),
         (
             &["--usb-host-wait", "x", "--print"][..],
@@ -1460,12 +1468,175 @@ fn the_stock_hosts_wait_and_connect_are_options() {
             "30",
             "--usb-host-connect",
             "9200",
+            "--usb-host-forward",
+            "19201:9200",
             "--print",
         ],
     );
     assert!(
         ok && out.contains("then connects to TCP 9200 on the lease server")
-            && out.contains(" gaia.wait=30 gaia.connect-port=9200"),
+            && out.contains(" gaia.wait=30 gaia.connect-port=9200 gaia.forward=20000:9200")
+            && out.contains(
+                "usb host: forwards the PC's 127.0.0.1:19201 to TCP 9200 on the lease server"
+            ),
         "{out}"
     );
+}
+
+/// A stand-in for qemu-system-aarch64 ($QEMU) that boots nothing: a call
+/// without -dtb (the runner's probes of the machine) goes to the real one; a boot records its arguments and device tree
+/// as boot-N in $FAKE_DIR, takes QMP's events listener, and on its first
+/// boot writes $FAKE_FLASH (when set) into its drive at $FAKE_AT, as a
+/// flasher would, and logs a restart.
+const FAKE_QEMU: &str = r#"#!/usr/bin/env python3
+import os, socket, sys
+args = sys.argv[1:]
+if "-dtb" not in args:
+    os.execvp("qemu-system-aarch64", ["qemu-system-aarch64", *args])
+d = os.environ["FAKE_DIR"]
+n = len([f for f in os.listdir(d) if f.endswith(".args")]) + 1
+with open(f"{d}/boot-{n}.args", "w") as f:
+    f.write("\n".join(args))
+opt = lambda name: args[args.index(name) + 1]
+with open(opt("-dtb"), "rb") as src, open(f"{d}/boot-{n}.dtb", "wb") as dst:
+    dst.write(src.read())
+for i, a in enumerate(args):
+    if a == "-qmp" and "wait=on" in args[i + 1]:
+        path = args[i + 1].split(",")[0][len("unix:"):]
+        srv = socket.socket(socket.AF_UNIX)
+        srv.bind(path)
+        srv.listen(1)
+        conn, _ = srv.accept()
+        f = conn.makefile("rw")
+        f.write('{"QMP": {}}\n'); f.flush()
+        f.readline()
+        f.write('{"return": {}}\n'); f.flush()
+        conn.close()
+log = [a.split("logfile=")[1].split(",")[0] for a in args if "logfile=" in a][0]
+drive = [a.split("file=")[1].split(",")[0] for a in args if a.startswith("if=none")][0]
+with open(log, "w") as out:
+    if n == 1:
+        if os.environ.get("FAKE_FLASH"):
+            with open(os.environ["FAKE_FLASH"], "rb") as src, open(drive, "r+b") as dst:
+                dst.seek(int(os.environ["FAKE_AT"]))
+                dst.write(src.read())
+        out.write("reboot: Restarting system\n")
+"#;
+
+/// After a RAM boot, a restart boots the eMMC as the RAM boot left it: boot
+/// mode 1, its boot partition's config, count 2 and rsts 0x20, recorded as
+/// boot 2 of the run; an eMMC with no boot partition then ends the run.
+#[test]
+fn a_restart_after_a_ram_boot_boots_the_emmc() {
+    if !tools_here(&[
+        "mformat",
+        "mcopy",
+        "mmd",
+        "mtype",
+        "mdir",
+        "sfdisk",
+        "fdtput",
+        "fdtget",
+        "dtc",
+        "python3",
+        "qemu-system-aarch64",
+    ]) {
+        return;
+    }
+    let dir = tempfile::tempdir().expect("tempdir");
+    let set = ram_boot(dir.path(), "boot_ramdisk=1\n");
+    // What the flasher writes: a slot disk, its device tree with the board's
+    // power-management block.
+    let flash = disk(dir.path());
+    put_dtb(dir.path(), &flash, "slots/bay0/board.dtb", Some(0x7d200000));
+    let fake = dir.path().join("fake-qemu");
+    std::fs::write(&fake, FAKE_QEMU).expect("write");
+    run("chmod", &["+x", fake.to_str().expect("utf-8")]);
+    let boots = |flash: Option<&Path>, name: &str| {
+        let record = dir.path().join(name);
+        std::fs::create_dir(&record).expect("mkdir");
+        let out = Command::new(repo().join("scripts/qemu-rpi-slots.sh"))
+            .env("QEMU", &fake)
+            .env("FAKE_DIR", &record)
+            .env("FAKE_FLASH", flash.map(Path::as_os_str).unwrap_or_default())
+            .env("FAKE_AT", (12u64 << 20).to_string())
+            .arg("--state")
+            .arg(dir.path().join(name).join("state"))
+            .args([
+                "--net",
+                "user",
+                "--profile",
+                "board",
+                "--fresh",
+                "--disk-size",
+                "64M",
+                "--emmc-at",
+                "/soc@107c000000/mmc@fff000",
+            ])
+            .arg(&set)
+            .stdin(std::process::Stdio::null())
+            .output()
+            .expect("the runner runs");
+        (
+            record,
+            out.status.success(),
+            format!(
+                "{}{}",
+                String::from_utf8_lossy(&out.stdout),
+                String::from_utf8_lossy(&out.stderr)
+            ),
+        )
+    };
+    let (record, ok, out) = boots(Some(&flash), "flashed");
+    assert!(ok, "{out}");
+    assert!(
+        out.contains("== the eMMC's boot partition (partition 1), after the RAM boot"),
+        "{out}"
+    );
+    let state = record.join("state");
+    let first = std::fs::read_to_string(state.join("boot-1.replaced")).expect("boot 1");
+    let second = std::fs::read_to_string(state.join("boot-2.replaced")).expect("boot 2");
+    assert!(first.contains("ram boot: "), "{first}");
+    assert!(
+        first.contains("firmware: count 1, rsts 0x1000, partition none (a RAM boot), boot-mode 3"),
+        "{first}"
+    );
+    assert!(!second.contains("ram boot: "), "{second}");
+    assert!(
+        second.contains("firmware: count 2, rsts 0x20, partition 1, boot-mode 1"),
+        "{second}"
+    );
+    assert!(
+        second.contains("disk: the eMMC as the RAM boot left it, booted from its partition 1"),
+        "{second}"
+    );
+    assert!(!state.join("boot-3.replaced").exists(), "a third boot");
+    let get = |n: u32, args: &[&str]| {
+        let out = Command::new("fdtget")
+            .arg(record.join(format!("boot-{n}.dtb")))
+            .args(args)
+            .output()
+            .expect("fdtget");
+        String::from_utf8_lossy(&out.stdout).trim().to_string()
+    };
+    assert_eq!(get(1, &["-t", "x", "/chosen/bootloader", "boot-mode"]), "3");
+    assert_eq!(get(2, &["-t", "x", "/chosen/bootloader", "boot-mode"]), "1");
+    assert_eq!(get(2, &["-t", "x", "/chosen/bootloader", "partition"]), "1");
+    assert_eq!(
+        get(2, &["/soc@107c000000/watchdog@7d200000", "compatible"]),
+        "gaia,firmware-watchdog"
+    );
+    // Boot 2's command line is the eMMC's slot's, boot 1's boot.img's.
+    let args1 = std::fs::read_to_string(record.join("boot-1.args")).expect("args");
+    let args2 = std::fs::read_to_string(record.join("boot-2.args")).expect("args");
+    assert!(args1.contains("rdinit=/init panic=5"), "{args1}");
+    assert!(args2.contains("os.slot=s0"), "{args2}");
+
+    // Nothing written: no boot partition, and the run ends after boot 1.
+    let (record, ok, out) = boots(None, "blank");
+    assert!(
+        ok && out.contains("the eMMC has no FAT boot partition after the RAM boot"),
+        "{out}"
+    );
+    assert!(!record.join("state/boot-2.replaced").exists(), "{out}");
 }

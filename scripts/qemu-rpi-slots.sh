@@ -161,7 +161,16 @@
 #   disk boot;
 # - /chosen/bootloader has no partition: nothing was booted from one;
 # - boot.img is copied into the state directory and only read.
-# The firmware watchdog, the UDC and --usb-host are as for a disk.
+# The firmware watchdog, the UDC and --usb-host are as for a disk. A restart
+# (reboot, tryboot or the watchdog) boots the eMMC, as the firmware does
+# once the USB boot is no longer asked for: the same eMMC image as a disk,
+# boot mode 1, its boot partition's config.txt (or tryboot.txt), the next
+# count and rsts, all recorded as later boots of the one run. An eMMC with
+# no FAT boot partition by then ends the run: the firmware would go on to
+# its next boot mode.
+# Not like the board after the flash: the eMMC is QEMU's, on PCI, at the
+# host file's speed and a power-of-two size; the gadget is served by
+# usbip-vudc over USB/IP, at high speed, not by the dwc2.
 #
 # The image is never written: its contents are copied (sparse) to
 # <state>/disk.img once, and the guest writes that copy. --fresh copies again.
@@ -197,6 +206,10 @@
 #                   and then for its network (default 600 s each)
 #   --usb-host-connect PORT  the stock host also connects to TCP PORT on
 #                   the lease's server, as a host's program would
+#   --usb-host-forward H:P  the PC's 127.0.0.1:H reaches TCP P on the lease's
+#                   server, through the stock host (which then stays up
+#                   until each boot ends, and is plugged in again for the
+#                   next): for a real client on the PC
 #   --hostfwd H:G   with --net user: forward host TCP port H to guest port
 #                   G (repeatable; replaces the defaults)
 #   --append ARGS   add ARGS to every boot's kernel command line
@@ -256,6 +269,7 @@ boot_mode=""
 emmc_at=""
 usb_host_wait=600
 usb_host_connect=""
+usb_host_forward=""
 tryboot=0
 max_boots=0
 watchdog=1
@@ -289,6 +303,7 @@ while [[ $# -gt 0 ]]; do
 	--emmc-at) emmc_at="$2"; shift 2 ;;
 	--usb-host-wait) usb_host_wait="$2"; shift 2 ;;
 	--usb-host-connect) usb_host_connect="$2"; shift 2 ;;
+	--usb-host-forward) usb_host_forward="$2"; shift 2 ;;
 	--tryboot) tryboot=1; shift ;;
 	--max-boots) max_boots="$2"; shift 2 ;;
 	--no-watchdog) watchdog=0; shift ;;
@@ -326,6 +341,7 @@ fi
 [[ -n $boot_mode ]] || boot_mode=1
 [[ $usb_host_wait =~ ^[0-9]+$ ]] || { echo "--usb-host-wait is a number of seconds" >&2; exit 2; }
 [[ -z $usb_host_connect || $usb_host_connect =~ ^[0-9]+$ ]] || { echo "--usb-host-connect is a TCP port" >&2; exit 2; }
+[[ -z $usb_host_forward || $usb_host_forward =~ ^[0-9]+:[0-9]+$ ]] || { echo "--usb-host-forward is HOST-PORT:BOARD-PORT" >&2; exit 2; }
 [[ -z $emmc_at || $profile == board ]] || { echo "--emmc-at needs --profile board" >&2; exit 2; }
 [[ -z $emmc_at || $emmc_at == /* ]] || { echo "--emmc-at is a device-tree path, /..." >&2; exit 2; }
 [[ ${#hostfwds[@]} -gt 0 ]] || hostfwds=(15800:5800 15899:5899 19200:9200 2222:22)
@@ -354,8 +370,8 @@ virt | board) ;;
 *) echo "--profile is virt or board, not $profile" >&2; exit 2 ;;
 esac
 qemu_x86=${QEMU_X86:-qemu-system-x86_64}
-[[ -n $usb_host || ( $usb_host_wait == 600 && -z $usb_host_connect ) ]] ||
-	{ echo "--usb-host-wait and --usb-host-connect need --usb-host" >&2; exit 2; }
+[[ -n $usb_host || ( $usb_host_wait == 600 && -z $usb_host_connect && -z $usb_host_forward ) ]] ||
+	{ echo "--usb-host-wait, --usb-host-connect and --usb-host-forward need --usb-host" >&2; exit 2; }
 if [[ -n $usb_host ]]; then
 	[[ $profile == board ]] || { echo "--usb-host needs --profile board" >&2; exit 2; }
 	[[ -r $usb_host/kernel && -r $usb_host/initramfs.cpio.gz ]] ||
@@ -373,7 +389,12 @@ if [[ -n $usb_host ]]; then
 	usb_port_device=$((40000 + (RANDOM % 10000) * 2))
 	usb_port_host=$((usb_port_device + 1))
 	# The stock host's init reads its options from here (scripts/qemu-stock-host/init).
-	usb_host_cmdline="console=ttyS0 loglevel=7 panic=-1 gaia.vsock-port=$usb_port_host gaia.wait=$usb_host_wait${usb_host_connect:+ gaia.connect-port=$usb_host_connect}"
+	# The forward's vsock port is the stock host's own (its CID's).
+	usb_forward_vport=20000
+	usb_host_cmdline="console=ttyS0 loglevel=7 panic=-1 gaia.vsock-port=$usb_port_host gaia.wait=$usb_host_wait${usb_host_connect:+ gaia.connect-port=$usb_host_connect}${usb_host_forward:+ gaia.forward=$usb_forward_vport:${usb_host_forward#*:}}"
+	if [[ -n $usb_host_forward ]]; then
+		usb_host_forward_note="forwards the PC's 127.0.0.1:${usb_host_forward%%:*} to TCP ${usb_host_forward#*:} on the lease server (vsock port $usb_forward_vport), and stays up until the boot ends"
+	fi
 fi
 # Where the image starts in the disk file: after the eMMC's two boot areas
 # and its RPMB area, the order QEMU's emmc keeps them in its backing file.
@@ -1040,7 +1061,20 @@ kernel_seccomp() {
 		echo off
 	fi
 }
+ram_now=$ramdisk
 while :; do
+	if [[ $ram_now -eq 1 && $boots -gt 0 ]]; then
+		# After the RAM boot, a restart: the firmware boots the eMMC.
+		read -r fat_at fat_part < <(fat_offset) || true
+		if [[ -z ${fat_at:-} ]]; then
+			echo "== the eMMC has no FAT boot partition after the RAM boot: the firmware would go on to its next boot mode; stopping" >&2
+			exit 0
+		fi
+		fat="$disk@@$fat_at"
+		ram_now=0
+		boot_mode=1
+		echo "== the eMMC's boot partition (partition $fat_part), after the RAM boot" >&2
+	fi
 	if [[ $profile == board ]]; then
 		# The firmware's count of boots since power-on, and the reset status:
 		# a power-on first, a restart after.
@@ -1073,7 +1107,7 @@ while :; do
 			echo "disk: emmc, user area $emmc_user bytes, boot0 and boot1 $emmc_boot bytes, rpmb $emmc_rpmb bytes"
 			echo "rsts: $rsts"
 			echo "partition: ${fat_part:-none (a RAM boot)}"
-			[[ $ramdisk -eq 0 ]] || echo "ram boot: $image/config.txt (boot_ramdisk=1), boot.img sha256 $(sha256sum < "$fat" | cut -d' ' -f1)"
+			[[ $ram_now -eq 0 ]] || echo "ram boot: $image/config.txt (boot_ramdisk=1), boot.img sha256 $(sha256sum < "$fat" | cut -d' ' -f1)"
 			echo "emmc at: ${boot_from:-${emmc_at:-not moved}}"
 			echo "kernel_watchdog_timeout: ${boot_watchdog:-none}"
 		fi
@@ -1085,6 +1119,7 @@ while :; do
 		echo "seccomp: $(kernel_seccomp "$boot_kernel")"
 		echo "cmdline: $boot_cmdline"
 		echo "overlays: ${boot_overlays[*]:-none}"
+		[[ -z $usb_host_forward ]] || echo "usb host: $usb_host_forward_note"
 		[[ -z $usb_host ]] || echo "usb host: $usb_host; waits $usb_host_wait s for the gadget to link and $usb_host_wait s for its network${usb_host_connect:+, then connects to TCP $usb_host_connect on the lease server}; its command line: $usb_host_cmdline"
 		printf 'qemu:'
 		printf ' %q' "$qemu" "${args[@]}" -dtb "$state/virt.dtb" "${qemu_extra[@]}"
@@ -1106,11 +1141,12 @@ while :; do
 		echo "device tree $state/virt.dtb sha256 $(sha256sum < "$state/virt.dtb" | cut -d' ' -f1) (the virt machine's; not the image's)"
 		echo "$marker_note"
 		if [[ $profile == board ]]; then
-			if [[ $ramdisk -eq 1 ]]; then
+			if [[ $ram_now -eq 1 ]]; then
 				echo "ram boot: $image/config.txt says boot_ramdisk=1; boot.img sha256 $(sha256sum < "$fat" | cut -d' ' -f1) ($image/boot.img)"
 				echo "disk: QEMU emmc on sdhci-pci, blank, user area $emmc_user bytes (a power of two; not the board's size), boot0/boot1 $emmc_boot bytes, rpmb $emmc_rpmb bytes; its PCI host at ${emmc_at:-(not moved: --emmc-at)}"
 			else
 				echo "disk: QEMU emmc on sdhci-pci, user area $emmc_user bytes (a power of two; not the board's size), boot0/boot1 $emmc_boot bytes, rpmb $emmc_rpmb bytes; its PCI host at the boot source's path ${boot_from:-(none named)}"
+				[[ $ramdisk -eq 0 ]] || echo "disk: the eMMC as the RAM boot left it, booted from its partition $fat_part; NOT like the board: QEMU's eMMC writes at the host file's speed"
 			fi
 			echo "firmware: count $count, rsts $rsts, partition ${fat_part:-none (a RAM boot)}, boot-mode $boot_mode, tryboot $this_tryboot"
 			if [[ -n $firmware_wdt ]]; then
@@ -1125,6 +1161,7 @@ while :; do
 				if [[ -n $usb_host ]]; then
 					echo "usb host: the stock host in $usb_host, over vsock (guest CIDs $usb_cid_device and $usb_cid_host, relay ports $usb_port_device and $usb_port_host); its log $state/boot-$((boots)).usb-host.log"
 					echo "usb host: waits $usb_host_wait s for the gadget to link and $usb_host_wait s for its network${usb_host_connect:+, then connects to TCP $usb_host_connect on the lease server}; its command line: $usb_host_cmdline"
+					[[ -z $usb_host_forward ]] || echo "usb host: $usb_host_forward_note; NOT like the board: the PC reaches the board's network through the stock host, not through an NCM interface of its own"
 					sed 's/^/usb host: /' "$usb_host/SOURCES" 2> /dev/null || true
 				else
 					echo "usb host: none plugged in (--usb-host)"
@@ -1219,6 +1256,12 @@ for cmd in ("qmp_capabilities", "quit"):
 QUIT
 		) &
 		usb_pids+=($!)
+		if [[ -n $usb_host_forward ]]; then
+			socat "TCP-LISTEN:${usb_host_forward%%:*},bind=127.0.0.1,reuseaddr,fork" "VSOCK-CONNECT:$usb_cid_host:$usb_forward_vport" \
+				2> "$state/boot-$boots.usb-forward.log" &
+			usb_pids+=($!)
+			echo "== the PC's 127.0.0.1:${usb_host_forward%%:*} is forwarded to TCP ${usb_host_forward#*:} on the board's lease server" >&2
+		fi
 		echo "== the stock host is plugged in; its log $state/boot-$boots.usb-host.log" >&2
 	fi
 	rm -f "$state/usb-host-done"
