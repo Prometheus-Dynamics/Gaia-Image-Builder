@@ -90,7 +90,21 @@ fn patch_files(kernel: &serde_json::Value) -> Vec<String> {
         .collect()
 }
 
-const VIRT_PATCH: &str = "qemu-virt-kernel/0001-i6300esb-firmware-watchdog-cell.patch";
+/// The virt patches as the board's copy names them, in name order.
+fn virt_patches() -> Vec<String> {
+    let mut names: Vec<String> = std::fs::read_dir(repo().join("scripts/qemu-virt-kernel"))
+        .expect("the patches")
+        .map(|e| e.expect("entry").file_name().to_string_lossy().into_owned())
+        .filter(|n| n.ends_with(".patch"))
+        .map(|n| format!("qemu-virt-kernel/{n}"))
+        .collect();
+    names.sort();
+    assert!(
+        names.len() >= 2,
+        "the watchdog's and the UDC's patches: {names:?}"
+    );
+    names
+}
 
 #[test]
 fn the_virt_fragment_and_patches_go_last_on_the_boards_copy() {
@@ -110,12 +124,14 @@ fn the_virt_fragment_and_patches_go_last_on_the_boards_copy() {
         .map(|f| f.as_str().expect("str"))
         .collect();
     assert_eq!(fragments, ["a.config", "qemu-virt-kernel.config"]);
-    assert_eq!(patch_files(&kernel), [VIRT_PATCH]);
-    let copied = dir.path().join("out/devices/boards/b").join(VIRT_PATCH);
-    assert_eq!(
-        std::fs::read(&copied).expect("the patch is copied beside the board"),
-        std::fs::read(repo().join("scripts").join(VIRT_PATCH)).expect("the patch")
-    );
+    assert_eq!(patch_files(&kernel), virt_patches());
+    for patch in virt_patches() {
+        let copied = dir.path().join("out/devices/boards/b").join(&patch);
+        assert_eq!(
+            std::fs::read(&copied).expect("the patch is copied beside the board"),
+            std::fs::read(repo().join("scripts").join(&patch)).expect("the patch")
+        );
+    }
     // The original is not written.
     assert!(
         !std::fs::read_to_string(devices.join("boards/b/board.toml"))
@@ -131,11 +147,9 @@ fn the_virt_fragment_and_patches_go_last_on_the_boards_copy() {
         "",
     );
     let (_, out, kernel) = run(dir.path(), &devices);
-    assert_eq!(
-        patch_files(&kernel.expect("a copy")),
-        ["own.patch", VIRT_PATCH],
-        "{out}"
-    );
+    let mut want = vec!["own.patch".to_string()];
+    want.extend(virt_patches());
+    assert_eq!(patch_files(&kernel.expect("a copy")), want, "{out}");
 
     // A board with none while its family has some: its list would replace
     // the family's, so it is refused.

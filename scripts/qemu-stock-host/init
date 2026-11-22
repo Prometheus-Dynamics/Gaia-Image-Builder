@@ -1,0 +1,123 @@
+#!/bin/busybox sh
+# The stock host's init (scripts/qemu-stock-host.sh): a PC that a board is
+# plugged into, with nothing set up for it. It loads the host kernel's own
+# USB/IP, CDC NCM and CDC ACM drivers, attaches the board's gadget, leases an
+# address on the gadget's network interface as any host would, and pings
+# the server the lease names. Every result line starts "stock-host:"; the
+# kernel's own log follows "stock-host: kernel log". Then it powers off.
+#
+# Kernel command line: gaia.vsock-port=P (the relay's port for this side),
+# gaia.wait=S (how long to wait for the interface, default 600).
+/bin/busybox mkdir -p /bin /sbin /proc /sys /dev /tmp
+/bin/busybox --install -s /bin
+mount -t proc proc /proc
+mount -t sysfs sysfs /sys
+mount -t devtmpfs devtmpfs /dev
+port=""
+wait=600
+for word in $(cat /proc/cmdline); do
+	case $word in
+	gaia.vsock-port=*) port=${word#*=} ;;
+	gaia.wait=*) wait=${word#*=} ;;
+	esac
+done
+done_() {
+	echo "stock-host: kernel log"
+	dmesg
+	echo "stock-host: done"
+	poweroff -f
+}
+echo "stock-host: $(uname -r)"
+for m in $(cat /lib/modules/order); do
+	insmod "/lib/modules/$m.ko" || echo "stock-host: insmod $m failed"
+done
+[ -n "$port" ] || { echo "stock-host: no gaia.vsock-port= on the command line"; done_; }
+/bin/vhci-attach "$port" || done_
+
+# What the device gave the host: its descriptors as read (device, then each
+# configuration), in hex, and the interfaces and endpoints of the
+# configuration set, if one is.
+i=0
+while [ $i -lt 60 ] && [ ! -s /sys/bus/usb/devices/1-1/descriptors ]; do
+	sleep 1
+	i=$((i + 1))
+done
+sleep 2
+if [ -s /sys/bus/usb/devices/1-1/descriptors ]; then
+	echo "stock-host: descriptors $(od -An -tx1 -v /sys/bus/usb/devices/1-1/descriptors | tr -d ' \n')"
+	echo "stock-host: configuration set: $(cat /sys/bus/usb/devices/1-1/bConfigurationValue)"
+	for f in /sys/bus/usb/devices/1-1:*; do
+		[ -d "$f" ] || continue
+		eps=""
+		for e in "$f"/ep_*; do
+			[ -d "$e" ] && eps="$eps $(cat "$e/bEndpointAddress")/$(cat "$e/type")"
+		done
+		echo "stock-host: interface $(basename "$f") class $(cat "$f/bInterfaceClass") driver $(basename "$(readlink "$f/driver" 2> /dev/null)" 2> /dev/null) endpoints$eps"
+	done
+else
+	echo "stock-host: no device enumerated"
+fi
+
+# The gadget's network interface: the one cdc_ncm drives.
+iface=""
+i=0
+while [ $i -lt "$wait" ]; do
+	for n in /sys/class/net/*; do
+		[ "$(basename "$(readlink "$n/device/driver" 2> /dev/null)")" = cdc_ncm ] && iface=$(basename "$n")
+	done
+	[ -n "$iface" ] && break
+	sleep 1
+	i=$((i + 1))
+done
+if [ -z "$iface" ]; then
+	echo "stock-host: no CDC NCM interface after $wait s"
+	done_
+fi
+echo "stock-host: CDC NCM interface $iface after $i s"
+ip link set "$iface" up
+
+# A plain DHCP client, as a host's network manager would be.
+cat > /tmp/lease.sh << 'EOF'
+#!/bin/sh
+[ "$1" = bound ] || exit 0
+ip addr add "$ip/${mask:-24}" dev "$interface"
+{
+	echo "ip=$ip"
+	echo "mask=$mask"
+	echo "serverid=$serverid"
+	echo "router=$router"
+	echo "dns=$dns"
+	echo "domain=$domain"
+	echo "hostname=$hostname"
+	echo "ntpsrv=$ntpsrv"
+	echo "wpad=$wpad"
+	echo "staticroutes=$staticroutes"
+} > /tmp/lease
+EOF
+chmod +x /tmp/lease.sh
+if ! udhcpc -i "$iface" -n -q -t 30 -T 2 -s /tmp/lease.sh -O staticroutes -O wpad > /tmp/udhcpc.log 2>&1 || [ ! -s /tmp/lease ]; then
+	sed 's/^/stock-host: udhcpc: /' /tmp/udhcpc.log
+	echo "stock-host: no lease on $iface"
+	done_
+fi
+. /tmp/lease
+echo "stock-host: lease $ip/$mask from $serverid"
+# The board's lease gives an address and nothing else: no route, no name
+# server, no domain, nothing that would change how the host reaches others.
+host=""
+for k in router dns domain hostname ntpsrv wpad staticroutes; do
+	eval v=\$$k
+	[ -z "$v" ] || host="$host $k=$v"
+done
+if [ -z "$host" ]; then
+	echo "stock-host: the lease carries no host configuration"
+else
+	echo "stock-host: the lease carries host configuration:$host"
+fi
+if ping -c 3 -W 3 "$serverid" > /tmp/ping.log 2>&1; then
+	echo "stock-host: ping $serverid (the lease's server): ok"
+else
+	sed 's/^/stock-host: ping: /' /tmp/ping.log
+	echo "stock-host: ping $serverid (the lease's server): failed"
+fi
+done_

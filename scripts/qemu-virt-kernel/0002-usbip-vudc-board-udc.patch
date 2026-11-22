@@ -1,0 +1,394 @@
+--- a/drivers/usb/usbip/vudc.h
++++ b/drivers/usb/usbip/vudc.h
+@@ -17,6 +17,7 @@
+ #include <linux/timer.h>
+ #include <linux/time.h>
+ #include <linux/sysfs.h>
++#include <linux/workqueue.h>
+ 
+ #include "usbip_common.h"
+ 
+@@ -107,6 +108,16 @@
+ 	unsigned pullup:1;
+ 	unsigned connected:1;
+ 	unsigned desc_cached:1;
++
++	/*
++	 * From a "gaia,virtual-udc" device tree node: the general-purpose
++	 * endpoints offered per direction (15 without one), and the host's
++	 * vsock port the UDC links to on its own once the gadget pulls up
++	 * (0: only through usbip_sockfd).
++	 */
++	unsigned int eps_per_dir;
++	u32 vsock_port;
++	struct delayed_work link;
+ };
+ 
+ struct vudc_device {
+@@ -116,6 +127,9 @@
+ 
+ extern const struct attribute_group *vudc_groups[];
+ 
++int vudc_attach(struct vudc *udc, struct socket *socket);
++void vudc_link_work(struct work_struct *work);
++
+ /* visible everywhere */
+ 
+ static inline struct vep *to_vep(struct usb_ep *_ep)
+--- a/drivers/usb/usbip/vudc_dev.c
++++ b/drivers/usb/usbip/vudc_dev.c
+@@ -15,6 +15,10 @@
+ #include <linux/usb/hcd.h>
+ #include <linux/kthread.h>
+ #include <linux/file.h>
++#include <linux/net.h>
++#include <linux/of.h>
++#include <linux/vm_sockets.h>
++#include <net/net_namespace.h>
+ #include <linux/byteorder/generic.h>
+ 
+ #include "usbip_common.h"
+@@ -174,6 +178,8 @@
+ 
+ 		spin_unlock_irqrestore(&udc->lock, flags);
+ 		usbip_start_eh(&udc->ud);
++		if (udc->vsock_port)
++			mod_delayed_work(system_dfl_wq, &udc->link, 0);
+ 	} else {
+ 		/* Invalidate descriptors */
+ 		udc->desc_cached = 0;
+@@ -472,6 +478,9 @@
+ 	spin_lock_irqsave(&ud->lock, flags);
+ 	ud->status = SDEV_ST_AVAILABLE;
+ 	spin_unlock_irqrestore(&ud->lock, flags);
++	/* The host went away: link again while the gadget is pulled up. */
++	if (udc->vsock_port && udc->pullup)
++		mod_delayed_work(system_dfl_wq, &udc->link, HZ);
+ }
+ 
+ static void vudc_device_unusable(struct usbip_device *ud)
+@@ -558,7 +567,9 @@
+ 			else
+ 				ep->ep.caps.dir_in = true;
+ 
+-			list_add_tail(&ep->ep.ep_list, &udc->gadget.ep_list);
++			/* Only the endpoints the UDC offers go on the list. */
++			if (num <= udc->eps_per_dir)
++				list_add_tail(&ep->ep.ep_list, &udc->gadget.ep_list);
+ 		}
+ 	}
+ 
+@@ -589,6 +600,54 @@
+ 	kfree(udc->ep);
+ }
+ 
++/*
++ * The link: a vsock stream to the host's port, then the same attach as a
++ * socket written to usbip_sockfd. Retried each second until it is up; the
++ * host side relays it to a stock host's vhci_hcd.
++ */
++void vudc_link_work(struct work_struct *work)
++{
++	struct vudc *udc = container_of(to_delayed_work(work), struct vudc, link);
++	struct sockaddr_vm addr = {
++		.svm_family = AF_VSOCK,
++		.svm_cid = VMADDR_CID_HOST,
++		.svm_port = udc->vsock_port,
++	};
++	struct socket *sock;
++	struct file *file;
++	int ret;
++
++	if (!udc->pullup || udc->connected)
++		return;
++	ret = sock_create_kern(&init_net, AF_VSOCK, SOCK_STREAM, 0, &sock);
++	if (ret)
++		goto again;
++	ret = kernel_connect(sock, (struct sockaddr_unsized *)&addr, sizeof(addr), 0);
++	if (ret) {
++		sock_release(sock);
++		goto again;
++	}
++	/* A file, so that vudc_shutdown's sockfd_put releases it. */
++	file = sock_alloc_file(sock, 0, NULL);
++	if (IS_ERR(file)) {
++		ret = PTR_ERR(file);
++		goto again;
++	}
++	mutex_lock(&udc->ud.sysfs_lock);
++	ret = vudc_attach(udc, sock);
++	mutex_unlock(&udc->ud.sysfs_lock);
++	if (ret) {
++		fput(file);
++		goto again;
++	}
++	dev_info(&udc->pdev->dev, "linked to the host over vsock port %u\n", udc->vsock_port);
++	return;
++again:
++	dev_dbg(&udc->pdev->dev, "vsock link: %d, again in 1 s\n", ret);
++	if (udc->pullup)
++		mod_delayed_work(system_dfl_wq, &udc->link, HZ);
++}
++
+ /* platform driver ops */
+ 
+ int vudc_probe(struct platform_device *pdev)
+@@ -605,6 +664,18 @@
+ 	udc->gadget.max_speed = USB_SPEED_HIGH;
+ 	udc->gadget.dev.parent = &pdev->dev;
+ 	udc->pdev = pdev;
++	udc->eps_per_dir = 15;
++	INIT_DELAYED_WORK(&udc->link, vudc_link_work);
++	if (pdev->dev.of_node) {
++		u32 eps;
++
++		if (!of_property_read_u32(pdev->dev.of_node, "gaia,endpoints", &eps) &&
++		    eps >= 1 && eps <= 15)
++			udc->eps_per_dir = eps;
++		of_property_read_u32(pdev->dev.of_node, "gaia,vsock-port", &udc->vsock_port);
++		dev_info(&pdev->dev, "%u endpoints per direction, linking over vsock port %u\n",
++			 udc->eps_per_dir, udc->vsock_port);
++	}
+ 
+ 	ret = init_vudc_hw(udc);
+ 	if (ret)
+@@ -630,6 +701,7 @@
+ {
+ 	struct vudc *udc = platform_get_drvdata(pdev);
+ 
++	cancel_delayed_work_sync(&udc->link);
+ 	v_stop_timer(udc);
+ 	usb_del_gadget_udc(&udc->gadget);
+ 	cleanup_vudc_hw(udc);
+--- a/drivers/usb/usbip/vudc_main.c
++++ b/drivers/usb/usbip/vudc_main.c
+@@ -9,6 +9,7 @@
+ #include <linux/device.h>
+ #include <linux/list.h>
+ #include <linux/module.h>
++#include <linux/of.h>
+ 
+ #include "vudc.h"
+ 
+@@ -17,11 +18,18 @@
+ module_param_named(num, vudc_number, uint, S_IRUGO);
+ MODULE_PARM_DESC(num, "number of emulated controllers");
+ 
++static const struct of_device_id vudc_of_match[] = {
++	{ .compatible = "gaia,virtual-udc" },
++	{ }
++};
++MODULE_DEVICE_TABLE(of, vudc_of_match);
++
+ static struct platform_driver vudc_driver = {
+ 	.probe		= vudc_probe,
+ 	.remove		= vudc_remove,
+ 	.driver		= {
+ 		.name	= GADGET_NAME,
++		.of_match_table = vudc_of_match,
+ 		.dev_groups = vudc_groups,
+ 	},
+ };
+@@ -33,6 +41,7 @@
+ 	int retval = -ENOMEM;
+ 	int i;
+ 	struct vudc_device *udc_dev = NULL, *udc_dev2 = NULL;
++	struct device_node *node;
+ 
+ 	if (usb_disabled())
+ 		return -ENODEV;
+@@ -46,6 +55,13 @@
+ 	if (retval < 0)
+ 		goto out;
+ 
++	/* The device tree's UDCs stand in for a board's: no others. */
++	node = of_find_matching_node(NULL, vudc_of_match);
++	if (node) {
++		of_node_put(node);
++		goto out;
++	}
++
+ 	for (i = 0; i < vudc_number; i++) {
+ 		udc_dev = alloc_vudc_device(i);
+ 		if (!udc_dev) {
+--- a/drivers/usb/usbip/vudc_sysfs.c
++++ b/drivers/usb/usbip/vudc_sysfs.c
+@@ -90,6 +90,78 @@
+ }
+ static const BIN_ATTR_RO(dev_desc, sizeof(struct usb_device_descriptor));
+ 
++/*
++ * Starts USB/IP on a connected stream socket, with ud.sysfs_lock held. On
++ * success the socket is the UDC's (vudc_shutdown puts it); on failure it is
++ * still the caller's.
++ */
++int vudc_attach(struct vudc *udc, struct socket *socket)
++{
++	struct device *dev = &udc->pdev->dev;
++	struct task_struct *tcp_rx, *tcp_tx;
++	unsigned long flags;
++
++	spin_lock_irqsave(&udc->lock, flags);
++	/* Don't export what we don't have */
++	if (!udc->driver || !udc->pullup) {
++		spin_unlock_irqrestore(&udc->lock, flags);
++		dev_err(dev, "gadget not bound");
++		return -ENODEV;
++	}
++	if (udc->connected) {
++		spin_unlock_irqrestore(&udc->lock, flags);
++		dev_err(dev, "Device already connected");
++		return -EBUSY;
++	}
++	spin_lock(&udc->ud.lock);
++	if (udc->ud.status != SDEV_ST_AVAILABLE) {
++		spin_unlock(&udc->ud.lock);
++		spin_unlock_irqrestore(&udc->lock, flags);
++		return -EINVAL;
++	}
++	spin_unlock(&udc->ud.lock);
++	spin_unlock_irqrestore(&udc->lock, flags);
++
++	if (socket->type != SOCK_STREAM) {
++		dev_err(dev, "Expecting SOCK_STREAM - found %d", socket->type);
++		return -EINVAL;
++	}
++
++	tcp_rx = kthread_create(&v_rx_loop, &udc->ud, "vudc_rx");
++	if (IS_ERR(tcp_rx))
++		return -EINVAL;
++	tcp_tx = kthread_create(&v_tx_loop, &udc->ud, "vudc_tx");
++	if (IS_ERR(tcp_tx)) {
++		kthread_stop(tcp_rx);
++		return -EINVAL;
++	}
++
++	/* get task structs now */
++	get_task_struct(tcp_rx);
++	get_task_struct(tcp_tx);
++
++	/* lock and update udc->ud state */
++	spin_lock_irqsave(&udc->lock, flags);
++	spin_lock(&udc->ud.lock);
++
++	udc->ud.tcp_socket = socket;
++	udc->ud.tcp_rx = tcp_rx;
++	udc->ud.tcp_tx = tcp_tx;
++	udc->ud.status = SDEV_ST_USED;
++
++	spin_unlock(&udc->ud.lock);
++
++	ktime_get_ts64(&udc->start_time);
++	v_start_timer(udc);
++	udc->connected = 1;
++
++	spin_unlock_irqrestore(&udc->lock, flags);
++
++	wake_up_process(udc->ud.tcp_rx);
++	wake_up_process(udc->ud.tcp_tx);
++	return 0;
++}
++
+ static ssize_t usbip_sockfd_store(struct device *dev,
+ 				  struct device_attribute *attr,
+ 				  const char *in, size_t count)
+@@ -101,8 +173,6 @@
+ 	struct socket *socket;
+ 	unsigned long flags;
+ 	int ret;
+-	struct task_struct *tcp_rx = NULL;
+-	struct task_struct *tcp_tx = NULL;
+ 
+ 	rv = kstrtoint(in, 0, &sockfd);
+ 	if (rv != 0)
+@@ -122,77 +192,18 @@
+ 	}
+ 
+ 	if (sockfd != -1) {
+-		if (udc->connected) {
+-			dev_err(dev, "Device already connected");
+-			ret = -EBUSY;
+-			goto unlock;
+-		}
+-
+-		spin_lock(&udc->ud.lock);
+-
+-		if (udc->ud.status != SDEV_ST_AVAILABLE) {
+-			ret = -EINVAL;
+-			goto unlock_ud;
+-		}
+-
++		spin_unlock_irqrestore(&udc->lock, flags);
+ 		socket = sockfd_lookup(sockfd, &err);
+ 		if (!socket) {
+ 			dev_err(dev, "failed to lookup sock");
+-			ret = -EINVAL;
+-			goto unlock_ud;
+-		}
+-
+-		if (socket->type != SOCK_STREAM) {
+-			dev_err(dev, "Expecting SOCK_STREAM - found %d",
+-				socket->type);
+-			ret = -EINVAL;
+-			goto sock_err;
+-		}
+-
+-		/* unlock and create threads and get tasks */
+-		spin_unlock(&udc->ud.lock);
+-		spin_unlock_irqrestore(&udc->lock, flags);
+-
+-		tcp_rx = kthread_create(&v_rx_loop, &udc->ud, "vudc_rx");
+-		if (IS_ERR(tcp_rx)) {
+-			sockfd_put(socket);
+ 			mutex_unlock(&udc->ud.sysfs_lock);
+ 			return -EINVAL;
+ 		}
+-		tcp_tx = kthread_create(&v_tx_loop, &udc->ud, "vudc_tx");
+-		if (IS_ERR(tcp_tx)) {
+-			kthread_stop(tcp_rx);
++		ret = vudc_attach(udc, socket);
++		if (ret)
+ 			sockfd_put(socket);
+-			mutex_unlock(&udc->ud.sysfs_lock);
+-			return -EINVAL;
+-		}
+-
+-		/* get task structs now */
+-		get_task_struct(tcp_rx);
+-		get_task_struct(tcp_tx);
+-
+-		/* lock and update udc->ud state */
+-		spin_lock_irqsave(&udc->lock, flags);
+-		spin_lock(&udc->ud.lock);
+-
+-		udc->ud.tcp_socket = socket;
+-		udc->ud.tcp_rx = tcp_rx;
+-		udc->ud.tcp_tx = tcp_tx;
+-		udc->ud.status = SDEV_ST_USED;
+-
+-		spin_unlock(&udc->ud.lock);
+-
+-		ktime_get_ts64(&udc->start_time);
+-		v_start_timer(udc);
+-		udc->connected = 1;
+-
+-		spin_unlock_irqrestore(&udc->lock, flags);
+-
+-		wake_up_process(udc->ud.tcp_rx);
+-		wake_up_process(udc->ud.tcp_tx);
+-
+ 		mutex_unlock(&udc->ud.sysfs_lock);
+-		return count;
++		return ret ? ret : count;
+ 
+ 	} else {
+ 		if (!udc->connected) {
+@@ -216,8 +227,6 @@
+ 
+ 	return count;
+ 
+-sock_err:
+-	sockfd_put(socket);
+ unlock_ud:
+ 	spin_unlock(&udc->ud.lock);
+ unlock:

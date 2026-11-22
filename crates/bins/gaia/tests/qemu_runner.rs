@@ -848,6 +848,188 @@ fn the_board_overlays_marker_is_emulated_from_the_boots_overlay() {
     assert_eq!(get(&dtb_of(&out), &["/lemnos", "lemnos,board"]), None);
 }
 
+/// Compiles `dts` (with -@ for a base tree, so overlays can name its
+/// labels) and puts it on the disk's FAT as `name`.
+fn put_tree(dir: &Path, disk: &Path, name: &str, dts: &str, symbols: bool) {
+    let source = dir.join("tree.dts");
+    let out = dir.join("tree.dtb");
+    std::fs::write(&source, dts).expect("write");
+    let mut args = vec!["-q", "-I", "dts", "-O", "dtb"];
+    if symbols {
+        args.push("-@");
+    }
+    args.extend([
+        "-o",
+        out.to_str().expect("utf-8"),
+        source.to_str().expect("utf-8"),
+    ]);
+    run("dtc", &args);
+    run(
+        "mcopy",
+        &[
+            "-o",
+            "-i",
+            &format!("{}@@1M", disk.display()),
+            out.to_str().expect("utf-8"),
+            &format!("::{name}"),
+        ],
+    );
+}
+
+/// The board profile's UDC: a gaia,virtual-udc node at the image's dwc2
+/// path, with its CPU address and the board's 7 endpoints per direction,
+/// only where the base tree or the boot's overlay enables the dwc2 for a
+/// device (target-path or a label's fixup); with --usb-host, the vsock port
+/// it links to and a vsock device on the machine.
+#[test]
+fn the_udc_is_at_the_images_dwc2_when_the_boot_enables_it() {
+    if !tools_here(&[
+        "mformat",
+        "mcopy",
+        "mmd",
+        "mtype",
+        "sfdisk",
+        "fdtput",
+        "fdtget",
+        "dtc",
+        "python3",
+        "qemu-system-aarch64",
+    ]) {
+        return;
+    }
+    let dir = tempfile::tempdir().expect("tempdir");
+    let disk = disk(dir.path());
+    put_tree(
+        dir.path(),
+        &disk,
+        "slots/bay0/board.dtb",
+        "/dts-v1/;\n/ { #address-cells = <2>; #size-cells = <2>;\n soc@107c000000 { compatible = \"simple-bus\"; #address-cells = <1>; #size-cells = <1>; ranges = <0x0 0x10 0x0 0x80000000>; watchdog@7d200000 { compatible = \"brcm,bcm2712-pm\"; reg = <0x7d200000 0x308>; }; };\n axi { compatible = \"simple-bus\"; #address-cells = <2>; #size-cells = <2>; ranges; usb: usb@480000 { compatible = \"brcm,bcm2835-usb\"; reg = <0x10 0x480000 0x0 0x10000>; status = \"disabled\"; }; };\n};\n",
+        true,
+    );
+    let host = dir.path().join("stock-host");
+    std::fs::create_dir_all(&host).expect("mkdir");
+    std::fs::write(host.join("kernel"), b"k").expect("write");
+    std::fs::write(host.join("initramfs.cpio.gz"), b"i").expect("write");
+    let host = host.to_str().expect("utf-8");
+    let udc = "/axi/usb@480000";
+    let overlay = |body: &str| {
+        put_tree(
+            dir.path(),
+            &disk,
+            "slots/bay0/overlays/lemnos-board.dtbo",
+            &format!("/dts-v1/;\n/plugin/;\n/ {{\n fragment@0 {{ {body} }};\n}};\n"),
+            false,
+        );
+    };
+    // Each run copies the image again (--fresh): the overlay changes in it.
+    let tree = |args: &[&str]| -> (bool, String, String) {
+        let mut args = args.to_vec();
+        args.push("--fresh");
+        let (ok, out) = runner(dir.path(), &disk, &args);
+        let dtb = out.lines().last().unwrap_or_default().to_string();
+        (ok, out, dtb)
+    };
+    let get = |dtb: &str, args: &[&str]| {
+        let out = Command::new("fdtget")
+            .arg(dtb)
+            .args(args)
+            .output()
+            .expect("fdtget");
+        out.status
+            .success()
+            .then(|| String::from_utf8_lossy(&out.stdout).trim().to_string())
+    };
+
+    // Disabled in the base tree and by no overlay: no UDC, and a stock host
+    // has nothing to plug into.
+    overlay("target-path = \"/axi/pcie@1000120000/rp1\"; __overlay__ { status = \"okay\"; };");
+    let (ok, out, dtb) = tree(&["--profile", "board", "--dtb"]);
+    assert!(ok, "{out}");
+    assert_eq!(get(&dtb, &[udc, "compatible"]), None);
+    let (ok, out, _) = tree(&["--profile", "board", "--usb-host", host, "--dtb"]);
+    assert!(
+        !ok && out.contains("no USB device controller for it")
+            && out.contains("disabled: status \"disabled\" (from the base tree)"),
+        "{out}"
+    );
+
+    // Enabled as a peripheral by the boot's overlay, by path.
+    overlay(
+        "target-path = \"/axi/usb@480000\"; __overlay__ { status = \"okay\"; dr_mode = \"peripheral\"; };",
+    );
+    let (ok, out, dtb) = tree(&["--profile", "board", "--dtb"]);
+    assert!(ok, "{out}");
+    assert_eq!(
+        get(&dtb, &[udc, "compatible"]).as_deref(),
+        Some("gaia,virtual-udc")
+    );
+    assert_eq!(
+        get(&dtb, &["-t", "x", udc, "reg"]).as_deref(),
+        Some("10 480000 0 10000")
+    );
+    assert_eq!(
+        get(&dtb, &["-t", "i", udc, "gaia,endpoints"]).as_deref(),
+        Some("7")
+    );
+    assert_eq!(
+        get(&dtb, &[udc, "gaia,vsock-port"]),
+        None,
+        "a port with no host"
+    );
+    assert_eq!(
+        get(&dtb, &["/axi", "compatible"]).as_deref(),
+        Some("simple-bus")
+    );
+    let (ok, out, dtb) = tree(&["--profile", "board", "--usb-host", host, "--dtb"]);
+    assert!(ok, "{out}");
+    let port: u32 = get(&dtb, &["-t", "i", udc, "gaia,vsock-port"])
+        .expect("the vsock port")
+        .parse()
+        .expect("a number");
+    assert!((40000..60000).contains(&port), "{port}");
+    let (ok, out, _) = tree(&["--profile", "board", "--usb-host", host, "--print"]);
+    let out = out.replace("\\,", ",");
+    assert!(
+        ok && out.contains("-device vhost-vsock-pci,guest-cid="),
+        "{out}"
+    );
+
+    // As a host only, through the base tree's label: no UDC.
+    overlay("target = <&usb>; __overlay__ { status = \"okay\"; dr_mode = \"host\"; };");
+    let (ok, out, _) = tree(&["--profile", "board", "--usb-host", host, "--dtb"]);
+    assert!(
+        !ok && out.contains("disabled: dr_mode \"host\" (status from slots/bay0/overlays/lemnos-board.dtbo /fragment@0)"),
+        "{out}"
+    );
+    overlay("target = <&usb>; __overlay__ { status = \"okay\"; };");
+    let (ok, out, dtb) = tree(&["--profile", "board", "--dtb"]);
+    assert!(ok, "{out}");
+    assert_eq!(
+        get(&dtb, &[udc, "compatible"]).as_deref(),
+        Some("gaia,virtual-udc")
+    );
+
+    // Refused: a stock host off the board profile, or with nothing to boot.
+    let (ok, out, _) = tree(&["--usb-host", host, "--print"]);
+    assert!(
+        !ok && out.contains("--usb-host needs --profile board"),
+        "{out}"
+    );
+    let empty = dir.path().join("empty");
+    std::fs::create_dir_all(&empty).expect("mkdir");
+    let (ok, out, _) = tree(&[
+        "--profile",
+        "board",
+        "--usb-host",
+        empty.to_str().expect("utf-8"),
+        "--print",
+    ]);
+    assert!(
+        !ok && out.contains("no kernel and initramfs.cpio.gz there"),
+        "{out}"
+    );
+}
+
 /// The watchdog is attached unless --no-watchdog leaves it out, and the
 /// boot says which.
 #[test]

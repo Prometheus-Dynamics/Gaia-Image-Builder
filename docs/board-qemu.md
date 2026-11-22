@@ -14,11 +14,18 @@ GAIA_STORE=<store> scripts/qemu-virt-kernel.sh <devices> products/raze-base/prod
     --recipes <gaia>/recipes --setting raze-base.version=<v> --setting raze-base.slot=<slot>
 ```
 
+The stock host, once per host kernel (a static x86_64 busybox is the one input not on the host; Gaia used
+busybox.net's 1.35.0 x86_64-linux-musl binary):
+
+```
+scripts/qemu-stock-host.sh --busybox <busybox> <host dir>
+```
+
 Then each image:
 
 ```
 scripts/qemu-rpi-slots.sh --profile board --fresh --net user --max-boots 1 \
-    --kernel <out>/Image --watchdog-scale 459 --state <work dir> <image>.disk
+    --kernel <out>/Image --watchdog-scale 459 --usb-host <host dir> --state <work dir> <image>.disk
 ```
 
 - The image is read, never written: it is copied (sparse) into `<work dir>/disk.img`.
@@ -32,6 +39,8 @@ scripts/qemu-rpi-slots.sh --profile board --fresh --net user --max-boots 1 \
 - A watchdog reset ends the boot and the next starts from config.txt, as on the board. The runner reads QEMU's
   `WATCHDOG` event from `<work dir>/qmp-events.sock` into `boot-N.events` and says how long after the guest started
   it came.
+- With `--usb-host`, the stock host's serial log is `<work dir>/boot-N.usb-host.log`, and its `stock-host:` lines are
+  printed when the boot ends. When the stock host is done, it powers off, the board guest is quit and the run ends.
 
 ## What the profile gives
 
@@ -55,7 +64,43 @@ scripts/qemu-rpi-slots.sh --profile board --fresh --net user --max-boots 1 \
   MFD cell), and starts it at probe marked as running. So `/sys/class/watchdog/watchdog0/device` has no `of_node`,
   and its parent's is the image's watchdog path: the shape lemnosd's board file has to match.
 
+- **The USB device controller.** The image's device tree has the SoC's dwc2 (`/axi/usb@480000` on the Raze,
+  `brcm,bcm2835-usb`), disabled; the board overlay's fragment@7 enables it with `dr_mode = "peripheral"`. Where the
+  base tree or one of the boot's `dtoverlay=` files enables it for a device (by `target-path` or by a label), the
+  runner puts a `gaia,virtual-udc` node at that path, with its CPU address. The virt kernel's usbip-vudc (patch
+  0002) binds to it, so the UDC is `1000480000.usb` in `/sys/class/udc`, as on the board, and lemnosd's gadget binds
+  to it by that name. Without such an overlay there is no UDC, as on the board.
+- **The stock host** (`--usb-host`). This is a second guest, x86_64 under KVM, that stands for a PC with nothing set
+  up for the board. It runs the host's own distribution kernel and its own vhci_hcd, cdc_ncm and cdc_acm modules. The
+  UDC links to it over virtio vsock as soon as the gadget pulls up, relayed by `socat` on the host. The stock host
+  then does what a host does with a device plugged in:
+  - prints the descriptors it read, and the interfaces and endpoints of the configuration it set;
+  - leases an address on the CDC NCM interface with a plain DHCP client;
+  - checks that the lease carries no host configuration: no router, name server, domain, host name, NTP server,
+    WPAD or static routes;
+  - pings the server the lease names. Nothing about the board's addresses is written into it.
+
+  Its kernel log is the result.
+
 A work dir's disk copy is laid out for one profile. Switching profiles needs `--fresh`.
+
+## Endpoint numbering: usbip-vudc as the board's dwc2
+
+A gadget function's endpoint addresses come from the UDC: `usb_ep_autoconfig` takes the first free endpoint on the
+UDC's list that fits, and the address is the number in its name. So the same functions get the same addresses on two
+UDCs only if both list the same endpoints in the same order.
+
+- **dwc2 on the board:** `EPs: 8` (Atlas, Raze #2), ep0 and 7 general-purpose endpoints per direction. They are
+  listed ep1in, ep1out, ep2in, ep2out, … ep7in, ep7out, each of any transfer type.
+- **usbip-vudc as upstream has it:** ep0 and 15 per direction, in the same order (ep1in, ep1out, …), each of any type.
+- **As patched (0002):** the same, capped at the node's `gaia,endpoints` (the runner gives 7, the board's), so the
+  list is the board's.
+
+The first functions take ep1in, ep1out, ep2in, ep2out, … in bind order, on either UDC. Where they still differ:
+- vudc has no FIFOs: it takes any max packet size, where dwc2 sizes each IN endpoint's FIFO;
+- vudc serves high speed only, over USB/IP, with no PHY;
+- ep0's max packet is 64 on both.
+A fault that depends on FIFO sizing would not show.
 
 ## Not like the board
 
@@ -110,7 +155,32 @@ from a 47db1d24 boot; the board figure is Atlas's Raze #2 journal of 47db1d24.
 Without the scale (`--watchdog-scale 100`), 4411fdc6 resets 23.7 s after the guest started, as "Lemnos hardware
 daemon" is starting. That run shows the hand-over gap, not lemnosd's match.
 
+## Proof: the USB gadget (2026-11-22)
+
+The cause, from Lemnos and the coordinator: lemnosd wrote its FunctionFS descriptors with `FUNCTIONFS_VIRTUAL_ADDR`.
+Their virtual address 0x02 collided with NCM's real ep2out on dwc2's endpoint numbering.
+
+Kernel: `qemu-virt-kernel.sh` on Atlas 4411fdc6's devices, with patches 0001 and 0002. Stock host: Linux
+7.3.4-202.nobara.fc44.x86_64 (the build host's own), busybox 1.35.0. Scale: 459%, as above.
+
+| Image | The board guest | The stock host |
+|---|---|---|
+| 0a94343e (Lemnos cb436d2a) | `ffs_func_eps_enable: config_ep_by_speed(ep1out) returned -5` | `config 1 interface 2 altsetting 1 has a duplicate endpoint with address 0x2, skipping`, then `can't set config #1, error -32`: the board's fault. Then the watchdog reset (fault A), 74.5 s after the guest started |
+| 47db1d24 (Lemnos 61c37032) | gadget bound | configuration 1 set; CDC NCM `usb0` and CDC ACM `ttyACM0`; lease 172.31.131.131/29 from 172.31.131.129 with no host configuration; ping of 172.31.131.129 ok; then the run ends |
+
+The descriptors the stock host read show the collision. On both images, autoconfig gave the FunctionFS interface
+ep1in and ep1out, NCM's data interface ep2out and ep2in, and ACM's ep3out and ep4in:
+
+| Interface | 0a94343e | 47db1d24 |
+|---|---|---|
+| 0, FunctionFS (class ff) | 0x81, **0x02** (the virtual address, as written) | 0x81, 0x01 |
+| 1, NCM control | 0x83 | 0x83 |
+| 2, NCM data | 0x02, 0x82 | 0x02, 0x82 |
+| 3, ACM control | 0x85 | 0x85 |
+| 4, ACM data | 0x03, 0x84 | 0x03, 0x84 |
+
+Wall time: 85 s for 0a94343e (until the reset) and 40 s for 47db1d24 (until the stock host was done).
+
 ## Still to come
 
-- The USB device side: usbip-vudc as `1000480000.usb`, plus a stock-host guest. The host's kernel log is the result.
 - A diff of `/sys/class/block`, `/sys/class/watchdog` and `/sys/class/udc` against listings from the real board.

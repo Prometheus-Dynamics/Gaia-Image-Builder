@@ -123,6 +123,21 @@
 #   asked), for a guest that runs slower than the board under TCG: P is
 #   the guest's time over the board's for the same stretch of the boot,
 #   measured, and each boot records it as not like the board;
+# - the USB device controller: where the image's own device tree has the
+#   SoC's dwc2 (compatible brcm,bcm2835-usb or snps,dwc2) and the base tree
+#   or one of the boot's dtoverlay= files enables it, not as a host only
+#   (status "okay", dr_mode other than "host"), a node compatible
+#   "gaia,virtual-udc" is put at that path with its CPU address, so the
+#   virt kernel's usbip-vudc (scripts/qemu-virt-kernel) is the UDC with the
+#   board's name (1000480000.usb on a CM5) in /sys/class/udc. It offers 7
+#   endpoints per direction, numbered and listed as the board's dwc2 does
+#   ("EPs: 8": ep0 and ep1in, ep1out ... ep7in, ep7out), so a gadget's
+#   functions get the endpoint addresses they get on the board. With
+#   --usb-host DIR, a stock host (scripts/qemu-stock-host.sh) is plugged
+#   in: a second guest, x86_64 under KVM, whose vhci_hcd the UDC links to
+#   over virtio vsock (relayed by socat on the host), and whose serial log
+#   (<state>/boot-N.usb-host.log) is the host's view of the device. When
+#   the stock host powers off, the board guest is quit and the run ends;
 # The default profile (--profile virt) is unchanged: a virtio disk, and no
 # count, rsts or partition in the device tree.
 #
@@ -150,6 +165,10 @@
 #   --watchdog-scale P  with --profile board: the firmware watchdog's
 #                   hardware counts P percent of each second (100-10000,
 #                   default 100; see above)
+#   --usb-host DIR  with --profile board: plug the stock host built in DIR
+#                   by scripts/qemu-stock-host.sh into the UDC (see above;
+#                   needs socat and qemu-system-x86_64, $QEMU_X86 names
+#                   another)
 #   --hostfwd H:G   with --net user: forward host TCP port H to guest port
 #                   G (repeatable; replaces the defaults)
 #   --append ARGS   add ARGS to every boot's kernel command line
@@ -184,6 +203,10 @@ args_given=("$@")
 in_netns=0
 profile=virt
 watchdog_scale=100
+usb_host=""
+# The board's dwc2 general-purpose endpoints per direction (Atlas, Raze #2:
+# "dwc2 1000480000.usb: EPs: 8", ep0 among them).
+udc_eps=7
 # The CM5's eMMC hardware areas (Atlas, Raze #1 and #2: mmcblk0boot0 and
 # mmcblk0boot1 4 MiB block devices, mmcblk0rpmb 4 MiB).
 emmc_boot=$((4 << 20))
@@ -218,6 +241,7 @@ while [[ $# -gt 0 ]]; do
 	--state) state="$2"; shift 2 ;;
 	--profile) profile="$2"; shift 2 ;;
 	--watchdog-scale) watchdog_scale="$2"; shift 2 ;;
+	--usb-host) usb_host="$2"; shift 2 ;;
 	--fresh) fresh=1; shift ;;
 	--kernel) kernel_override="$2"; shift 2 ;;
 	--disk-size) disk_size="$2"; shift 2 ;;
@@ -277,6 +301,24 @@ case "$profile" in
 virt | board) ;;
 *) echo "--profile is virt or board, not $profile" >&2; exit 2 ;;
 esac
+qemu_x86=${QEMU_X86:-qemu-system-x86_64}
+if [[ -n $usb_host ]]; then
+	[[ $profile == board ]] || { echo "--usb-host needs --profile board" >&2; exit 2; }
+	[[ -r $usb_host/kernel && -r $usb_host/initramfs.cpio.gz ]] ||
+		{ echo "--usb-host $usb_host: no kernel and initramfs.cpio.gz there (scripts/qemu-stock-host.sh makes them)" >&2; exit 2; }
+	usb_host=$(cd "$usb_host" && pwd)
+	if [[ $print_only -eq 0 && $dtb_only -eq 0 ]]; then
+		for tool in socat "$qemu_x86"; do
+			command -v "$tool" > /dev/null || { echo "missing $tool for --usb-host" >&2; exit 2; }
+		done
+	fi
+	# vsock addresses are the host's, shared by every guest on it: CIDs and
+	# relay ports for this run, apart from others'.
+	usb_cid_device=$((100000 + RANDOM * 4))
+	usb_cid_host=$((usb_cid_device + 1))
+	usb_port_device=$((40000 + (RANDOM % 10000) * 2))
+	usb_port_host=$((usb_port_device + 1))
+fi
 # Where the image starts in the disk file: after the eMMC's two boot areas
 # and its RPMB area, the order QEMU's emmc keeps them in its backing file.
 user_off=0
@@ -534,6 +576,7 @@ machine_args() {
 	printf '%s\n' -netdev "$netdev" -device "virtio-net-pci,netdev=net0,mac=$mac" \
 		-device virtio-rng-pci
 	[[ $watchdog -eq 0 ]] || printf '%s\n' -device i6300esb
+	[[ -z $usb_host ]] || printf '%s\n' -device "vhost-vsock-pci,guest-cid=$usb_cid_device"
 }
 
 # The virt-mmio transport the disk is on: its base address, from QEMU's own
@@ -579,12 +622,16 @@ emulate_marker() {
 	fi
 }
 
-# The firmware's watchdog in the image's own device trees: "<path> <address>
-# <size>", the power-management block's node path and its address and size
-# as the CPU sees them (through every parent's ranges). Empty when none has
-# one; fails when they disagree.
-image_watchdog() {
-	local files=() file dir
+# A block of the board in the image's own device trees, $1 one of:
+# - pm, the power-management block, whose watchdog the firmware arms:
+#   "<path> <address> <size>";
+# - udc, the SoC's dwc2: "<path> <address> <size> <how>", how being
+#   "enabled by ..." or "disabled: ...", from the base tree's status and
+#   dr_mode and the boot's dtoverlay= files' fragments that target it.
+# The address and size are the CPU's (through every parent's ranges). Empty
+# when no tree has one; fails when they disagree.
+image_node() {
+	local kind=$1 files=() file dir overlays=() k=0
 	rm -rf "$state/image-dt"
 	mkdir -p "$state/image-dt"
 	if [[ -n $boot_device_tree ]]; then
@@ -603,7 +650,13 @@ image_watchdog() {
 		got+=("$state/image-dt/$n.dtb")
 	done
 	[[ ${#got[@]} -gt 0 ]] || return 0
-	python3 - "${got[@]}" <<'FDT'
+	for file in ${boot_overlays[@]+"${boot_overlays[@]}"}; do
+		fat_has "$file" || continue
+		k=$((k + 1))
+		mcopy -n -i "$fat" "::$file" "$state/image-dt/ov-$k.dtbo"
+		overlays+=("$state/image-dt/ov-$k.dtbo=$file")
+	done
+	python3 - "$kind" "${got[@]}" -- ${overlays[@]+"${overlays[@]}"} <<'FDT'
 import struct, sys
 
 def nodes(blob):
@@ -644,9 +697,47 @@ def number(cs):
         v = (v << 32) | c
     return v
 
-COMPATIBLE = {"brcm,bcm2712-pm", "brcm,bcm2835-pm"}
+def text(data):
+    return data.rstrip(b"\0").decode(errors="replace") if data is not None else None
+
+kind = sys.argv[1]
+sep = sys.argv.index("--")
+dtbs, overlays = sys.argv[2:sep], [o.split("=", 1) for o in sys.argv[sep + 1 :]]
+COMPATIBLE = {"pm": {"brcm,bcm2712-pm", "brcm,bcm2835-pm"}, "udc": {"brcm,bcm2835-usb", "snps,dwc2"}}[kind]
+
+def enabled(tree, path):
+    """How the base tree and the boot's overlays leave the node: on or off, and why."""
+    props = tree[path]
+    status, mode = text(props.get("status")) or "okay", text(props.get("dr_mode")) or "otg"
+    by = "the base tree"
+    symbols = tree.get("/__symbols__", {})
+    for local, name in overlays:
+        ov = dict(nodes(open(local, "rb").read()))
+        fixups = {}
+        for label, refs in ov.get("/__fixups__", {}).items():
+            for ref in text(refs).split("\0"):
+                where, prop, _ = ref.split(":")
+                if prop == "target" and label in symbols:
+                    fixups[where] = text(symbols[label])
+        for frag, fprops in ov.items():
+            if frag.count("/") != 1 or frag + "/__overlay__" not in ov:
+                continue
+            target = text(fprops.get("target-path")) or fixups.get(frag)
+            if target != path:
+                continue
+            over = ov[frag + "/__overlay__"]
+            if "status" in over:
+                status, by = text(over["status"]), f"{name} {frag}"
+            if "dr_mode" in over:
+                mode = text(over["dr_mode"])
+    if status not in ("okay", "ok"):
+        return f"disabled: status \"{status}\" (from {by})"
+    if mode == "host":
+        return f"disabled: dr_mode \"host\" (status from {by})"
+    return f"enabled by {by}, dr_mode {mode}"
+
 found = set()
-for file in sys.argv[1:]:
+for file in dtbs:
     tree = dict(nodes(open(file, "rb").read()))
     def prop_int(path, name, default):
         data = tree.get(path, {}).get(name)
@@ -678,20 +769,20 @@ for file in sys.argv[1:]:
                 else:
                     sys.exit(f"{path}: {address:#x} is outside {node}'s ranges")
             node = up
-        found.add((path, address, size))
+        found.add((path, address, size, enabled(tree, path) if kind == "udc" else ""))
+what = {"pm": "the power-management block", "udc": "the USB device controller"}[kind]
 if len(found) > 1:
-    sys.exit("the image's device trees disagree on the power-management block: " + "; ".join(f"{p} {a:#x}" for p, a, _ in sorted(found)))
-for path, address, size in found:
-    print(path, f"{address:#x}", f"{size:#x}")
+    sys.exit(f"the image's device trees disagree on {what}: " + "; ".join(f"{p} {a:#x} {h}" for p, a, _, h in sorted(found)))
+for path, address, size, how in found:
+    print(path, f"{address:#x}", f"{size:#x}", how)
 FDT
 }
 
-# The firmware's watchdog node (see the board profile): at the image's path,
-# its parents made simple buses where the virt tree has none.
-firmware_watchdog() {
-	local path address size part at=""
-	read -r path address size <<< "$1"
-	for part in $(tr '/' ' ' <<< "${path%/*}"); do
+# Simple buses for the parents of the node path $1 where the virt tree has
+# none, so a node there has its own reg as the CPU address.
+fdt_parents() {
+	local part at=""
+	for part in $(tr '/' ' ' <<< "${1%/*}"); do
 		at+="/$part"
 		if ! fdtget "$state/virt.dtb" "$at" compatible > /dev/null 2>&1; then
 			fdtput -p -t s "$state/virt.dtb" "$at" compatible simple-bus
@@ -700,10 +791,34 @@ firmware_watchdog() {
 			fdtput -t x "$state/virt.dtb" "$at" ranges
 		fi
 	done
+}
+
+fdt_reg() {
+	fdtput -t x "$state/virt.dtb" "$1" reg $(printf '%x ' $(($2 >> 32)) $(($2 & 0xffffffff)) $(($3 >> 32)) $(($3 & 0xffffffff)))
+}
+
+# The firmware's watchdog node (see the board profile): at the image's path,
+# its parents made simple buses where the virt tree has none.
+firmware_watchdog() {
+	local path address size
+	read -r path address size <<< "$1"
+	fdt_parents "$path"
 	fdtput -p -t s "$state/virt.dtb" "$path" compatible gaia,firmware-watchdog
-	fdtput -t x "$state/virt.dtb" "$path" reg $(printf '%x ' $((address >> 32)) $((address & 0xffffffff)) $((size >> 32)) $((size & 0xffffffff)))
+	fdt_reg "$path" "$address" "$size"
 	fdtput -t x "$state/virt.dtb" "$path" timeout-sec "$(printf %x "$boot_watchdog")"
 	[[ $watchdog_scale -eq 100 ]] || fdtput -t x "$state/virt.dtb" "$path" gaia,time-scale-percent "$(printf %x "$watchdog_scale")"
+}
+
+# The UDC's node (see the board profile) at the image's dwc2 path; with a
+# stock host, the vsock port it links to.
+virtual_udc() {
+	local path address size
+	read -r path address size _ <<< "$1"
+	fdt_parents "$path"
+	fdtput -p -t s "$state/virt.dtb" "$path" compatible gaia,virtual-udc
+	fdt_reg "$path" "$address" "$size"
+	fdtput -t x "$state/virt.dtb" "$path" gaia,endpoints "$(printf %x "$udc_eps")"
+	[[ -z $usb_host ]] || fdtput -t x "$state/virt.dtb" "$path" gaia,vsock-port "$(printf %x "$usb_port_device")"
 }
 
 # The virt machine's device tree with /chosen/bootloader/tryboot set to $1,
@@ -727,9 +842,18 @@ make_dtb() {
 		firmware_wdt=""
 		if [[ -n $boot_watchdog ]]; then
 			[[ $boot_watchdog =~ ^[0-9]+$ && $boot_watchdog -gt 0 ]] || { echo "$boot_config: kernel_watchdog_timeout=$boot_watchdog is not a number of seconds" >&2; return 1; }
-			firmware_wdt=$(image_watchdog) || return 1
+			firmware_wdt=$(image_node pm) || return 1
 			[[ -n $firmware_wdt ]] || { echo "$boot_config sets kernel_watchdog_timeout, and the image's device trees have no power-management block (brcm,bcm2712-pm or brcm,bcm2835-pm) for the firmware's watchdog" >&2; return 1; }
 			firmware_watchdog "$firmware_wdt"
+		fi
+		udc=$(image_node udc) || return 1
+		local how=${udc#* * * }
+		if [[ -n $udc && $how == enabled* ]]; then
+			virtual_udc "$udc"
+		elif [[ -n $usb_host ]]; then
+			[[ -n $udc ]] || udc="no dwc2 (brcm,bcm2835-usb or snps,dwc2)"
+			echo "--usb-host: the image's device trees have no USB device controller for it: $udc" >&2
+			return 1
 		fi
 	fi
 }
@@ -903,6 +1027,19 @@ while :; do
 			else
 				echo "firmware watchdog: none ($boot_config sets no kernel_watchdog_timeout)"
 			fi
+			if [[ ${udc#* * * } == enabled* ]]; then
+				echo "usb device controller: usbip-vudc, node gaia,virtual-udc at ${udc%% *} (the image's dwc2, CPU address $(cut -d' ' -f2,3 <<< "$udc"); ${udc#* * * }), $udc_eps endpoints per direction as the board's dwc2"
+				echo "usb device controller: NOT like the board: no dwc2 hardware; the device is served over USB/IP, at high speed"
+				if [[ -n $usb_host ]]; then
+					echo "usb host: the stock host in $usb_host, over vsock (guest CIDs $usb_cid_device and $usb_cid_host, relay ports $usb_port_device and $usb_port_host); its log $state/boot-$((boots)).usb-host.log"
+					sed 's/^/usb host: /' "$usb_host/SOURCES" 2> /dev/null || true
+				else
+					echo "usb host: none plugged in (--usb-host)"
+				fi
+			else
+				[[ -n $udc ]] || udc="no dwc2 in the image's device trees"
+				echo "usb device controller: none ($udc)"
+			fi
 		fi
 		if [[ $watchdog -eq 1 ]]; then
 			echo "watchdog: i6300esb attached"
@@ -959,14 +1096,55 @@ with open(out, "w") as log:
             log.flush()
 QMP
 	events_pid=$!
+	usb_pids=()
+	if [[ -n $usb_host ]]; then
+		# The relay takes the UDC's connection first, then the stock host's.
+		socat "VSOCK-LISTEN:$usb_port_device" "VSOCK-LISTEN:$usb_port_host" 2> "$state/boot-$boots.usb-relay.log" &
+		usb_pids+=($!)
+		accel=tcg
+		[[ ! -r /dev/kvm || ! -w /dev/kvm ]] || accel=kvm
+		"$qemu_x86" -M "q35,accel=$accel" -m 512M -smp 2 -kernel "$usb_host/kernel" -initrd "$usb_host/initramfs.cpio.gz" \
+			-append "console=ttyS0 loglevel=7 panic=-1 gaia.vsock-port=$usb_port_host" \
+			-device "vhost-vsock-pci,guest-cid=$usb_cid_host" -display none -monitor none -no-reboot \
+			-serial "file:$state/boot-$boots.usb-host.log" &
+		usb_pids+=($!)
+		# The stock host done: the board guest is quit, and the run ends.
+		(
+			while kill -0 "${usb_pids[1]}" 2> /dev/null; do sleep 1; done
+			grep -aq '^stock-host: done' "$state/boot-$boots.usb-host.log" 2> /dev/null || exit 0
+			: > "$state/usb-host-done"
+			python3 - "$state/qmp.sock" <<'QUIT' || true
+import json, socket, sys
+s = socket.socket(socket.AF_UNIX)
+s.connect(sys.argv[1])
+f = s.makefile("rw")
+f.readline()
+for cmd in ("qmp_capabilities", "quit"):
+    f.write(json.dumps({"execute": cmd}) + "\n")
+    f.flush()
+    f.readline()
+QUIT
+		) &
+		usb_pids+=($!)
+		echo "== the stock host is plugged in; its log $state/boot-$boots.usb-host.log" >&2
+	fi
+	rm -f "$state/usb-host-done"
 	status=0
 	"$qemu" "${args[@]}" -qmp "unix:$state/qmp-events.sock,server=on,wait=on" -dtb "$state/virt.dtb" "${qemu_extra[@]}" || status=$?
 	wait "$events_pid" || true
+	if [[ ${#usb_pids[@]} -gt 0 ]]; then
+		kill "${usb_pids[@]}" 2> /dev/null || true
+		wait "${usb_pids[@]}" 2> /dev/null || true
+		grep -a '^stock-host: ' "$state/boot-$boots.usb-host.log" | grep -v '^stock-host: kernel log' >&2 || echo "== the stock host logged nothing" >&2
+	fi
 	if [[ $status -ne 0 ]]; then
 		echo "== QEMU exited with $status" >&2
 		exit "$status"
 	fi
-	if grep -q ' WATCHDOG ' "$events" 2> /dev/null; then
+	if [[ -e $state/usb-host-done ]]; then
+		echo "== stopped: the stock host is done" >&2
+		exit 0
+	elif grep -q ' WATCHDOG ' "$events" 2> /dev/null; then
 		# The watchdog's reset: config.txt again (a pending tryboot is
 		# forgotten, as after a panic).
 		rm -f "$state/tryboot-next"
