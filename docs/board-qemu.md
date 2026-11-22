@@ -35,7 +35,8 @@ scripts/qemu-rpi-slots.sh --profile board --fresh --net user --max-boots 1 \
 - `--print` shows the first boot's plan and QEMU line without booting. `--dtb` builds and checks its device tree.
 - `--max-boots 1` stops at the first restart.
 - The kernel must have PCI host generic, SDHCI PCI, MMC block, erofs, dm-verity, ext4, vfat and i6300esb; for the
-  board profile, the patches in `scripts/qemu-virt-kernel/` (the watchdog, the UDC, virtio_blk's major).
+  board profile, the patches in `scripts/qemu-virt-kernel/` (the watchdog, the UDC, virtio_blk's major, the
+  firmware mailbox).
   `qemu-virt-kernel.sh` makes such a kernel from the board's own.
 - A watchdog reset ends the boot and the next starts from config.txt, as on the board. The runner reads QEMU's
   `WATCHDOG` event from `<work dir>/qmp-events.sock` into `boot-N.events` and says how long after the guest started
@@ -74,12 +75,14 @@ scripts/qemu-rpi-slots.sh --profile board --fresh --net user --max-boots 3 \
   to the stock host, which joins it to TCP P on the lease's server. With it, the stock host stays up until the boot
   ends instead of powering off. Each boot gets a new stock host, so the gadget is plugged in again after a restart, on
   the same PC port. Its log has a `stock-host: forward N:` line for each connection.
-- A restart boots the eMMC as the RAM boot left it. This covers the guest's reboot, a tryboot reboot and the watchdog.
+- A restart boots the eMMC as the RAM boot left it, unless the boot gave the firmware's one-shot RPIBOOT order
+  (see "The firmware mailbox"); then it is the RAM boot again. This covers the guest's reboot, a tryboot reboot and
+  the watchdog.
   It is the same eMMC image, now booted as a disk:
   - boot mode 1;
   - its boot partition's `config.txt` (or `tryboot.txt`);
   - the PCI host at the path the slot's command line names;
-  - count 2 and rsts 0x20.
+  - the count one higher (2 after a first boot) and rsts 0x20.
   It is recorded as `boot-2.*` of the same run. If the eMMC has no FAT boot partition by then, the run ends, since
   the firmware would go on to its next boot mode. So the whole flash can run in emulation: the RAM boot, the client's
   push through the forward, the flasher writing and checking the eMMC, the reboot, and the slot's first boot.
@@ -167,6 +170,44 @@ The first functions take ep1in, ep1out, ep2in, ep2out, … in bind order, on eit
 - ep0's max packet is 64 on both.
 A fault that depends on FIFO sizing would not show.
 
+## The firmware mailbox
+
+The board's way back to the PC is the firmware's one-shot reboot order: a program asks it through the property
+mailbox, `/dev/vcio`, and the next boot is RPIBOOT (USB device boot). The board profile has a stand-in for it, so a
+return to RPIBOOT is shown before a board (Lemnos's `lemnos-way-back rpiboot`, the flasher's failure paths, slot-init's
+loop return).
+
+- **The node.** The virt kernel's `gaia-fw-mailbox` (`scripts/qemu-virt-kernel/0004-gaia-firmware-mailbox.patch`,
+  built in) makes `/dev/vcio` as the Pi kernel's vcio does: a misc device, root:root 0600 (no mode given, as there),
+  registered at device_initcall, so devtmpfs has it before any userspace. It binds only to the `gaia,firmware-mailbox`
+  node the runner adds, so no other boot gets one.
+- **The requests.** `IOCTL_MBOX_PROPERTY` (`_IOWR(100, 0, char *)`) with a property buffer as the Pi kernel takes it
+  (the size in its first word, then tags to the end tag). It answers `0x80000000` and each tag's code
+  `0x80000000 | 4` when it took the buffer, and `0x80000001` and takes nothing when a tag is unknown or `refuse` is
+  set:
+  - `0x0003808b`, the reboot order: recorded with its value (3 is RPIBOOT);
+  - `0x0003808d`, the boot count set: recorded with its value;
+  - `0x0003008d`, the boot count get: the count this boot's `/chosen/bootloader/count` shows. (Lemnos's own test
+    stand-in answers 0.)
+  `/sys/module/gaia_fw_mailbox/parameters` has `orders`, `order`, `asked`, `clears` and `refuse` (writable, and
+  `gaia_fw_mailbox.refuse=1` on the command line), the names of Lemnos's `lemnos_test_vcio`.
+- **The next boot.** With RPIBOOT taken, the next boot is the RAM-boot set again (boot mode 3, no partition, the eMMC
+  as it is), recorded as the next `boot-N` of the run: `== RPIBOOT (the firmware's one-shot order from boot N)`.
+  The order is one-shot: the boot after that goes to the eMMC. With no order, the eMMC as before. A disk run (no
+  RAM-boot set) that gets the order stops: the firmware would wait for a USB host. An order value other than 3 is
+  recorded and not acted on. The order holds across a watchdog reset as across a reboot.
+- **How the order gets there: the runner's mechanism, nothing on the board.** The stand-in keeps its record in the
+  last page of guest RAM, which the runner reserves (`/reserved-memory`, no-map) and names in the node's `reg`. In the
+  board profile QEMU runs with `-action reboot=shutdown,shutdown=pause` instead of `-no-reboot`: at the guest's
+  restart it pauses, the events listener saves the page (`pmemsave`, `<work dir>/boot-N.mailbox`) and quits QEMU, and
+  the runner reads it. `boot-N.replaced` gets a `firmware mailbox:` line with what it held.
+- **MODELLED from Lemnos's notes (docs/slots.md, "The count's life", and slot-init's e2e firmware model), not from the
+  board:** the count is 8 bits, one higher at each boot, wrapping at 256; a set (`0x0003808d`) stores its value and
+  the next boot reads it plus one; power-on starts at `--boot-count` (0). Also not from the board: what the firmware
+  does with a set value other than 0, whether an order survives a watchdog reset (here it does), and the reply to an
+  unknown tag. Atlas's board run sheet reads the count after a clear and rsts after a watchdog reset; their values
+  correct this model.
+
 ## Not like the board
 
 - QEMU needs the eMMC's user area to be a power of two. It is the smallest one that holds the image (16 GiB for a Raze
@@ -178,6 +219,8 @@ A fault that depends on FIFO sizing would not show.
 - The eMMC controller is on PCI, so the block devices' paths have the PCI host and slot in them:
   `soc@107c000000/4010000000.mmc/pci0000:00/0000:00:01.0/mmc_host/…`, where the board has
   `soc@107c000000/1000fff000.mmc/mmc_host/…`. The node path (`of_node`) is the board's; the device names are not.
+- The firmware mailbox is a stand-in that knows three tags, and an order reaches the next boot through a page the
+  runner saves (see "The firmware mailbox"); the board's firmware keeps it itself. The boot count is modelled.
 - The watchdog is QEMU's i6300esb behind the board's shape and facts. The device tree node's compatible is
   `gaia,firmware-watchdog`, not `brcm,bcm2712-pm`.
 - **Speed.** TCG runs this boot about 4.6 times slower than the board. The image's timeouts (15 s for slot-init and the

@@ -1489,7 +1489,7 @@ fn the_stock_hosts_wait_and_connect_are_options() {
 /// boot writes $FAKE_FLASH (when set) into its drive at $FAKE_AT, as a
 /// flasher would, and logs a restart.
 const FAKE_QEMU: &str = r#"#!/usr/bin/env python3
-import os, socket, sys
+import json, os, socket, sys
 args = sys.argv[1:]
 if "-dtb" not in args:
     os.execvp("qemu-system-aarch64", ["qemu-system-aarch64", *args])
@@ -1507,10 +1507,27 @@ for i, a in enumerate(args):
         srv.bind(path)
         srv.listen(1)
         conn, _ = srv.accept()
+        # A runner that never answers fails the boot rather than hangs it.
+        conn.settimeout(120)
         f = conn.makefile("rw")
         f.write('{"QMP": {}}\n'); f.flush()
         f.readline()
         f.write('{"return": {}}\n'); f.flush()
+        page = os.path.join(os.environ.get("FAKE_MAILBOX_DIR", "/nonexistent"), f"boot-{n}.bin")
+        if os.path.exists(page):
+            # The guest's restart, paused: the runner saves the mailbox page
+            # (pmemsave) and quits.
+            f.write('{"timestamp": {"seconds": 1, "microseconds": 0}, "event": "SHUTDOWN", "data": {"guest": true, "reason": "guest-reset"}}\n'); f.flush()
+            for line in f:
+                cmd = json.loads(line)
+                if cmd["execute"] == "pmemsave":
+                    with open(f"{d}/boot-{n}.pmemsave", "w") as note:
+                        note.write(json.dumps(cmd["arguments"]))
+                    with open(page, "rb") as src, open(cmd["arguments"]["filename"], "wb") as dst:
+                        dst.write(src.read().ljust(cmd["arguments"]["size"], b"\0"))
+                f.write('{"return": {}}\n'); f.flush()
+                if cmd["execute"] == "quit":
+                    break
         conn.close()
 log = [a.split("logfile=")[1].split(",")[0] for a in args if "logfile=" in a][0]
 drive = [a.split("file=")[1].split(",")[0] for a in args if a.startswith("if=none")][0]
@@ -1520,6 +1537,7 @@ with open(log, "w") as out:
             with open(os.environ["FAKE_FLASH"], "rb") as src, open(drive, "r+b") as dst:
                 dst.seek(int(os.environ["FAKE_AT"]))
                 dst.write(src.read())
+    if str(n) in os.environ.get("FAKE_REBOOTS", "1").split(","):
         out.write("reboot: Restarting system\n")
 "#;
 
@@ -1636,6 +1654,264 @@ fn a_restart_after_a_ram_boot_boots_the_emmc() {
     let (record, ok, out) = boots(None, "blank");
     assert!(
         ok && out.contains("the eMMC has no FAT boot partition after the RAM boot"),
+        "{out}"
+    );
+    assert!(!record.join("state/boot-2.replaced").exists(), "{out}");
+}
+
+/// The mailbox stand-in's record page (qemu-virt-kernel/0004), as QEMU saves
+/// it: magic, version, orders, order, clears, clear value, asked, refused.
+fn mailbox_page(
+    orders: u32,
+    order: u32,
+    clears: u32,
+    clear: u32,
+    asked: u32,
+    refused: u32,
+) -> Vec<u8> {
+    [0x424d_5647, 1, orders, order, clears, clear, asked, refused]
+        .iter()
+        .flat_map(|w: &u32| w.to_le_bytes())
+        .collect()
+}
+
+/// The firmware's one-shot reboot order, through the mailbox stand-in: QEMU
+/// pauses at the guest's restart and the runner saves the record page. With
+/// RPIBOOT (0x0003808b, 3) taken in boot 1, boot 2 is the RAM-boot set again
+/// (boot mode 3, no partition), and boot 3, with no order, the eMMC. With no
+/// order, or one the stand-in does not know, boot 2 is the eMMC; a boot count
+/// set is the next boot's count less one. The node and its reserved page are
+/// in every board-profile device tree, and the page is the last of RAM.
+#[test]
+fn the_firmware_rpiboot_order_serves_the_ram_boot_again() {
+    if !tools_here(&[
+        "mformat",
+        "mcopy",
+        "mmd",
+        "mtype",
+        "mdir",
+        "sfdisk",
+        "fdtput",
+        "fdtget",
+        "dtc",
+        "python3",
+        "qemu-system-aarch64",
+    ]) {
+        return;
+    }
+    let dir = tempfile::tempdir().expect("tempdir");
+    let set = ram_boot(dir.path(), "boot_ramdisk=1\n");
+    let flash = disk(dir.path());
+    put_dtb(dir.path(), &flash, "slots/bay0/board.dtb", Some(0x7d200000));
+    let fake = dir.path().join("fake-qemu");
+    std::fs::write(&fake, FAKE_QEMU).expect("write");
+    run("chmod", &["+x", fake.to_str().expect("utf-8")]);
+    let boots = |name: &str, pages: &[(u32, Vec<u8>)], reboots: &str, image: &Path| {
+        let record = dir.path().join(name);
+        let pages_dir = record.join("pages");
+        std::fs::create_dir_all(&pages_dir).expect("mkdir");
+        for (n, page) in pages {
+            std::fs::write(pages_dir.join(format!("boot-{n}.bin")), page).expect("page");
+        }
+        let out = Command::new(repo().join("scripts/qemu-rpi-slots.sh"))
+            .env("QEMU", &fake)
+            .env("FAKE_DIR", &record)
+            .env("FAKE_FLASH", &flash)
+            .env("FAKE_AT", (12u64 << 20).to_string())
+            .env("FAKE_MAILBOX_DIR", &pages_dir)
+            .env("FAKE_REBOOTS", reboots)
+            .arg("--state")
+            .arg(record.join("state"))
+            .args([
+                "--net",
+                "user",
+                "--profile",
+                "board",
+                "--fresh",
+                "--disk-size",
+                "64M",
+                "--mem",
+                "2G",
+                "--emmc-at",
+                "/soc@107c000000/mmc@fff000",
+            ])
+            .arg(image)
+            .stdin(std::process::Stdio::null())
+            .output()
+            .expect("the runner runs");
+        let text = format!(
+            "{}{}",
+            String::from_utf8_lossy(&out.stdout),
+            String::from_utf8_lossy(&out.stderr)
+        );
+        (record, out.status.success(), text)
+    };
+    let get_in = |record: &Path, n: u32, prop: &str| {
+        let out = Command::new("fdtget")
+            .arg(record.join(format!("boot-{n}.dtb")))
+            .args(["-t", "x", "/chosen/bootloader", prop])
+            .output()
+            .expect("fdtget");
+        String::from_utf8_lossy(&out.stdout).trim().to_string()
+    };
+    let replaced = |record: &Path, n: u32| {
+        std::fs::read_to_string(record.join(format!("state/boot-{n}.replaced"))).unwrap_or_default()
+    };
+
+    // RPIBOOT taken in boot 1: the RAM boot again, then the eMMC.
+    let (record, ok, out) = boots("order", &[(1, mailbox_page(1, 3, 0, 0, 1, 0))], "1,2", &set);
+    assert!(ok, "{out}");
+    assert!(
+        out.contains(
+            "== firmware mailbox, boot 1: orders 1 order 3 clears 0 clear 0 asked 1 refused 0"
+        ) && out.contains(
+            "== RPIBOOT (the firmware's one-shot order from boot 1): the RAM-boot set again"
+        ),
+        "{out}"
+    );
+    let (one, two, three) = (
+        replaced(&record, 1),
+        replaced(&record, 2),
+        replaced(&record, 3),
+    );
+    assert!(one.contains("firmware mailbox: orders 1 order 3"), "{one}");
+    assert!(
+        two.contains("ram boot: ")
+            && two
+                .contains("firmware: count 2, rsts 0x20, partition none (a RAM boot), boot-mode 3"),
+        "{two}"
+    );
+    assert!(
+        !three.contains("ram boot: ")
+            && three.contains("firmware: count 3, rsts 0x20, partition 1, boot-mode 1"),
+        "{three}"
+    );
+    let saved = std::fs::read_to_string(record.join("boot-1.pmemsave")).expect("pmemsave");
+    assert!(
+        saved.contains(&format!(
+            "\"val\": {}",
+            0x4000_0000u64 + (2u64 << 30) - 0x1000
+        )) && saved.contains("\"size\": 4096"),
+        "{saved}"
+    );
+    let args = std::fs::read_to_string(record.join("boot-1.args")).expect("args");
+    assert!(
+        args.contains("-action\nreboot=shutdown,shutdown=pause") && !args.contains("-no-reboot"),
+        "{args}"
+    );
+    let get = |n: u32, args: &[&str]| {
+        let out = Command::new("fdtget")
+            .arg(record.join(format!("boot-{n}.dtb")))
+            .args(args)
+            .output()
+            .expect("fdtget");
+        String::from_utf8_lossy(&out.stdout).trim().to_string()
+    };
+    for n in 1..=3 {
+        assert_eq!(
+            get(n, &["/gaia-firmware-mailbox@bffff000", "compatible"]),
+            "gaia,firmware-mailbox"
+        );
+        assert_eq!(
+            get(n, &["-t", "x", "/gaia-firmware-mailbox@bffff000", "reg"]),
+            "0 bffff000 0 1000"
+        );
+        assert_eq!(
+            get(
+                n,
+                &["-t", "x", "/reserved-memory/gaia-mailbox@bffff000", "reg"]
+            ),
+            "0 bffff000 0 1000"
+        );
+        let props = Command::new("fdtget")
+            .arg(record.join(format!("boot-{n}.dtb")))
+            .args(["-p", "/reserved-memory/gaia-mailbox@bffff000"])
+            .output()
+            .expect("fdtget");
+        assert!(
+            String::from_utf8_lossy(&props.stdout)
+                .lines()
+                .any(|l| l == "no-map")
+        );
+    }
+    assert_eq!(get(2, &["-t", "x", "/chosen/bootloader", "boot-mode"]), "3");
+    assert_eq!(get(3, &["-t", "x", "/chosen/bootloader", "boot-mode"]), "1");
+
+    // No order, the boot count set to 0: boot 2 is the eMMC, with count 1.
+    let (record, ok, out) = boots("clear", &[(1, mailbox_page(0, 0, 1, 0, 1, 0))], "1", &set);
+    assert!(ok, "{out}");
+    assert!(!out.contains("== RPIBOOT"), "{out}");
+    let two = replaced(&record, 2);
+    assert!(
+        !two.contains("ram boot: ")
+            && two.contains("firmware: count 1, rsts 0x20, partition 1, boot-mode 1"),
+        "{two}"
+    );
+
+    // An order the stand-in does not know: recorded, not acted on.
+    let (record, ok, out) = boots("unknown", &[(1, mailbox_page(1, 5, 0, 0, 1, 0))], "1", &set);
+    assert!(
+        ok && out
+            .contains("reboot order 5 is not one the stand-in knows (3 is RPIBOOT); not acted on"),
+        "{out}"
+    );
+    assert!(!replaced(&record, 2).contains("ram boot: "), "{out}");
+
+    // RPIBOOT taken in an eMMC boot (boot 2): boot 3 is the RAM boot again,
+    // boot mode 3 with no partition, as after boot 1.
+    let (record, ok, out) = boots(
+        "emmc-order",
+        &[(2, mailbox_page(1, 3, 0, 0, 1, 0))],
+        "1,2",
+        &set,
+    );
+    assert!(
+        ok && out.contains(
+            "== RPIBOOT (the firmware's one-shot order from boot 2): the RAM-boot set again"
+        ),
+        "{out}"
+    );
+    let three = replaced(&record, 3);
+    assert!(
+        replaced(&record, 2).contains("partition 1, boot-mode 1")
+            && three.contains("ram boot: ")
+            && three.contains("partition none (a RAM boot), boot-mode 3"),
+        "{three}"
+    );
+    assert_eq!(get_in(&record, 3, "boot-mode"), "3");
+
+    // A record of another version, or with another magic: not read.
+    for (name, magic, version) in [("magic", 0x1234_5678u32, 1u32), ("version", 0x424d_5647, 2)] {
+        let mut page = mailbox_page(1, 3, 0, 0, 1, 0);
+        page[..4].copy_from_slice(&magic.to_le_bytes());
+        page[4..8].copy_from_slice(&version.to_le_bytes());
+        let (record, ok, out) = boots(name, &[(1, page)], "1", &set);
+        assert!(
+            ok && !out.contains("== firmware mailbox") && !out.contains("== RPIBOOT"),
+            "{name}: {out}"
+        );
+        assert!(
+            replaced(&record, 2).contains("partition 1, boot-mode 1"),
+            "{name}: {out}"
+        );
+    }
+
+    // A page with no record (no stand-in ran): nothing recorded, the eMMC next.
+    let (record, ok, out) = boots("none", &[(1, vec![0; 64])], "1", &set);
+    assert!(ok && !out.contains("== firmware mailbox"), "{out}");
+    assert!(
+        !replaced(&record, 1).contains("firmware mailbox: orders"),
+        "{out}"
+    );
+    assert!(
+        replaced(&record, 2).contains("partition 1, boot-mode 1"),
+        "{out}"
+    );
+
+    // A disk-mode run that gets RPIBOOT has no set to serve: it stops.
+    let (record, ok, out) = boots("disk", &[(1, mailbox_page(1, 3, 0, 0, 1, 0))], "1", &flash);
+    assert!(
+        ok && out.contains("this run has no RAM-boot set to serve; stopping"),
         "{out}"
     );
     assert!(!record.join("state/boot-2.replaced").exists(), "{out}");

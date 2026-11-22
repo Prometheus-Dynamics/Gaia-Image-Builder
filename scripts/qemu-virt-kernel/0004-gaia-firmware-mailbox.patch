@@ -1,0 +1,263 @@
+--- a/drivers/misc/Kconfig
++++ b/drivers/misc/Kconfig
+@@ -5,6 +5,15 @@
+ 
+ menu "Misc devices"
+ 
++config GAIA_FW_MAILBOX
++	bool "Gaia: the Raspberry Pi firmware mailbox stand-in (QEMU board profile)"
++	depends on OF
++	help
++	  /dev/vcio for the board-like QEMU profile of Gaia's
++	  scripts/qemu-rpi-slots.sh: the property mailbox's reboot order
++	  and boot count tags, kept in a page the runner reads. Binds only
++	  to a "gaia,firmware-mailbox" node. Never on a board.
++
+ config SENSORS_LIS3LV02D
+ 	tristate
+ 	depends on INPUT
+--- a/drivers/misc/Makefile
++++ b/drivers/misc/Makefile
+@@ -3,6 +3,7 @@
+ # Makefile for misc devices that really don't fit anywhere else.
+ #
+ 
++obj-$(CONFIG_GAIA_FW_MAILBOX)	+= gaia-fw-mailbox.o
+ obj-$(CONFIG_IBMVMC)		+= ibmvmc.o
+ obj-$(CONFIG_AD525X_DPOT)	+= ad525x_dpot.o
+ obj-$(CONFIG_AD525X_DPOT_I2C)	+= ad525x_dpot-i2c.o
+--- /dev/null
++++ b/drivers/misc/gaia-fw-mailbox.c
+@@ -0,0 +1,232 @@
++// SPDX-License-Identifier: GPL-2.0
++/*
++ * Gaia (the board-like QEMU profile of scripts/qemu-rpi-slots.sh): a stand-in
++ * for the Raspberry Pi firmware's property mailbox, /dev/vcio. Nothing here is
++ * the firmware.
++ *
++ * The node is the one the Pi kernel's vcio driver makes: a misc device named
++ * "vcio", root:root 0600, registered at device_initcall so devtmpfs has it
++ * before any userspace runs. Its one request, IOCTL_MBOX_PROPERTY
++ * (_IOWR(100, 0, char *)), takes a property buffer as the Pi kernel's does:
++ * the size in its first word, then the request code, then tags (tag, value
++ * size, request code, value) up to the end tag 0. The answers:
++ *
++ * - 0x0003808b, the one-shot reboot order (3 = RPIBOOT): taken and recorded;
++ * - 0x0003808d, the boot count set: taken and recorded with its value;
++ * - 0x0003008d, the boot count get: the count this boot's device tree shows
++ *   (/chosen/bootloader/count), as the firmware set it;
++ * - any other tag, or every tag while `refuse` is not 0: the buffer's code
++ *   is 0x80000001 and nothing is taken.
++ *
++ * A taken buffer has the code 0x80000000 and each tag's code 0x80000000 | its
++ * value size. The parameters (/sys/module/gaia_fw_mailbox/parameters) are
++ * those of Lemnos's test stand-in (testing/qemu/test_block/lemnos_test_vcio.rs):
++ * orders, order, asked, clears, and refuse (writable, and settable on the
++ * command line as gaia_fw_mailbox.refuse=1).
++ *
++ * How an order reaches the next boot is the runner's mechanism, nothing on a
++ * board: the stand-in binds to a "gaia,firmware-mailbox" node the runner adds,
++ * whose reg is a page the runner reserves, and keeps its record there; QEMU
++ * pauses at the guest's restart and the runner saves that page before it quits
++ * (docs/board-qemu.md, "The firmware mailbox").
++ */
++
++#include <linux/fs.h>
++#include <linux/io.h>
++#include <linux/miscdevice.h>
++#include <linux/module.h>
++#include <linux/moduleparam.h>
++#include <linux/of.h>
++#include <linux/platform_device.h>
++#include <linux/slab.h>
++#include <linux/uaccess.h>
++
++#define MBOX_PROPERTY _IOWR(100, 0, char *)
++#define MBOX_MAX_BYTES 1024
++#define CODE_REQUEST 0
++#define CODE_OK 0x80000000u
++#define CODE_ERROR 0x80000001u
++#define TAG_END 0
++#define TAG_SET_REBOOT_ORDER 0x0003808bu
++#define TAG_SET_BOOT_COUNT 0x0003808du
++#define TAG_GET_BOOT_COUNT 0x0003008du
++
++/* The record the runner reads, little-endian words. */
++#define RECORD_MAGIC 0x424d5647u /* "GVMB" */
++#define RECORD_VERSION 1
++enum {
++	R_MAGIC,
++	R_VERSION,
++	R_ORDERS,
++	R_ORDER,
++	R_CLEARS,
++	R_CLEAR_VALUE,
++	R_ASKED,
++	R_REFUSED,
++	R_WORDS
++};
++
++static unsigned int orders;
++module_param(orders, uint, 0444);
++MODULE_PARM_DESC(orders, "Test only: the reboot orders the stand-in took");
++static unsigned int order;
++module_param(order, uint, 0444);
++MODULE_PARM_DESC(order, "Test only: the value of the last reboot order taken");
++static unsigned int asked;
++module_param(asked, uint, 0444);
++MODULE_PARM_DESC(asked, "Test only: the buffers the stand-in was sent");
++static unsigned int clears;
++module_param(clears, uint, 0444);
++MODULE_PARM_DESC(clears, "Test only: the boot count sets the stand-in took");
++static unsigned int refuse;
++module_param(refuse, uint, 0644);
++MODULE_PARM_DESC(refuse, "Test only: not 0 answers every buffer with the error code");
++
++static DEFINE_MUTEX(mbox_lock);
++static __le32 *record;
++static unsigned int refused, clear_value;
++static u32 boot_count;
++
++static void record_write(void)
++{
++	u32 words[R_WORDS] = {
++		[R_MAGIC] = RECORD_MAGIC,	[R_VERSION] = RECORD_VERSION,
++		[R_ORDERS] = orders,		[R_ORDER] = order,
++		[R_CLEARS] = clears,		[R_CLEAR_VALUE] = clear_value,
++		[R_ASKED] = asked,		[R_REFUSED] = refused,
++	};
++	int i;
++
++	for (i = 0; i < R_WORDS; i++)
++		record[i] = cpu_to_le32(words[i]);
++	wmb();
++}
++
++/*
++ * Answers the buffer `buf` of `size` bytes in place. The tags are checked
++ * first and taken only when every one is known, so a refused buffer takes
++ * nothing.
++ */
++static int mbox_answer(u32 *buf, u32 size)
++{
++	u32 words = size / 4, i;
++	bool known = true;
++
++	if (buf[1] != CODE_REQUEST)
++		return -EINVAL;
++	for (i = 2; i < words && buf[i] != TAG_END; i += 3 + DIV_ROUND_UP(buf[i + 1], 4)) {
++		if (i + 3 > words || buf[i + 1] > (words - i - 3) * 4)
++			return -EINVAL;
++		if (buf[i] != TAG_SET_REBOOT_ORDER && buf[i] != TAG_SET_BOOT_COUNT &&
++		    buf[i] != TAG_GET_BOOT_COUNT)
++			known = false;
++		else if (buf[i + 1] < 4)
++			return -EINVAL;
++	}
++	if (i >= words)
++		return -EINVAL;
++	asked++;
++	if (refuse || !known) {
++		refused++;
++		buf[1] = CODE_ERROR;
++		return 0;
++	}
++	for (i = 2; buf[i] != TAG_END; i += 3 + DIV_ROUND_UP(buf[i + 1], 4)) {
++		switch (buf[i]) {
++		case TAG_SET_REBOOT_ORDER:
++			order = buf[i + 3];
++			orders++;
++			break;
++		case TAG_SET_BOOT_COUNT:
++			clear_value = buf[i + 3];
++			clears++;
++			break;
++		case TAG_GET_BOOT_COUNT:
++			buf[i + 3] = boot_count;
++			break;
++		}
++		buf[i + 2] = CODE_OK | 4;
++	}
++	buf[1] = CODE_OK;
++	return 0;
++}
++
++static long mbox_ioctl(struct file *file, unsigned int cmd, unsigned long arg)
++{
++	void __user *user = (void __user *)arg;
++	u32 size, *buf;
++	int ret;
++
++	if (cmd != MBOX_PROPERTY)
++		return -EINVAL;
++	if (copy_from_user(&size, user, sizeof(size)))
++		return -EFAULT;
++	if (size < 12 || size > MBOX_MAX_BYTES || size % 4)
++		return -EINVAL;
++	buf = kmalloc(size, GFP_KERNEL);
++	if (!buf)
++		return -ENOMEM;
++	if (copy_from_user(buf, user, size)) {
++		kfree(buf);
++		return -EFAULT;
++	}
++	mutex_lock(&mbox_lock);
++	ret = mbox_answer(buf, size);
++	record_write();
++	mutex_unlock(&mbox_lock);
++	if (!ret && copy_to_user(user, buf, size))
++		ret = -EFAULT;
++	kfree(buf);
++	return ret;
++}
++
++static const struct file_operations mbox_fops = {
++	.owner = THIS_MODULE,
++	.unlocked_ioctl = mbox_ioctl,
++	.compat_ioctl = compat_ptr_ioctl,
++	.llseek = noop_llseek,
++};
++
++/* As the Pi kernel's vcio: no mode given, so devtmpfs makes it root:root 0600. */
++static struct miscdevice mbox_misc = {
++	.minor = MISC_DYNAMIC_MINOR,
++	.name = "vcio",
++	.fops = &mbox_fops,
++};
++
++static int mbox_probe(struct platform_device *pdev)
++{
++	struct device_node *chosen;
++	struct resource *res;
++
++	res = platform_get_resource(pdev, IORESOURCE_MEM, 0);
++	if (!res || resource_size(res) < R_WORDS * 4)
++		return -EINVAL;
++	record = devm_memremap(&pdev->dev, res->start, resource_size(res), MEMREMAP_WB);
++	if (IS_ERR(record))
++		return PTR_ERR(record);
++	chosen = of_find_node_by_path("/chosen/bootloader");
++	if (chosen) {
++		of_property_read_u32(chosen, "count", &boot_count);
++		of_node_put(chosen);
++	}
++	record_write();
++	dev_info(&pdev->dev, "the firmware mailbox stand-in, /dev/vcio (boot count %u)\n",
++		 boot_count);
++	return misc_register(&mbox_misc);
++}
++
++static const struct of_device_id mbox_of_match[] = {
++	{ .compatible = "gaia,firmware-mailbox" },
++	{}
++};
++
++static struct platform_driver mbox_driver = {
++	.probe = mbox_probe,
++	.driver = {
++		.name = "gaia-fw-mailbox",
++		.of_match_table = mbox_of_match,
++		.suppress_bind_attrs = true,
++	},
++};
++builtin_platform_driver(mbox_driver);

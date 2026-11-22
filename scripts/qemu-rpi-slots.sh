@@ -56,7 +56,9 @@
 # Other dtoverlay= fragments and dtparam= are not applied: the device tree
 # is the virt machine's, so Pi hardware (RP1, CSI, PIO, the fan) is absent.
 #
-# Restarts: QEMU runs with -no-reboot and the serial console goes to a log.
+# Restarts: QEMU runs with -no-reboot (the board profile: paused at the
+# restart instead, see the firmware mailbox below) and the serial console
+# goes to a log.
 # When the kernel logs "Restarting system with command '...tryboot...'"
 # (`reboot "0 tryboot"`), the next boot is a tryboot; any other restart or a
 # panic restart boots config.txt again, which is what the firmware does (a
@@ -167,10 +169,25 @@
 # boot mode 1, its boot partition's config.txt (or tryboot.txt), the next
 # count and rsts, all recorded as later boots of the one run. An eMMC with
 # no FAT boot partition by then ends the run: the firmware would go on to
-# its next boot mode.
+# its next boot mode. A boot that gave the firmware's one-shot RPIBOOT order
+# through the mailbox stand-in restarts into the RAM boot again instead.
 # Not like the board after the flash: the eMMC is QEMU's, on PCI, at the
 # host file's speed and a power-of-two size; the gadget is served by
 # usbip-vudc over USB/IP, at high speed, not by the dwc2.
+#
+# The firmware mailbox (board profile; docs/board-qemu.md): the virt kernel's
+# stand-in (scripts/qemu-virt-kernel/0004) is /dev/vcio, root:root 0600, for
+# a "gaia,firmware-mailbox" node the runner adds. It takes the reboot order
+# (0x0003808b; 3 is RPIBOOT) and the boot count set (0x0003808d) and answers
+# the count get (0x0003008d). Its record is the last page of guest RAM,
+# reserved: QEMU pauses at the guest's restart (-action
+# reboot=shutdown,shutdown=pause), the events listener saves the page
+# (<state>/boot-N.mailbox) and quits QEMU, and the runner reads it. That is
+# the runner's mechanism, nothing on the board. With RPIBOOT taken the next
+# boot is the RAM-boot set again (once: the boot after goes to the eMMC); a
+# disk run has none to serve and stops. The boot count is MODELLED from
+# Lemnos's notes, not from the board: 8 bits, one higher at each boot, and a
+# set's value is what the next boot adds one to.
 #
 # The image is never written: its contents are copied (sparse) to
 # <state>/disk.img once, and the guest writes that copy. --fresh copies again.
@@ -657,8 +674,15 @@ machine_args() {
 		done
 	fi
 	printf '%s\n' -M virt,gic-version=3 -cpu "$cpu" -smp "$smp" -m "$mem" \
-		-accel tcg,thread=multi -nographic -no-reboot \
-		-drive "if=none,id=disk0,format=raw,file=$disk,discard=unmap"
+		-accel tcg,thread=multi -nographic
+	if [[ $profile == board ]]; then
+		# Paused at the guest's restart, so the mailbox page is saved first
+		# (the events listener saves it and quits QEMU).
+		printf '%s\n' -action reboot=shutdown,shutdown=pause
+	else
+		printf '%s\n' -no-reboot
+	fi
+	printf '%s\n' -drive "if=none,id=disk0,format=raw,file=$disk,discard=unmap"
 	if [[ $profile == board ]]; then
 		printf '%s\n' -device sdhci-pci \
 			-device "emmc,drive=disk0,boot-partition-size=$emmc_boot,rpmb-partition-size=$emmc_rpmb"
@@ -916,6 +940,42 @@ virtual_udc() {
 	[[ -z $usb_host ]] || fdtput -t x "$state/virt.dtb" "$path" gaia,vsock-port "$(printf %x "$usb_port_device")"
 }
 
+# The firmware mailbox stand-in's node (scripts/qemu-virt-kernel/0004): its
+# record page, the last page of guest RAM, reserved (no-map) so the kernel
+# leaves it to the stand-in. The page is the runner's, nothing on a board.
+firmware_mailbox() {
+	local dtb="$state/virt.dtb" hi lo
+	hi=$(printf %x $((mbox_addr >> 32)))
+	lo=$(printf %x $((mbox_addr & 0xffffffff)))
+	fdtput -c "$dtb" /reserved-memory
+	fdtput -t x "$dtb" /reserved-memory '#address-cells' 2
+	fdtput -t x "$dtb" /reserved-memory '#size-cells' 2
+	fdtput "$dtb" /reserved-memory ranges
+	fdtput -c "$dtb" "/reserved-memory/gaia-mailbox@$(printf %x "$mbox_addr")"
+	fdtput -t x "$dtb" "/reserved-memory/gaia-mailbox@$(printf %x "$mbox_addr")" reg "$hi" "$lo" 0 1000
+	fdtput "$dtb" "/reserved-memory/gaia-mailbox@$(printf %x "$mbox_addr")" no-map
+	fdtput -c "$dtb" "/gaia-firmware-mailbox@$(printf %x "$mbox_addr")"
+	fdtput -t s "$dtb" "/gaia-firmware-mailbox@$(printf %x "$mbox_addr")" compatible gaia,firmware-mailbox
+	fdtput -t x "$dtb" "/gaia-firmware-mailbox@$(printf %x "$mbox_addr")" reg "$hi" "$lo" 0 1000
+}
+
+# The mailbox page a boot left ($1, as QEMU saved it), read: one line,
+# "orders N order V clears N clear V asked N refused N", or nothing when the
+# page has no record (no stand-in ran, or QEMU saved nothing).
+mailbox_record() {
+	[[ -s $1 ]] || return 0
+	python3 - "$1" <<'MBOX'
+import struct, sys
+data = open(sys.argv[1], "rb").read(32)
+if len(data) < 32:
+    sys.exit(0)
+magic, version, orders, order, clears, clear, asked, refused = struct.unpack("<8I", data)
+if magic != 0x424D5647 or version != 1:
+    sys.exit(0)
+print(f"orders {orders} order {order} clears {clears} clear {clear} asked {asked} refused {refused}")
+MBOX
+}
+
 # The virt machine's device tree with /chosen/bootloader/tryboot set to $1,
 # the boot mode $2, the board's serial number, and the disk's node at the
 # boot source's path $3 when there is one.
@@ -930,6 +990,7 @@ make_dtb() {
 		fdtput -t x "$state/virt.dtb" /chosen/bootloader count "$(printf %x "$count")"
 		fdtput -t x "$state/virt.dtb" /chosen/bootloader rsts "$(printf %x "$rsts")"
 		[[ -z $fat_part ]] || fdtput -t x "$state/virt.dtb" /chosen/bootloader partition "$(printf %x "$fat_part")"
+		firmware_mailbox
 	fi
 	emulate_marker
 	move_node "${3:-$emmc_at}" || return 1
@@ -1030,6 +1091,18 @@ if [[ $new_copy -eq 1 && -n $ssh_key && $ssh_key != none ]]; then
 fi
 
 count=$boot_count
+# The firmware's boot count (8 bits; +1 at each boot, a mailbox set stores its
+# value) and a pending one-shot RPIBOOT order. MODELLED from Lemnos's notes
+# (docs/slots.md, "The count's life"), not from the board.
+fw_count=$boot_count
+rpiboot_next=0
+case "$mem" in
+*[Gg]) mem_bytes=$((${mem%[Gg]} << 30)) ;;
+*[Mm]) mem_bytes=$((${mem%[Mm]} << 20)) ;;
+*) mem_bytes=$((mem << 20)) ;;
+esac
+# The last page of guest RAM (virt's RAM starts at 0x40000000).
+mbox_addr=$((0x40000000 + mem_bytes - 0x1000))
 boots=0
 trials=0
 # Whether the trial arguments go on this tryboot (the $trials-th of the run).
@@ -1063,7 +1136,20 @@ kernel_seccomp() {
 }
 ram_now=$ramdisk
 while :; do
-	if [[ $ram_now -eq 1 && $boots -gt 0 ]]; then
+	if [[ $rpiboot_next -eq 1 ]]; then
+		# The firmware's one-shot reboot order: RPIBOOT at this boot only.
+		rpiboot_next=0
+		rm -f "$state/tryboot-next"
+		if [[ $ramdisk -eq 0 ]]; then
+			echo "== RPIBOOT (the firmware's one-shot order from boot $boots): the firmware waits for a USB host to serve it, and this run has no RAM-boot set to serve; stopping" >&2
+			exit 0
+		fi
+		fat="$state/boot.img"
+		fat_part=""
+		ram_now=1
+		boot_mode=3
+		echo "== RPIBOOT (the firmware's one-shot order from boot $boots): the RAM-boot set again, $image" >&2
+	elif [[ $ram_now -eq 1 && $boots -gt 0 ]]; then
 		# After the RAM boot, a restart: the firmware boots the eMMC.
 		read -r fat_at fat_part < <(fat_offset) || true
 		if [[ -z ${fat_at:-} ]]; then
@@ -1078,7 +1164,8 @@ while :; do
 	if [[ $profile == board ]]; then
 		# The firmware's count of boots since power-on, and the reset status:
 		# a power-on first, a restart after.
-		count=$((boot_count + boots + 1))
+		fw_count=$(((fw_count + 1) % 256))
+		count=$fw_count
 		rsts=0x20
 		[[ $boots -gt 0 ]] || rsts=0x1000
 	fi
@@ -1110,6 +1197,7 @@ while :; do
 			[[ $ram_now -eq 0 ]] || echo "ram boot: $image/config.txt (boot_ramdisk=1), boot.img sha256 $(sha256sum < "$fat" | cut -d' ' -f1)"
 			echo "emmc at: ${boot_from:-${emmc_at:-not moved}}"
 			echo "kernel_watchdog_timeout: ${boot_watchdog:-none}"
+			echo "firmware mailbox: record page $(printf 0x%x "$mbox_addr")"
 		fi
 		echo "boot source: ${boot_from:-none}"
 		echo "from: $boot_source"
@@ -1149,6 +1237,8 @@ while :; do
 				[[ $ramdisk -eq 0 ]] || echo "disk: the eMMC as the RAM boot left it, booted from its partition $fat_part; NOT like the board: QEMU's eMMC writes at the host file's speed"
 			fi
 			echo "firmware: count $count, rsts $rsts, partition ${fat_part:-none (a RAM boot)}, boot-mode $boot_mode, tryboot $this_tryboot"
+			echo "firmware: the count is MODELLED from Lemnos's notes (docs/slots.md), not from the board: +1 at each boot, 8 bits, a mailbox set (0x0003808d) stores its value for the next boot to add 1 to"
+			echo "firmware mailbox: /dev/vcio stand-in (qemu-virt-kernel/0004), node gaia,firmware-mailbox, record page $(printf 0x%x "$mbox_addr") (reserved; saved by QEMU at the guest's restart, the runner's mechanism, nothing on the board)"
 			if [[ -n $firmware_wdt ]]; then
 				echo "firmware watchdog: armed, $boot_watchdog s (kernel_watchdog_timeout in $boot_config), node gaia,firmware-watchdog at ${firmware_wdt%% *} (the image's power-management block, CPU address ${firmware_wdt#* })"
 				[[ $watchdog_scale -eq 100 ]] || echo "firmware watchdog: NOT like the board: its hardware counts $watchdog_scale% of each second asked (--watchdog-scale), for a guest slower than the board"
@@ -1197,9 +1287,13 @@ while :; do
 	# listener on its socket.
 	events="$state/boot-$boots.events"
 	rm -f "$state/qmp-events.sock"
-	python3 - "$state/qmp-events.sock" "$events" <<'QMP' &
+	rm -f "$state/boot-$boots.mailbox"
+	mbox_args=()
+	[[ $profile != board ]] || mbox_args=("$mbox_addr" "$state/boot-$boots.mailbox")
+	python3 - "$state/qmp-events.sock" "$events" ${mbox_args[@]+"${mbox_args[@]}"} <<'QMP' &
 import json, socket, sys, time
 path, out = sys.argv[1], sys.argv[2]
+mailbox = sys.argv[3:5]
 for _ in range(600):
     try:
         s = socket.socket(socket.AF_UNIX)
@@ -1224,6 +1318,22 @@ with open(out, "w") as log:
             stamp = msg.get("timestamp", {})
             log.write(f"{stamp.get('seconds', 0)}.{stamp.get('microseconds', 0):06d} {msg['event']} {json.dumps(msg.get('data', {}))}\n")
             log.flush()
+            if mailbox and msg["event"] == "SHUTDOWN" and msg.get("data", {}).get("guest"):
+                # The board profile pauses at the guest's restart: the
+                # mailbox page is saved, then QEMU quits.
+                for cmd in ({"execute": "pmemsave", "arguments": {"val": int(mailbox[0]), "size": 4096, "filename": mailbox[1]}},
+                            {"execute": "quit"}):
+                    f.write(json.dumps(cmd) + "\n")
+                    f.flush()
+                    for reply in f:
+                        got = json.loads(reply)
+                        if "event" in got:
+                            log.write(f"0 {got['event']} {json.dumps(got.get('data', {}))}\n")
+                        elif "return" in got or "error" in got:
+                            if "error" in got:
+                                log.write(f"0 QMP-ERROR {cmd['execute']} {json.dumps(got['error'])}\n")
+                            break
+                    log.flush()
 QMP
 	events_pid=$!
 	usb_pids=()
@@ -1276,6 +1386,23 @@ QUIT
 	if [[ $status -ne 0 ]]; then
 		echo "== QEMU exited with $status" >&2
 		exit "$status"
+	fi
+	if [[ $profile == board ]]; then
+		mbox=$(mailbox_record "$state/boot-$boots.mailbox")
+		if [[ -n $mbox ]]; then
+			echo "firmware mailbox: $mbox" >> "$state/boot-$boots.replaced"
+			echo "== firmware mailbox, boot $boots: $mbox" >&2
+			read -r _ m_orders _ m_order _ m_clears _ m_clear _ <<< "$mbox"
+			if [[ $m_clears -gt 0 ]]; then
+				fw_count=$((m_clear % 256))
+				echo "== firmware mailbox: the boot count set to $m_clear (MODELLED: the next boot reads $(((fw_count + 1) % 256)))" >&2
+			fi
+			if [[ $m_orders -gt 0 && $m_order -eq 3 ]]; then
+				rpiboot_next=1
+			elif [[ $m_orders -gt 0 ]]; then
+				echo "== firmware mailbox: reboot order $m_order is not one the stand-in knows (3 is RPIBOOT); not acted on" >&2
+			fi
+		fi
 	fi
 	if [[ -e $state/usb-host-done ]]; then
 		echo "== stopped: the stock host is done" >&2
