@@ -2634,3 +2634,131 @@ fn fragments_go_to_their_files_assembly_in_the_products_order() {
         "{err}"
     );
 }
+
+/// rpi-ramdisk-boot-generated: the generator's board overlay compiled and
+/// proven on the board's device tree, then in boot.img at the path the
+/// product names; the same generator's file is also a fragment of a
+/// shared file, assembled into the built tree the initramfs is made of.
+#[test]
+fn a_generated_ramdisk_boot_takes_the_generators_overlay_and_fragment() {
+    let dir = project();
+    let board_dir = dir.path().join("examples/boards/zero-3e");
+    let board = board_dir.join("board.toml");
+    let product = dir
+        .path()
+        .join("examples/products/zero-3e-demo/product.toml");
+    let component = dir
+        .path()
+        .join("examples/components/hello-rust/component.toml");
+    let original = std::fs::read_to_string(&component).expect("read");
+    std::fs::write(
+        &component,
+        format!(
+            "{original}\n[generate]\ntool = {{ source = \"src\", package = \"hello-rust\" }}\ndescription = \"daemon\"\nargs = [\"tree\", \"@description@\", \"@out@\"]\noutputs = [\"overlay.dts\", \"mdev.conf\"]\n\n[generate.provides]\nboard-overlay = \"overlay.dts\"\n\n[[fragments]]\nfrom = {{ generated = \"mdev.conf\" }}\nto = \"/etc/mdev.conf\"\n"
+        ),
+    )
+    .expect("write");
+    let text = std::fs::read_to_string(&board).expect("read");
+    std::fs::write(
+        &board,
+        format!("{text}\n[descriptions]\ndaemon = \"daemon-board.toml\"\n"),
+    )
+    .expect("write");
+    std::fs::write(board_dir.join("daemon-board.toml"), "id = \"zero-3e\"\n").expect("write");
+    edit(
+        &product,
+        "recipe = \"sd-image\"",
+        "recipe = \"rpi-ramdisk-boot-generated\"",
+    );
+    edit(
+        &product,
+        "budget = \"1G\"\n",
+        "budget = \"1G\"\n\n[[images.assembled]]\npath = \"/etc/mdev.conf\"\norder = [\"hello-rust\", \"os\"]\n",
+    );
+    edit(
+        &product,
+        "id = \"zero-3e-demo\"",
+        "device_trees = \"rk3566-radxa-zero-3e.dtb\"\nboard_overlay = \"overlays/board.dtbo\"\nconfig = \"kernel=kernel8.img\\ndtoverlay=board\\n\"\ncmdline = \"rdinit=/init\"",
+    );
+    let tools = [
+        "--tool",
+        "mformat=/opt/tools/mformat",
+        "--tool",
+        "mcopy=/opt/tools/mcopy",
+    ];
+    let out = plan(dir.path(), &tools);
+    let err = String::from_utf8_lossy(&out.stderr);
+    assert!(out.status.success(), "{err}");
+    let text = String::from_utf8_lossy(&out.stdout)
+        .split(' ')
+        .filter(|word| !word.is_empty())
+        .collect::<Vec<_>>()
+        .join(" ");
+    for line in [
+        // The overlay: the generator's source, compiled by its contract
+        // with the OS build's dtc, proven on the kernel build's trees.
+        "zero-3e-demo.hello-rust.generate.tree -> zero-3e-demo::overlay.source",
+        "hello-rust.src.tree -> zero-3e-demo::overlay.contract",
+        "zero-3e-demo.host-tools.seed -> zero-3e-demo::overlay.tools",
+        "zero-3e-demo.kernel.device_trees -> zero-3e-demo::overlay.base",
+        "zero-3e-demo.kernel.device_trees -> zero-3e-demo::device_trees.from",
+        // Into boot.img after the device trees, before config.txt.
+        "zero-3e-demo::device_trees.tree -> zero-3e-demo::board_overlay.tree",
+        "zero-3e-demo::overlay.overlay -> zero-3e-demo::board_overlay.from",
+        "zero-3e-demo::board_overlay.tree -> zero-3e-demo::config.tree",
+        "zero-3e-demo::cmdline.tree -> zero-3e-demo::fat.tree",
+        "zero-3e-demo::overlay.overlay -> host.zero-3e-demo.overlay",
+        "zero-3e-demo::serve.tree -> host.zero-3e-demo.boot",
+        // The same generator's mdev.conf, a fragment of the built tree's.
+        "zero-3e-demo.hello-rust.generate.tree -> zero-3e-demo.hello-rust.fragment0.from",
+        "zero-3e-demo.hello-rust.fragment0.layer -> zero-3e-demo.assembled0.parts0",
+        "zero-3e-demo.rootfs.tree -> zero-3e-demo::initramfs.tree",
+    ] {
+        assert!(text.contains(line), "the plan has no line {line:?}\n{text}");
+    }
+    assert!(
+        !text.contains("zero-3e-demo::device_trees.tree -> zero-3e-demo::config.tree"),
+        "the overlay is skipped\n{text}"
+    );
+    let mut args = tools.to_vec();
+    args.push("--json");
+    let json = plan(dir.path(), &args);
+    let both: serde_json::Value = serde_json::from_slice(&json.stdout).expect("json");
+    let nodes = both["graph"]["graph"]["nodes"].as_array().expect("nodes");
+    let consts = |label: &str| {
+        &nodes
+            .iter()
+            .find(|n| n["label"] == label)
+            .unwrap_or_else(|| panic!("no node {label}"))["consts"]
+    };
+    let overlay = consts("zero-3e-demo::overlay");
+    assert_eq!(overlay["source_path"]["value"], "overlay.dts");
+    assert_eq!(overlay["stated_path"]["value"], "");
+    assert_eq!(
+        overlay["contract_path"]["value"],
+        "contracts/overlay-dtc.toml"
+    );
+    assert_eq!(overlay["base_name"]["value"], "rk3566-radxa-zero-3e.dtb");
+    assert_eq!(
+        consts("zero-3e-demo::board_overlay")["files"]["value"],
+        "overlays/board.dtbo"
+    );
+
+    // Without a generator that provides board-overlay, the plan says so.
+    std::fs::write(
+        &component,
+        format!(
+            "{original}\n[generate]\ntool = {{ source = \"src\", package = \"hello-rust\" }}\ndescription = \"daemon\"\nargs = [\"tree\", \"@description@\", \"@out@\"]\noutputs = [\"mdev.conf\"]\n\n[[fragments]]\nfrom = {{ generated = \"mdev.conf\" }}\nto = \"/etc/mdev.conf\"\n"
+        ),
+    )
+    .expect("write");
+    let out = plan(dir.path(), &tools);
+    assert!(!out.status.success());
+    let err = String::from_utf8_lossy(&out.stderr);
+    assert!(
+        err.contains(
+            "takes the generated file of the role `board-overlay`; hello-rust provides none"
+        ),
+        "{err}"
+    );
+}

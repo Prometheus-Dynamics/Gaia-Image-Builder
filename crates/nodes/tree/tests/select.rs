@@ -157,10 +157,45 @@ fn nothing_is_guessed_or_replaced() {
             .expect("put")
             .into(),
     };
-    let err = tree_select(&store, None, &one, "board.dtb", &Ctx::new()).expect_err("one file");
+    // One file (a compiled overlay) goes at the one path `files` gives.
+    let placed = tree_select(
+        &store,
+        Some(&base),
+        &one,
+        "overlays/board.dtbo",
+        &Ctx::new(),
+    )
+    .expect("one file");
+    let opened = Store::open(&store).expect("store");
+    let at = placed.object.path_in(&opened).expect("in the store");
+    assert_eq!(
+        std::fs::read(at.join("overlays/board.dtbo")).expect("read"),
+        std::fs::read(root.path().join("built/board.dtb")).expect("read")
+    );
+    assert_eq!(
+        std::fs::read_to_string(at.join("board.dtb")).expect("read"),
+        "mine",
+        "the tree's own file is kept"
+    );
+    let paths: Vec<&str> = placed.entries.iter().map(|e| e.path.as_str()).collect();
+    assert_eq!(paths, ["board.dtb", "overlays/board.dtbo"]);
+    for (files, want) in [
+        (
+            "a.dtbo b.dtbo",
+            "the artifact to select from is one file: `files` is the one path it goes to",
+        ),
+        (
+            "board.dtb=overlays/x.dtbo",
+            "`board.dtb=overlays/x.dtbo` names a path in it; give only where it goes",
+        ),
+    ] {
+        let err = tree_select(&store, None, &one, files, &Ctx::new()).expect_err(files);
+        assert!(err.to_string().contains(want), "{files}: {err}");
+    }
+    let err = tree_select(&store, Some(&base), &one, "board.dtb", &Ctx::new()).expect_err("taken");
     assert!(
         err.to_string()
-            .contains("the artifact to select from is one file, not a tree"),
+            .contains("/board.dtb is already a file in the tree"),
         "{err}"
     );
     fails(None, "  \n ", "no files to select");

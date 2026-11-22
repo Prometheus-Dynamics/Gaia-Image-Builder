@@ -18,7 +18,9 @@ const MODE: u32 = 0o644;
 
 /// `tree` with the files `files` names from `from` (a tree: a build's
 /// directory of outputs), or a tree of only those. `files` is a whitespace-separated list of words: `path` puts the
-/// file at `path` in `from` at the same path, `path=to` puts it at `to`. A
+/// file at `path` in `from` at the same path, `path=to` puts it at `to`.
+/// When `from` is one file (a compiled overlay), `files` is the one path
+/// it goes to. A
 /// file `from` does not have, a path the tree already has, a path named
 /// twice and an empty list are errors: nothing is replaced or guessed.
 #[node(
@@ -41,14 +43,27 @@ pub fn tree_select(
         .object_ref()
         .ok_or_else(|| fail("the tree to select from is not in the store".into()))?;
     let stored = store.path(&object);
-    if !stored.is_dir() {
-        return Err(fail(
-            "the artifact to select from is one file, not a tree".into(),
-        ));
-    }
     let mut key = KeyBuilder::new(NAME, 1);
     let mut sources = Vec::new();
-    for (src, to) in &picks {
+    if stored.is_file() {
+        // One file (a compiled overlay): `files` is the one path it goes to.
+        let [(_, to)] = picks.as_slice() else {
+            return Err(fail(
+                "the artifact to select from is one file: `files` is the one path it goes to"
+                    .into(),
+            ));
+        };
+        if files.contains('=') {
+            return Err(fail(format!(
+                "the artifact to select from is one file: `{}` names a path in it; give only where it goes",
+                files.trim()
+            )));
+        }
+        let bytes = std::fs::read(&stored).map_err(|e| fail(format!("/{to}: {e}")))?;
+        key = key.input(&format!("file {to}"), Digest::of_bytes(&bytes));
+        sources.push((to.clone(), bytes));
+    }
+    for (src, to) in picks.iter().filter(|_| !stored.is_file()) {
         let file = stored.join(src);
         if !file.is_file() {
             return Err(fail(format!("the tree to select from has no file {src}")));

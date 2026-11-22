@@ -1,0 +1,147 @@
+# rpi-ramdisk-boot (see it: a Pi's boot served whole into RAM) with the
+# board's own overlay in boot.img, made from the image's generator: the
+# image's one component with a [generate] writes the overlay's source and
+# names it by the role `board-overlay` ([generate.provides]). It is
+# compiled and proven as slot-boot's is (gaia.devicetree.overlay: dtc -@ as
+# the generator source's compiler contract states, then fdtoverlay onto the
+# board's device tree, the board's `kernel.device_tree`, out of the kernel
+# build's), and placed in boot.img at `board_overlay`
+# (`overlays/<name>.dtbo`), for config.txt's `dtoverlay=<name>` to load.
+#
+# A generated fragment of a shared file ([[fragments]] from
+# `{ generated = ... }`) is the same generator's, and goes into the built
+# tree as any fragment does.
+#
+# Untested on board: the image this recipe makes has not booted.
+version = 1
+name = "rpi-ramdisk-boot-generated"
+description = "rpi-ramdisk-boot with the board overlay the image's generator writes, compiled and proven against the board's device tree, in boot.img."
+
+[stages]
+initramfs = "gaia.initramfs"
+kernel = "gaia.tree.role"
+cpio = "gaia.tree.role"
+device_trees = "gaia.tree.select"
+overlay = "gaia.devicetree.overlay"
+board_overlay = "gaia.tree.select"
+config = "gaia.tree.text"
+cmdline = "gaia.tree.text"
+fat = "gaia.fs.vfat"
+outer = "gaia.tree.text"
+serve = "gaia.tree.file"
+
+[[connects]]
+from = "kernel.tree"
+to = "cpio.tree"
+
+[[connects]]
+from = "initramfs.archive"
+to = "cpio.from"
+
+[[connects]]
+from = "cpio.tree"
+to = "device_trees.tree"
+
+[[connects]]
+from = "device_trees.tree"
+to = "board_overlay.tree"
+
+[[connects]]
+from = "overlay.overlay"
+to = "board_overlay.from"
+
+[[connects]]
+from = "board_overlay.tree"
+to = "config.tree"
+
+[[connects]]
+from = "config.tree"
+to = "cmdline.tree"
+
+[[connects]]
+from = "cmdline.tree"
+to = "fat.tree"
+
+[[connects]]
+from = "outer.tree"
+to = "serve.tree"
+
+[[connects]]
+from = "fat.image"
+to = "serve.file"
+
+[inputs]
+build = ["initramfs.tree"]
+kernel = ["kernel.from"]
+device-trees = ["device_trees.from", "overlay.base"]
+device-tree-name = ["overlay.base_name"]
+generated = ["overlay.source"]
+generator-source = ["overlay.contract"]
+host-tools = ["overlay.tools"]
+"provides.board-overlay" = ["overlay.source_path"]
+
+[outputs]
+overlay = "overlay.overlay"
+boot = "serve.tree"
+boot-image = "fat.image"
+
+[consts]
+"config.path" = "config.txt"
+"cmdline.path" = "cmdline.txt"
+# FAT16: what the firmware was proven to boot from; FAT32 is untried.
+"fat.fat_size" = 16
+"outer.path" = "config.txt"
+"outer.text" = "boot_ramdisk=1\n"
+"serve.path" = "boot.img"
+# No statement of the generator's about the overlay is checked here.
+"overlay.stated_path" = ""
+
+[parameters.kernel_name]
+type = "string"
+default = "kernel8.img"
+description = "The kernel's name in boot.img; config.txt's kernel= names it."
+sets = ["kernel.role"]
+
+[parameters.kernel_path]
+type = "string"
+default = ""
+description = "The kernel's file in the kernel build's output, when it holds more than one (e.g. Image beside Image.gz); empty takes its one file."
+sets = ["kernel.path"]
+
+[parameters.initramfs_name]
+type = "string"
+default = "initramfs.cpio"
+description = "The initramfs's name in boot.img; config.txt's `initramfs <name> followkernel` names it."
+sets = ["cpio.role"]
+
+[parameters.device_trees]
+type = "string"
+description = "The device trees and overlays boot.img holds, out of the kernel build's: whitespace-separated, each `path` (the same path in boot.img) or `path=to`."
+sets = ["device_trees.files"]
+
+[parameters.config]
+type = "string"
+description = "boot.img's config.txt, as the firmware reads it."
+sets = ["config.text"]
+
+[parameters.cmdline]
+type = "string"
+description = "boot.img's cmdline.txt: the kernel command line."
+sets = ["cmdline.text"]
+
+[parameters.size]
+type = "int"
+default = 0
+description = "boot.img's size in bytes; 0 sizes it to the content (see gaia.fs.vfat)."
+sets = ["fat.size"]
+
+[parameters.board_overlay]
+type = "string"
+description = "The compiled board overlay's path in boot.img, e.g. overlays/lemnos-board.dtbo; config.txt's dtoverlay= names it without overlays/ and .dtbo."
+sets = ["board_overlay.files"]
+
+[parameters.overlay_contract]
+type = "string"
+default = "contracts/overlay-dtc.toml"
+description = "The overlay compiler's contract, a file of the generator's source."
+sets = ["overlay.contract_path"]
