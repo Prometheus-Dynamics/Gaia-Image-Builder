@@ -1,0 +1,24 @@
+# A demo product: the ROCK 5C on Buildroot, reached over Ethernet (DHCP) and
+# its serial console. No USB gadget (see the board). The bench product is
+# Atlas's.
+version = 1
+name = "rock-5c-demo"
+
+[sources.buildroot]
+git = "https://gitlab.com/buildroot.org/buildroot.git"
+ref = "2026.02.3"
+
+[components]
+extlinux = "../../components/extlinux-rock-5c/component.toml"
+
+[[images]]
+name = "rock-5c-demo"
+board = "../../boards/rock-5c/board.toml"
+components = ["extlinux"]
+# The board gives the kernel, U-Boot and TF-A; os.fragment the rest.
+os = { provider = "buildroot", source = "buildroot", fragments = ["os.fragment"] }
+recipe = "sd-image"
+budget = "1G"
+
+[images.settings]
+id = "rock-5c-demo"

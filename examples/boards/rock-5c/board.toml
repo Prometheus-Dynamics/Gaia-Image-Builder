@@ -1,0 +1,30 @@
+# Radxa ROCK 5C (RK3588S2) on the RK35xx family: gigabit Ethernet (GMAC1,
+# RTL8211F) and the in-tree device tree, with its USB ports as hosts. No
+# gadget: the board's switched VBUS could drive 5 V out of a port in device
+# mode, so the example stays a host. The product files (gadget, partitions,
+# Lemnos descriptions) live in Atlas. Untested on board.
+version = 1
+extends = "../rk35xx/family.toml"
+name = "rock-5c"
+description = "Radxa ROCK 5C (RK3588S2)"
+
+[target]
+cpu = "cortex-a76.cortex-a55"
+
+[kernel]
+device_tree = "rockchip/rk3588s-rock-5c"
+
+[bootloader]
+defconfig = "rock-5c-rk3588s"
+
+# Each blob is given to U-Boot's make by its name: binman reads the DDR
+# init from ROCKCHIP_TPL.
+[bootloader.blobs]
+ROCKCHIP_TPL = { source = "rkbin", path = "bin/rk35/rk3588_ddr_lp4_2112MHz_lp5_2400MHz_v1.18.bin" }
+
+[bootloader.trusted_firmware]
+platform = "rk3588"
+
+# The maskrom loader is rkbin's boot_merger output for this ini.
+[flash.files]
+loader_ini = { source = "rkbin", path = "RKBOOT/RK3588MINIALL.ini" }
