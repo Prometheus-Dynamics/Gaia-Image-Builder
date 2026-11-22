@@ -15,10 +15,11 @@
 #
 # What it emulates, per boot, from the image's first FAT partition:
 # - config.txt (tryboot.txt on a tryboot), its `include` lines and the
-#   [all], [cm5], [pi5], [tryboot] and [boot_count&N] sections; other
-#   sections are skipped. The boot count those sections test stays at
-#   --boot-count (0) on every boot: the virt machine has no firmware
-#   counter, and nothing there could clear one, so none is given to the OS;
+#   [all], [cm5], [pi5], [tryboot], [boot_count&N], [boot_count>N],
+#   [boot_count<N] and [boot_count=N] sections; other sections are skipped.
+#   In the default profile the boot count those sections test stays at
+#   --boot-count (0) on every boot and none is given to the OS; the board
+#   profile counts boots as the firmware does (see below);
 # - os_prefix, kernel= (default kernel_2712.img, else kernel8.img),
 #   cmdline= (default cmdline.txt) and `initramfs <file> [followkernel]`;
 #   device_tree= and dtoverlay= are not applied (the device tree is virt's),
@@ -81,6 +82,27 @@
 # "unknown", from the configuration the kernel embeds (CONFIG_IKCONFIG;
 # unknown without it): systemd's SystemCallFilter= needs it on.
 #
+# Board profile (--profile board): the parts of a Raze-like board that the
+# virt machine above leaves out, each from the board's own facts:
+# - the disk is an eMMC (QEMU's emmc on sdhci-pci), as the CM5's is: the
+#   kernel makes mmcblk0 and the hardware areas mmcblk0boot0, mmcblk0boot1
+#   (4 MiB each, read-only) and mmcblk0rpmb (4 MiB, a character device),
+#   all under one controller. The image is the user area. QEMU needs that
+#   area's size to be a power of two, so it is the smallest one that holds
+#   the image (--disk-size gives a larger one), not the board's; the extra
+#   is past the image's partitions. The controller is on PCI, so the PCI
+#   host's node moves to the boot source's path (as the virtio disk's does
+#   in the default profile) and the eMMC sits under it;
+# - /chosen/bootloader also has, as the board's firmware sets them:
+#   count, the boot's number since power-on (1 on the run's first boot,
+#   counting every restart; --boot-count N starts it at N + 1), which the
+#   [boot_count...] sections test too; rsts, 0x1000 on the first boot (a
+#   power-on) and 0x20 after a restart; and partition, the number of the
+#   FAT partition booted. These are the values Atlas read on Raze #1 and #2;
+# - config.txt's kernel_watchdog_timeout is read and recorded per boot.
+# The default profile (--profile virt) is unchanged: a virtio disk, and no
+# count, rsts or partition in the device tree.
+#
 # The image is never written: its contents are copied (sparse) to
 # <state>/disk.img once, and the guest writes that copy. --fresh copies again.
 # Nothing is added to the copy unless asked: --ssh-key FILE puts FILE at
@@ -89,15 +111,18 @@
 #
 # Options:
 #   --state DIR     work directory (default: ./qemu-<image name>)
+#   --profile P     virt (default) or board (see above)
 #   --fresh         start again from the image
 #   --kernel FILE   boot this kernel instead of the image's (the board's
 #                   kernel with the virt machine's drivers, for a board image)
-#   --disk-size N   grow the disk copy to N (truncate syntax, e.g. 16G)
+#   --disk-size N   grow the disk copy to N (truncate syntax, e.g. 16G); with
+#                   --profile board the eMMC's user area, a power of two
 #   --net MODE      auto, tap, netns or user (see above)
 #   --mac MAC       the guest NIC's MAC
 #   --serial HEX    the board serial number in the device tree
 #   --ssh-key FILE  a public key for board/authorized_keys (default: none)
-#   --boot-count N  the boot count the config sections test (default 0)
+#   --boot-count N  the boot count the config sections test (default 0);
+#                   with --profile board, the count before the first boot
 #   --boot-mode N   the firmware's boot mode (default 1)
 #   --hostfwd H:G   with --net user: forward host TCP port H to guest port
 #                   G (repeatable; replaces the defaults)
@@ -131,6 +156,11 @@ usage() { sed -n '2,/^set -euo/{/^set -euo/d;s/^# \{0,1\}//;p}' "$0"; }
 
 args_given=("$@")
 in_netns=0
+profile=virt
+# The CM5's eMMC hardware areas (Atlas, Raze #1 and #2: mmcblk0boot0 and
+# mmcblk0boot1 4 MiB block devices, mmcblk0rpmb 4 MiB).
+emmc_boot=$((4 << 20))
+emmc_rpmb=$((4 << 20))
 state=""
 fresh=0
 kernel_override=""
@@ -159,6 +189,7 @@ image=""
 while [[ $# -gt 0 ]]; do
 	case "$1" in
 	--state) state="$2"; shift 2 ;;
+	--profile) profile="$2"; shift 2 ;;
 	--fresh) fresh=1; shift ;;
 	--kernel) kernel_override="$2"; shift 2 ;;
 	--disk-size) disk_size="$2"; shift 2 ;;
@@ -212,6 +243,14 @@ for n in "${trial_at[@]}"; do
 done
 [[ ${#trial_at[@]} -eq 0 || -n $trial_append ]] || { echo "--trial-at needs --trial-append" >&2; exit 2; }
 [[ $boot_mode =~ ^[0-9]+$ ]] || { echo "--boot-mode is a number" >&2; exit 2; }
+case "$profile" in
+virt | board) ;;
+*) echo "--profile is virt or board, not $profile" >&2; exit 2 ;;
+esac
+# Where the image starts in the disk file: after the eMMC's two boot areas
+# and its RPMB area, the order QEMU's emmc keeps them in its backing file.
+user_off=0
+[[ $profile == virt ]] || user_off=$((2 * emmc_boot + emmc_rpmb))
 qemu=${QEMU:-qemu-system-aarch64}
 if [[ $print_only -eq 0 ]]; then
 	command -v "$qemu" > /dev/null || { echo "missing $qemu (Fedora: qemu-system-aarch64-core)" >&2; exit 2; }
@@ -260,23 +299,60 @@ if [[ $net == netns && $print_only -eq 0 && $dtb_only -eq 0 ]]; then
 fi
 
 new_copy=0
+# A copy is laid out for its profile (the image at 0, or after the eMMC's
+# hardware areas): one made for the other is not booted.
+if [[ $fresh -eq 0 && -e $disk && $(cat "$state/disk.profile" 2> /dev/null || echo virt) != "$profile" ]]; then
+	echo "$disk was made for --profile $(cat "$state/disk.profile" 2> /dev/null || echo virt): add --fresh to copy the image again for --profile $profile" >&2
+	exit 2
+fi
 if [[ $fresh -eq 1 || ! -e $disk ]]; then
 	new_copy=1
-	rm -f "$disk" "$state/tryboot-next"
-	case "$image" in
-	*.xz) xz -dc "$image" | cp --sparse=always /dev/stdin "$disk" ;;
-	*) cp --sparse=always "$image" "$disk" ;;
-	esac
+	rm -f "$disk" "$state/tryboot-next" "$state/disk.profile"
+	if [[ $user_off -eq 0 ]]; then
+		case "$image" in
+		*.xz) xz -dc "$image" | cp --sparse=always /dev/stdin "$disk" ;;
+		*) cp --sparse=always "$image" "$disk" ;;
+		esac
+	else
+		# The hardware areas first (empty), then the image as the user area.
+		truncate -s "$user_off" "$disk"
+		case "$image" in
+		*.xz) xz -dc "$image" ;;
+		*) cat "$image" ;;
+		esac | dd of="$disk" bs=1M seek=$((user_off >> 20)) conv=sparse,notrunc status=none
+	fi
+	echo "$profile" > "$state/disk.profile"
 fi
-[[ -z $disk_size ]] || truncate -s ">$disk_size" "$disk"
+if [[ $user_off -eq 0 ]]; then
+	[[ -z $disk_size ]] || truncate -s ">$disk_size" "$disk"
+else
+	# The eMMC's user area: a power of two (QEMU's rule), at least the image.
+	have=$(($(stat -c %s "$disk") - user_off))
+	if [[ -n $disk_size ]]; then
+		want=$(numfmt --from=iec "${disk_size%B}")
+		[[ $((want & (want - 1))) -eq 0 ]] || { echo "--disk-size $disk_size: an eMMC's user area is a power of two (QEMU)" >&2; exit 2; }
+		[[ $want -ge $have ]] || { echo "--disk-size $disk_size is smaller than the image ($have bytes)" >&2; exit 2; }
+	else
+		want=1
+		while [[ $want -lt $have ]]; do want=$((want * 2)); done
+	fi
+	truncate -s $((user_off + want)) "$disk"
+	emmc_user=$want
+fi
 [[ $tryboot -eq 0 ]] || : > "$state/tryboot-next"
 
-# The byte offset of the first FAT partition (MBR types b, c, e), as the
-# firmware boots from it.
+# The byte offset in the disk file of the first FAT partition (MBR types b,
+# c, e), as the firmware boots from it, and its number: "<offset> <n>".
 fat_offset() {
-	sfdisk -d "$disk" | awk -F'[=,]' '
+	local table=$disk
+	if [[ $user_off -ne 0 ]]; then
+		table="$state/user-head.img"
+		dd if="$disk" of="$table" bs=1M skip=$((user_off >> 20)) count=1 status=none
+	fi
+	sfdisk -d "$table" 2> /dev/null | awk -F'[=,]' -v off="$user_off" '
+		/^\// { n++ }
 		/^\// && $0 ~ /type= *(b|c|e)([^0-9a-f]|$)/ {
-			for (i = 1; i <= NF; i++) if ($i ~ /start/) { gsub(/ /, "", $(i + 1)); print $(i + 1) * 512; exit }
+			for (i = 1; i <= NF; i++) if ($i ~ /start/) { gsub(/ /, "", $(i + 1)); print off + $(i + 1) * 512, n; exit }
 		}'
 }
 
@@ -304,6 +380,18 @@ read_config() {
 				cfg_on=0
 				[[ $mask =~ ^[0-9]+$ && $((count & mask)) -ne 0 ]] && cfg_on=1
 				;;
+			"[boot_count>"*"]" | "[boot_count<"*"]" | "[boot_count="*"]")
+				local op=${line:11:1} n=${line:12}
+				n=${n%\]}
+				cfg_on=0
+				if [[ $n =~ ^[0-9]+$ ]]; then
+					case "$op" in
+					">") [[ $count -gt $n ]] && cfg_on=1 ;;
+					"<") [[ $count -lt $n ]] && cfg_on=1 ;;
+					"=") [[ $count -eq $n ]] && cfg_on=1 ;;
+					esac
+				fi
+				;;
 			*) cfg_on=0 ;;
 			esac
 			continue
@@ -325,6 +413,7 @@ read_config() {
 plan_boot() {
 	local config=config.txt settings key value prefix="" kernel="" cmdline=cmdline.txt initramfs="" arg out
 	local overlay_prefix=overlays/ name overlays=()
+	boot_watchdog=""
 	[[ $1 -eq 0 ]] || config=tryboot.txt
 	cfg_on=1
 	settings=$(read_config "$config" "$1")
@@ -338,6 +427,7 @@ plan_boot() {
 		cmdline) cmdline=$value ;;
 		initramfs) initramfs=${value%% *} ;;
 		overlay_prefix) overlay_prefix=$value ;;
+		kernel_watchdog_timeout) boot_watchdog=$value ;;
 		dtoverlay)
 			name=${value%%[,:]*}
 			[[ -z $name ]] || overlays+=("$name")
@@ -401,9 +491,14 @@ machine_args() {
 	fi
 	printf '%s\n' -M virt,gic-version=3 -cpu "$cpu" -smp "$smp" -m "$mem" \
 		-accel tcg,thread=multi -nographic -no-reboot \
-		-drive "if=none,id=disk0,format=raw,file=$disk,discard=unmap" \
-		-device virtio-blk-device,drive=disk0 \
-		-netdev "$netdev" -device "virtio-net-pci,netdev=net0,mac=$mac" \
+		-drive "if=none,id=disk0,format=raw,file=$disk,discard=unmap"
+	if [[ $profile == board ]]; then
+		printf '%s\n' -device sdhci-pci \
+			-device "emmc,drive=disk0,boot-partition-size=$emmc_boot,rpmb-partition-size=$emmc_rpmb"
+	else
+		printf '%s\n' -device virtio-blk-device,drive=disk0
+	fi
+	printf '%s\n' -netdev "$netdev" -device "virtio-net-pci,netdev=net0,mac=$mac" \
 		-device virtio-rng-pci
 	[[ $watchdog -eq 0 ]] || printf '%s\n' -device i6300esb
 }
@@ -461,12 +556,25 @@ make_dtb() {
 	fdtput -p -t x "$state/virt.dtb" /chosen/bootloader tryboot "$1"
 	fdtput -t x "$state/virt.dtb" /chosen/bootloader boot-mode "$(printf %x "$2")"
 	fdtput -t s "$state/virt.dtb" / serial-number "$serial"
+	if [[ $profile == board ]]; then
+		fdtput -t x "$state/virt.dtb" /chosen/bootloader count "$(printf %x "$count")"
+		fdtput -t x "$state/virt.dtb" /chosen/bootloader rsts "$(printf %x "$rsts")"
+		fdtput -t x "$state/virt.dtb" /chosen/bootloader partition "$(printf %x "$fat_part")"
+	fi
 	emulate_marker
 	[[ -n $3 ]] || return 0
-	base=$(disk_transport)
-	[[ -n $base ]] || { echo "QEMU did not say which virtio-mmio transport the disk is on" >&2; return 1; }
+	local node
+	if [[ $profile == board ]]; then
+		# The eMMC's controller is on PCI: the PCI host's node moves.
+		node=$(fdtget -l "$state/virt.dtb" / | grep -m1 '^pcie@' || true)
+		[[ -n $node ]] || { echo "the virt device tree has no PCI host node" >&2; return 1; }
+	else
+		base=$(disk_transport)
+		[[ -n $base ]] || { echo "QEMU did not say which virtio-mmio transport the disk is on" >&2; return 1; }
+		node="virtio_mmio@$base"
+	fi
 	dtc -q -I dtb -O dts -o "$state/virt.dts" "$state/virt.dtb"
-	python3 - "$state/virt.dts" "virtio_mmio@$base" "$3" <<'MOVE'
+	python3 - "$state/virt.dts" "$node" "$3" <<'MOVE'
 import sys
 path, node, to = sys.argv[1], sys.argv[2], sys.argv[3]
 lines = open(path).read().split("\n")
@@ -494,6 +602,11 @@ MOVE
 	# Where the guest will look for it: there, and the disk's.
 	local compatible reg
 	compatible=$(fdtget "$state/virt.dtb" "$3" compatible 2> /dev/null || true)
+	if [[ $profile == board ]]; then
+		[[ $compatible == pci-host-ecam-generic ]] && return 0
+		echo "the device tree has no PCI host node (the eMMC's controller) at $3: compatible '$compatible'" >&2
+		return 1
+	fi
 	reg=$(fdtget -t x "$state/virt.dtb" "$3" reg 2> /dev/null || true)
 	if [[ $compatible != "virtio,mmio" || " $reg " != *" $base "* ]]; then
 		echo "the device tree has no virtio-mmio node for the disk (transport $base) at $3: compatible '$compatible', reg '$reg'" >&2
@@ -501,8 +614,9 @@ MOVE
 	fi
 }
 
-fat="$disk@@$(fat_offset)"
-[[ $fat != "$disk@@" ]] || { echo "$image has no FAT boot partition" >&2; exit 1; }
+read -r fat_at fat_part < <(fat_offset) || true
+[[ -n ${fat_at:-} ]] || { echo "$image has no FAT boot partition" >&2; exit 1; }
+fat="$disk@@$fat_at"
 
 if [[ $new_copy -eq 1 && -n $ssh_key && $ssh_key != none ]]; then
 	[[ -r $ssh_key ]] || { echo "cannot read --ssh-key $ssh_key" >&2; exit 2; }
@@ -544,6 +658,13 @@ kernel_seccomp() {
 	fi
 }
 while :; do
+	if [[ $profile == board ]]; then
+		# The firmware's count of boots since power-on, and the reset status:
+		# a power-on first, a restart after.
+		count=$((boot_count + boots + 1))
+		rsts=0x20
+		[[ $boots -gt 0 ]] || rsts=0x1000
+	fi
 	this_tryboot=0
 	if [[ -e $state/tryboot-next ]]; then
 		this_tryboot=1
@@ -564,6 +685,13 @@ while :; do
 		echo "tryboot: $this_tryboot"
 		echo "boot count: $count"
 		echo "boot mode: $boot_mode"
+		echo "profile: $profile"
+		if [[ $profile == board ]]; then
+			echo "disk: emmc, user area $emmc_user bytes, boot0 and boot1 $emmc_boot bytes, rpmb $emmc_rpmb bytes"
+			echo "rsts: $rsts"
+			echo "partition: $fat_part"
+			echo "kernel_watchdog_timeout: ${boot_watchdog:-none}"
+		fi
 		echo "boot source: ${boot_from:-none}"
 		echo "from: $boot_source"
 		echo "kernel: $boot_kernel"
@@ -591,6 +719,11 @@ while :; do
 		echo "kernel $boot_kernel sha256 $(sha256sum < "$boot_kernel" | cut -d' ' -f1) ($whose)"
 		echo "device tree $state/virt.dtb sha256 $(sha256sum < "$state/virt.dtb" | cut -d' ' -f1) (the virt machine's; not the image's)"
 		echo "$marker_note"
+		if [[ $profile == board ]]; then
+			echo "disk: QEMU emmc on sdhci-pci, user area $emmc_user bytes (a power of two; not the board's size), boot0/boot1 $emmc_boot bytes, rpmb $emmc_rpmb bytes; its PCI host at the boot source's path ${boot_from:-(none named)}"
+			echo "firmware: count $count, rsts $rsts, partition $fat_part, boot-mode $boot_mode, tryboot $this_tryboot"
+			echo "kernel_watchdog_timeout: ${boot_watchdog:-none} in $boot_config (recorded; not armed by this runner)"
+		fi
 		if [[ $watchdog -eq 1 ]]; then
 			echo "watchdog: i6300esb attached"
 		else

@@ -371,6 +371,228 @@ fn the_disks_node_is_at_the_boot_sources_path() {
     assert!(!out.status.success(), "a count was given");
 }
 
+/// The board profile: the disk is an eMMC whose user area is the image,
+/// after the two boot areas and the RPMB area (4 MiB each), a power of two
+/// in size; the PCI host it sits on is at the boot source's path; and
+/// /chosen/bootloader has the firmware's count (1 on the first boot), rsts
+/// (0x1000, a power-on) and the FAT's partition number.
+#[test]
+fn the_board_profile_gives_an_emmc_and_the_firmwares_facts() {
+    if !tools_here(&[
+        "mformat",
+        "mcopy",
+        "mmd",
+        "mtype",
+        "sfdisk",
+        "fdtput",
+        "fdtget",
+        "dtc",
+        "python3",
+        "qemu-system-aarch64",
+    ]) {
+        return;
+    }
+    let dir = tempfile::tempdir().expect("tempdir");
+    let disk = disk(dir.path());
+    let (ok, out) = runner(
+        dir.path(),
+        &disk,
+        &["--profile", "board", "--fresh", "--dtb"],
+    );
+    assert!(ok, "{out}");
+    let dtb = out
+        .lines()
+        .last()
+        .expect("the device tree's path")
+        .to_string();
+    let get = |args: &[&str]| {
+        let out = Command::new("fdtget")
+            .arg(&dtb)
+            .args(args)
+            .output()
+            .expect("fdtget");
+        String::from_utf8_lossy(&out.stdout).trim().to_string()
+    };
+    assert_eq!(
+        get(&["/soc@107c000000/mmc@fff000", "compatible"]),
+        "pci-host-ecam-generic"
+    );
+    assert_eq!(get(&["-t", "x", "/chosen/bootloader", "count"]), "1");
+    assert_eq!(get(&["-t", "x", "/chosen/bootloader", "rsts"]), "1000");
+    assert_eq!(get(&["-t", "x", "/chosen/bootloader", "partition"]), "1");
+    assert_eq!(get(&["-t", "x", "/chosen/bootloader", "boot-mode"]), "1");
+
+    // The copy: 12 MiB of hardware areas, then the image, in a 64 MiB user
+    // area (the 48 MiB image rounded up to a power of two).
+    let copy = dir.path().join("state/disk.img");
+    let bytes = std::fs::read(&copy).expect("the copy");
+    let image = std::fs::read(&disk).expect("the image");
+    assert_eq!(bytes.len(), (12 << 20) + (64 << 20));
+    assert!(
+        bytes[..12 << 20].iter().all(|b| *b == 0),
+        "the hardware areas are empty"
+    );
+    assert!(
+        bytes[12 << 20..(12 << 20) + image.len()] == image[..],
+        "the user area is the image"
+    );
+    assert!(bytes[(12 << 20) + image.len()..].iter().all(|b| *b == 0));
+
+    // The machine: QEMU's eMMC, with the board's hardware areas, on PCI.
+    let (ok, out) = runner(dir.path(), &disk, &["--profile", "board", "--print"]);
+    assert!(ok, "{out}");
+    // The QEMU line is shell-quoted (printf %q escapes commas).
+    let out = out.replace("\\,", ",");
+    for want in [
+        "-device sdhci-pci",
+        "-device emmc,drive=disk0,boot-partition-size=4194304,rpmb-partition-size=4194304",
+        "kernel_watchdog_timeout: 15",
+        "rsts: 0x1000",
+        "partition: 1",
+        "boot count: 1",
+        &format!("user area {} bytes", 64 << 20),
+    ] {
+        assert!(out.contains(want), "{want}: {out}");
+    }
+    assert!(!out.contains("virtio-blk-device"), "{out}");
+
+    // A copy made for one profile is not booted with the other.
+    let (ok, out) = runner(dir.path(), &disk, &["--print"]);
+    assert!(
+        !ok && out.contains("was made for --profile board: add --fresh"),
+        "{out}"
+    );
+    let (ok, out) = runner(dir.path(), &disk, &["--fresh", "--print"]);
+    assert!(ok && out.contains("virtio-blk-device"), "{out}");
+    assert_eq!(
+        std::fs::metadata(&copy).expect("the copy").len(),
+        image.len() as u64
+    );
+    let (ok, out) = runner(dir.path(), &disk, &["--profile", "board", "--print"]);
+    assert!(
+        !ok && out.contains("was made for --profile virt: add --fresh"),
+        "{out}"
+    );
+
+    // Refused: another profile, and a user area that is not a power of two
+    // or does not hold the image.
+    for (args, want) in [
+        (
+            &["--profile", "pi", "--print"][..],
+            "--profile is virt or board, not pi",
+        ),
+        (
+            &[
+                "--profile",
+                "board",
+                "--fresh",
+                "--disk-size",
+                "96M",
+                "--print",
+            ][..],
+            "is a power of two",
+        ),
+        (
+            &[
+                "--profile",
+                "board",
+                "--fresh",
+                "--disk-size",
+                "32M",
+                "--print",
+            ][..],
+            "is smaller than the image",
+        ),
+    ] {
+        let (ok, out) = runner(dir.path(), &disk, args);
+        assert!(!ok && out.contains(want), "{args:?}: {out}");
+    }
+    let (ok, out) = runner(
+        dir.path(),
+        &disk,
+        &[
+            "--profile",
+            "board",
+            "--fresh",
+            "--disk-size",
+            "128M",
+            "--print",
+        ],
+    );
+    assert!(
+        ok && out.contains(&format!("user area {} bytes", 128 << 20)),
+        "{out}"
+    );
+}
+
+/// The [boot_count...] sections: & tests bits, and >, < and = compare, in
+/// both profiles. The board profile's count is the boot's number since
+/// power-on, so --boot-count N gives N + 1 on its first boot.
+#[test]
+fn boot_count_sections_compare_as_the_firmware_does() {
+    if !tools_here(&["mformat", "mcopy", "mmd", "mtype", "sfdisk"]) {
+        return;
+    }
+    let dir = tempfile::tempdir().expect("tempdir");
+    let disk = disk(dir.path());
+    let slot = |out: &str| {
+        out.lines()
+            .find_map(|l| l.strip_prefix("cmdline: "))
+            .unwrap_or_default()
+            .split_whitespace()
+            .find_map(|w| w.strip_prefix("os.slot="))
+            .unwrap_or_default()
+            .to_string()
+    };
+    for (section, count, virt, board) in [
+        ("[boot_count&4]", "3", "s0", "s1"),
+        ("[boot_count&4]", "4", "s1", "s1"),
+        ("[boot_count>3]", "3", "s0", "s1"),
+        ("[boot_count>3]", "2", "s0", "s0"),
+        ("[boot_count<3]", "2", "s1", "s0"),
+        ("[boot_count<3]", "3", "s0", "s0"),
+        ("[boot_count=4]", "4", "s1", "s0"),
+        ("[boot_count=4]", "3", "s0", "s1"),
+        ("[boot_count>x]", "9", "s0", "s0"),
+    ] {
+        let config = format!(
+            "kernel_watchdog_timeout=15\ninclude default.txt\n{section}\ninclude previous.txt\n[all]\nkernel=kernel8.img\ncmdline=cmdline.txt\ninitramfs initramfs.cpio followkernel\ndevice_tree=board.dtb\ndtoverlay=lemnos-board\n"
+        );
+        let file = dir.path().join("config.txt");
+        std::fs::write(&file, config).expect("write");
+        run(
+            "mcopy",
+            &[
+                "-o",
+                "-i",
+                &format!("{}@@1M", disk.display()),
+                file.to_str().expect("utf-8"),
+                "::config.txt",
+            ],
+        );
+        for (profile, want) in [("virt", virt), ("board", board)] {
+            let (ok, out) = runner(
+                dir.path(),
+                &disk,
+                &[
+                    "--profile",
+                    profile,
+                    "--fresh",
+                    "--boot-count",
+                    count,
+                    "--print",
+                ],
+            );
+            assert!(ok, "{out}");
+            assert_eq!(
+                slot(&out),
+                want,
+                "{section} --boot-count {count} --profile {profile}: {out}"
+            );
+        }
+    }
+}
+
 /// The board overlay's marker reaches /lemnos of the virt tree from the
 /// dtoverlay= the boot's config names, and only the marker: a bay whose
 /// overlay has no marker, or whose overlay file is missing, gets none, so
