@@ -25,6 +25,11 @@ pub struct Component {
     /// Files put into the image.
     #[serde(default)]
     pub install: Vec<Install>,
+    /// The component's parts of files several owners share: each is
+    /// concatenated with the others' into one file, in the order the
+    /// product gives (`[[images.assembled]]`).
+    #[serde(default)]
+    pub fragments: Vec<Fragment>,
     /// Services enabled in the image.
     #[serde(default)]
     pub services: Vec<Service>,
@@ -198,6 +203,20 @@ pub struct Install {
     pub mode: Option<Mode>,
     pub owner: Option<String>,
     pub group: Option<String>,
+}
+
+/// The component's part of a file several owners share (`/etc/mdev.conf`,
+/// or any configuration with no `.d` directory): the file's text is the
+/// parts of the owners the product's `[[images.assembled]]` names, in its
+/// order. The assembled file's mode and owner are the OS's file's, or root's
+/// and 0644 when the OS has none.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Fragment {
+    /// Where the part comes from, as an install's `from`; not a link.
+    pub from: InstallFrom,
+    /// The shared file: an absolute path in the image.
+    pub to: String,
 }
 
 /// Where an installed file comes from.
@@ -511,102 +530,80 @@ impl Component {
             }
         }
         let declared: Option<Vec<String>> = component.generate.as_ref().map(|g| g.outputs.clone());
+        let has_build = component.build.is_some();
         for (index, install) in component.install.iter_mut().enumerate() {
             let key = format!("install[{index}]");
-            match &mut install.from {
-                InstallFrom::Built(_) if component.build.is_none() => {
+            if let InstallFrom::Link(target) = &install.from {
+                if target.is_empty() {
                     return Err(Error::new(
                         path,
-                        format!("{key}.from"),
-                        "names a build output, but there is no [build]",
+                        format!("{key}.from.link"),
+                        "a link needs a target",
                     ));
                 }
-                InstallFrom::Built(_) => {}
-                InstallFrom::Link(target) => {
-                    if target.is_empty() {
-                        return Err(Error::new(
-                            path,
-                            format!("{key}.from.link"),
-                            "a link needs a target",
-                        ));
-                    }
-                    if install.mode.is_some() {
-                        return Err(Error::new(
-                            path,
-                            format!("{key}.mode"),
-                            "a link has no mode of its own",
-                        ));
-                    }
-                }
-                InstallFrom::File(file) => {
-                    if let FileRef::Input { name } = file
-                        && !is_input_name(name)
-                    {
-                        return Err(Error::new(
-                            path,
-                            format!("{key}.from.input"),
-                            format!(
-                                "`{name}` is not an input name: lowercase letters, digits and `-`, like `bench-key`"
-                            ),
-                        ));
-                    }
-                    if let FileRef::Generated { path: generated } = file {
-                        let top = generated.split('/').next().unwrap_or_default();
-                        match &declared {
-                            None => {
-                                return Err(Error::new(
-                                    path,
-                                    format!("{key}.from.generated"),
-                                    "names a generated file, but there is no [generate]",
-                                ));
-                            }
-                            Some(outputs) if !outputs.iter().any(|output| output == top) => {
-                                return Err(Error::new(
-                                    path,
-                                    format!("{key}.from.generated"),
-                                    format!(
-                                        "`{generated}` is in no declared output; [generate] declares {}",
-                                        outputs.join(", ")
-                                    ),
-                                ));
-                            }
-                            Some(_) => {}
-                        }
-                    }
-                    if let FileRef::Description { name } = file
-                        && !is_input_name(name)
-                    {
-                        return Err(Error::new(
-                            path,
-                            format!("{key}.from.description"),
-                            format!(
-                                "`{name}` is not a description's name: lowercase letters, digits and `-`"
-                            ),
-                        ));
-                    }
-                    file.resolve(dir);
-                    if let FileRef::Local { file } = file {
-                        crate::common::check_exists(
-                            path,
-                            &format!("{key}.from.file"),
-                            file.path(),
-                        )?;
-                    }
-                    if let Some(name) = file.source() {
-                        check_source(
-                            path,
-                            &format!("{key}.from.source"),
-                            name,
-                            component.sources.keys(),
-                        )?;
-                    }
+                if install.mode.is_some() {
+                    return Err(Error::new(
+                        path,
+                        format!("{key}.mode"),
+                        "a link has no mode of its own",
+                    ));
                 }
             }
+            let file_in = FromChecks {
+                path,
+                dir,
+                has_build,
+                declared: &declared,
+                sources: &component.sources,
+            };
+            file_in.check(&key, &mut install.from)?;
             if !install.to.starts_with('/') {
                 return Err(Error::new(
                     path,
                     format!("{key}.to"),
                     "a path in the image is absolute",
+                ));
+            }
+        }
+        let mut shared = std::collections::BTreeSet::new();
+        for (index, fragment) in component.fragments.iter_mut().enumerate() {
+            let key = format!("fragments[{index}]");
+            if matches!(fragment.from, InstallFrom::Link(_)) {
+                return Err(Error::new(
+                    path,
+                    format!("{key}.from"),
+                    "a fragment is a file's text, not a link",
+                ));
+            }
+            let file_in = FromChecks {
+                path,
+                dir,
+                has_build,
+                declared: &declared,
+                sources: &component.sources,
+            };
+            file_in.check(&key, &mut fragment.from)?;
+            let to = &fragment.to;
+            if !to.starts_with('/')
+                || to.ends_with('/')
+                || to
+                    .split('/')
+                    .skip(1)
+                    .any(|part| part.is_empty() || part == "." || part == "..")
+            {
+                return Err(Error::new(
+                    path,
+                    format!("{key}.to"),
+                    format!("`{to}` is not an absolute path of a file in the image"),
+                ));
+            }
+            if !shared.insert(to.clone()) {
+                return Err(Error::new(
+                    path,
+                    format!("{key}.to"),
+                    format!(
+                        "{to} has another fragment of this component; a component gives one part of a file"
+                    ),
                 ));
             }
         }
@@ -630,5 +627,96 @@ impl Component {
             .iter()
             .map(|(name, source)| (format!("{}.{name}", self.name), source.want()))
             .collect()
+    }
+}
+
+/// What a `from` is checked against: the component file, its directory,
+/// whether it has a build, its generator's outputs and its sources.
+struct FromChecks<'a> {
+    path: &'a Path,
+    dir: &'a Path,
+    has_build: bool,
+    declared: &'a Option<Vec<String>>,
+    sources: &'a BTreeMap<String, Source>,
+}
+
+impl FromChecks<'_> {
+    /// Checks `from` (at `key`) and resolves a file beside the component.
+    fn check(&self, key: &str, from: &mut InstallFrom) -> Result<(), Error> {
+        match from {
+            InstallFrom::Built(_) if !self.has_build => {
+                return Err(Error::new(
+                    self.path,
+                    format!("{key}.from"),
+                    "names a build output, but there is no [build]",
+                ));
+            }
+            InstallFrom::Built(_) => {}
+            InstallFrom::Link(_) => {}
+            InstallFrom::File(file) => {
+                if let FileRef::Input { name } = file
+                    && !is_input_name(name)
+                {
+                    return Err(Error::new(
+                        self.path,
+                        format!("{key}.from.input"),
+                        format!(
+                            "`{name}` is not an input name: lowercase letters, digits and `-`, like `bench-key`"
+                        ),
+                    ));
+                }
+                if let FileRef::Generated { path: generated } = file {
+                    let top = generated.split('/').next().unwrap_or_default();
+                    match self.declared {
+                        None => {
+                            return Err(Error::new(
+                                self.path,
+                                format!("{key}.from.generated"),
+                                "names a generated file, but there is no [generate]",
+                            ));
+                        }
+                        Some(outputs) if !outputs.iter().any(|output| output == top) => {
+                            return Err(Error::new(
+                                self.path,
+                                format!("{key}.from.generated"),
+                                format!(
+                                    "`{generated}` is in no declared output; [generate] declares {}",
+                                    outputs.join(", ")
+                                ),
+                            ));
+                        }
+                        Some(_) => {}
+                    }
+                }
+                if let FileRef::Description { name } = file
+                    && !is_input_name(name)
+                {
+                    return Err(Error::new(
+                        self.path,
+                        format!("{key}.from.description"),
+                        format!(
+                            "`{name}` is not a description's name: lowercase letters, digits and `-`"
+                        ),
+                    ));
+                }
+                file.resolve(self.dir);
+                if let FileRef::Local { file } = file {
+                    crate::common::check_exists(
+                        self.path,
+                        &format!("{key}.from.file"),
+                        file.path(),
+                    )?;
+                }
+                if let Some(name) = file.source() {
+                    check_source(
+                        self.path,
+                        &format!("{key}.from.source"),
+                        name,
+                        self.sources.keys(),
+                    )?;
+                }
+            }
+        }
+        Ok(())
     }
 }

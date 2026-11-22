@@ -17,6 +17,9 @@
 //! - **`gaia.tree.services`**: the units components enable, as the links
 //!   `systemctl enable` makes, read from each unit's `[Install]` section in
 //!   the tree the other layers merge into.
+//! - **`gaia.tree.assemble`**: one file made of several owners' parts
+//!   (the OS's file, components' fragments) in a stated order, refusing two
+//!   rules of one name. Gives a layer that replaces the OS's file.
 //! - **`gaia.tree.merge`**: layers into one tree, in order. The node takes
 //!   them as a fan-in (`layers0`, `layers1`, ...), one edge per layer;
 //!   [`merge_layers`] takes a slice. Two layers
@@ -37,6 +40,7 @@
 
 mod accounts;
 mod artifact;
+mod assemble;
 mod by_role;
 mod cmdline;
 mod file;
@@ -56,6 +60,7 @@ mod under;
 mod walk;
 
 pub use accounts::tree_accounts;
+pub use assemble::{OS_PART, OWNER as ASSEMBLED_OWNER, assemble, tree_assemble};
 pub use by_role::{Record, RecordRole, placements, records, tree_by_role};
 pub use cmdline::{
     assemble as cmdline_assemble, cmdline, names_slot as cmdline_names_slot, root_hash_of,
@@ -85,7 +90,7 @@ use gaia_store::Digest;
 use gaia_types::Tree;
 
 /// The nodes, for a registry.
-pub const NODES: [&NodeRecord; 19] = [
+pub const NODES: [&NodeRecord; 20] = [
     &artifact::TREE_ARTIFACT_NODE,
     &generate_image::GENERATE_IMAGE_NODE,
     &generate_image::GENERATE_TREE_NODE,
@@ -104,6 +109,7 @@ pub const NODES: [&NodeRecord; 19] = [
     &links::TREE_LINKS_NODE,
     &accounts::TREE_ACCOUNTS_NODE,
     &services::TREE_SERVICES_NODE,
+    &assemble::TREE_ASSEMBLE_NODE,
     &merge::TREE_MERGE_NODE,
 ];
 

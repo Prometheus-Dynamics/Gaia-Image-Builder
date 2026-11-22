@@ -2180,6 +2180,8 @@ fn image_os(
             boot_layers.push(under(g, "device-trees", (kernel, "device_trees"), "/boot")?);
         }
     }
+    // Each component fragment: the file it is a part of, and its layer.
+    let mut fragments: Vec<(String, u32)> = Vec::new();
     for component in at.members {
         let build = at
             .builds
@@ -2187,7 +2189,13 @@ fn image_os(
             .find(|(name, _)| *name == component.name)
             .map(|(_, node)| *node);
         layers.extend(component_layers(
-            g, at, component, build, host_ports, inputs,
+            g,
+            at,
+            component,
+            build,
+            host_ports,
+            inputs,
+            &mut fragments,
         )?);
     }
     // The users, groups and enabled units the components state: the base's
@@ -2290,6 +2298,38 @@ fn image_os(
         g.edge((os, "rootfs"), (node, "base"));
         layers.push(node);
     }
+    // The files assembled from parts: the OS's, read from its tree, and
+    // the components' fragments, in the product's order.
+    for (n, assembled) in at.image.assembled.iter().enumerate() {
+        let node = g.add(
+            "gaia.tree.assemble",
+            format!("{}.assembled{n}", at.image.name),
+            file,
+            &format!("images[{i}].assembled[{n}]"),
+        )?;
+        // The order by owner: a component's own name, as its layers have it.
+        let order: Vec<String> = assembled
+            .order
+            .iter()
+            .map(|name| match at.loaded.components.get(name) {
+                Some(component) if name != "os" => component.name.clone(),
+                _ => name.clone(),
+            })
+            .collect();
+        g.set(node, "path", Lit::Str(assembled.path.clone()));
+        g.set(
+            node,
+            "order",
+            Lit::Str(serde_json::to_string(&order).unwrap_or_default()),
+        );
+        g.set(node, "rule_key", Lit::Int(i64::from(assembled.rule_key)));
+        g.edge((os, "rootfs"), (node, "base"));
+        let parts = fragments.iter().filter(|(to, _)| *to == assembled.path);
+        for (k, (_, part)) in parts.enumerate() {
+            g.edge((*part, "layer"), (node, &format!("parts{k}")));
+        }
+        layers.push(node);
+    }
     let merge = g.add(
         "gaia.tree.merge",
         format!("{}.rootfs", at.image.name),
@@ -2326,8 +2366,15 @@ fn image_os(
                 .iter()
                 .find(|(name, _)| *name == component.name)
                 .map(|(_, node)| *node);
+            // A fragment is refused in an initramfs when the product is read.
             layers.extend(component_layers(
-                g, at, component, build, host_ports, inputs,
+                g,
+                at,
+                component,
+                build,
+                host_ports,
+                inputs,
+                &mut Vec::new(),
             )?);
         }
         let node = g.add(
@@ -2846,6 +2893,7 @@ fn component_layers(
     build: Option<u32>,
     host_ports: &mut BTreeMap<String, String>,
     inputs: &mut BTreeMap<String, HostInput>,
+    fragments: &mut Vec<(String, u32)>,
 ) -> Result<Vec<u32>, Error> {
     let file = &component.file;
     let image = &at.image.name;
@@ -2855,6 +2903,42 @@ fn component_layers(
         Some(_) => Some(generate_node(g, at, component)?),
         None => None,
     };
+    // Each fragment alone, at its path, for the file it is a part of.
+    for (n, fragment) in component.fragments.iter().enumerate() {
+        let key = format!("fragments[{n}]");
+        let Some((group, path)) = place_from(g, at, component, &fragment.from, &key)? else {
+            return Err(Error::at(file, key, "a fragment is not a link"));
+        };
+        let tag = format!(".fragment{n}");
+        let from = from_node(g, at, component, build, generated, &group, &tag)?;
+        let place = g.add(
+            "gaia.tree.place",
+            format!("{image}.{}{tag}", component.name),
+            file,
+            &key,
+        )?;
+        g.set(place, "owner", Lit::Str(component.name.clone()));
+        let out = g.first_output(from).unwrap_or("tree");
+        g.edge((from, out), (place, "from"));
+        let port = format!("{image}.{}{tag}.placements", component.name);
+        host_input(
+            g,
+            host_ports,
+            inputs,
+            &port,
+            HostInput::Placements(gaia_types::Placements {
+                entries: vec![gaia_types::Placement {
+                    from: path,
+                    to: fragment.to.clone(),
+                    mode: Some(0o644),
+                    uid: 0,
+                    gid: 0,
+                }],
+            }),
+            (place, "placements"),
+        )?;
+        fragments.push((fragment.to.clone(), place));
+    }
     if component.install.is_empty() {
         let Some(build) = build else {
             return Ok(Vec::new());
@@ -2870,70 +2954,16 @@ fn component_layers(
         g.edge((build, out), (layer, "tree"));
         return Ok(vec![layer]);
     }
-    let dir = file.parent().unwrap_or(Path::new("/")).to_path_buf();
     let mut groups: BTreeMap<PlaceFrom, Vec<gaia_types::Placement>> = BTreeMap::new();
     // Paths that are symbolic links: nothing is placed, a link is made.
     let mut links: Vec<(String, String)> = Vec::new();
     for (n, install) in component.install.iter().enumerate() {
         let key = format!("install[{n}]");
-        let (group, from) = match &install.from {
-            InstallFrom::Link(target) => {
+        let Some((group, from)) = place_from(g, at, component, &install.from, &key)? else {
+            if let InstallFrom::Link(target) = &install.from {
                 links.push((install.to.clone(), target.clone()));
-                continue;
             }
-            InstallFrom::Built(path) => (PlaceFrom::Built, path.clone()),
-            InstallFrom::File(FileRef::InSource { source, path }) => {
-                (PlaceFrom::Source(source.clone()), path.clone())
-            }
-            InstallFrom::File(FileRef::Input { name }) => {
-                if !at.setup.inputs.contains_key(name) {
-                    return Err(Error::at(
-                        file,
-                        format!("{key}.from.input"),
-                        format!(
-                            "the named input `{name}` is not given; give it with --input {name}=<path>"
-                        ),
-                    ));
-                }
-                g.used_inputs.insert(name.clone());
-                (PlaceFrom::Input(name.clone()), name.clone())
-            }
-            InstallFrom::File(FileRef::Generated { path }) => (PlaceFrom::Generated, path.clone()),
-            InstallFrom::File(FileRef::Description { name }) => {
-                if !at.board.descriptions.contains_key(name) {
-                    let known: Vec<&str> =
-                        at.board.descriptions.keys().map(String::as_str).collect();
-                    return Err(Error::at(
-                        file,
-                        format!("{key}.from.description"),
-                        format!(
-                            "{} installs the board's description `{name}`, and the board {} ({}) states none of that name under [descriptions]{}",
-                            component.name,
-                            at.board.name,
-                            at.board.file.display(),
-                            if known.is_empty() {
-                                String::new()
-                            } else {
-                                format!("; it has {}", known.join(", "))
-                            }
-                        ),
-                    ));
-                }
-                (PlaceFrom::Description(name.clone()), name.clone())
-            }
-            InstallFrom::File(FileRef::Local { file: local }) => {
-                let inside = local.path().strip_prefix(&dir).map_err(|_| {
-                    Error::at(
-                        file,
-                        format!("{key}.from"),
-                        format!(
-                            "{} is outside the component's directory",
-                            local.path().display()
-                        ),
-                    )
-                })?;
-                (PlaceFrom::Beside, inside.display().to_string())
-            }
+            continue;
         };
         let id = |name: &Option<String>, what: &str| -> Result<u32, Error> {
             match name.as_deref() {
@@ -2962,70 +2992,7 @@ fn component_layers(
     }
     let mut layers = Vec::new();
     for (k, (group, placements)) in groups.into_iter().enumerate() {
-        let from = match &group {
-            PlaceFrom::Built => build.ok_or_else(|| {
-                Error::at(
-                    file,
-                    "install",
-                    "an entry is placed from the build's output, and the component has no build",
-                )
-            })?,
-            PlaceFrom::Beside => {
-                let node = g.add(
-                    "gaia.source.path",
-                    format!("{image}.{}.files", component.name),
-                    file,
-                    "install",
-                )?;
-                g.set(node, "path", Lit::Str(dir.display().to_string()));
-                node
-            }
-            PlaceFrom::Source(name) => {
-                let source = component.sources.get(name).ok_or_else(|| {
-                    Error::at(file, "install", format!("no source named `{name}`"))
-                })?;
-                component_source(g, component, name, source, at.lock, at.board)?
-            }
-            PlaceFrom::Input(name) => {
-                let path = at.setup.inputs.get(name).ok_or_else(|| {
-                    Error::at(file, "install", format!("no input named `{name}`"))
-                })?;
-                let node = g.add(
-                    "gaia.source.input",
-                    format!("{image}.{}.input.{name}", component.name),
-                    file,
-                    "install",
-                )?;
-                g.set(node, "path", Lit::Str(path.display().to_string()));
-                g.set(node, "name", Lit::Str(name.clone()));
-                node
-            }
-            PlaceFrom::Generated => generated.ok_or_else(|| {
-                Error::at(
-                    file,
-                    "install",
-                    "names a generated file, but there is no [generate]",
-                )
-            })?,
-            PlaceFrom::Description(name) => {
-                let described = at.board.descriptions.get(name).ok_or_else(|| {
-                    Error::at(file, "install", format!("no description named `{name}`"))
-                })?;
-                let node = g.add(
-                    "gaia.source.input",
-                    format!("{image}.{}.description.{name}", component.name),
-                    &at.board.file,
-                    &format!("descriptions.{name}"),
-                )?;
-                g.set(
-                    node,
-                    "path",
-                    Lit::Str(described.path().display().to_string()),
-                );
-                g.set(node, "name", Lit::Str(name.clone()));
-                node
-            }
-        };
+        let from = from_node(g, at, component, build, generated, &group, "")?;
         let place = g.add(
             "gaia.tree.place",
             format!("{image}.{}.place{k}", component.name),
@@ -3064,6 +3031,157 @@ fn component_layers(
         layers.push(node);
     }
     Ok(layers)
+}
+
+/// Where an install's or a fragment's `from` (at `key`) is placed from,
+/// and its path there; `None` for a link.
+fn place_from(
+    g: &mut Graph<'_>,
+    at: &OsIn<'_>,
+    component: &Component,
+    from: &InstallFrom,
+    key: &str,
+) -> Result<Option<(PlaceFrom, String)>, Error> {
+    let file = &component.file;
+    let dir = file.parent().unwrap_or(Path::new("/")).to_path_buf();
+    let found = match from {
+        InstallFrom::Link(_) => return Ok(None),
+        InstallFrom::Built(path) => (PlaceFrom::Built, path.clone()),
+        InstallFrom::File(FileRef::InSource { source, path }) => {
+            (PlaceFrom::Source(source.clone()), path.clone())
+        }
+        InstallFrom::File(FileRef::Input { name }) => {
+            if !at.setup.inputs.contains_key(name) {
+                return Err(Error::at(
+                    file,
+                    format!("{key}.from.input"),
+                    format!(
+                        "the named input `{name}` is not given; give it with --input {name}=<path>"
+                    ),
+                ));
+            }
+            g.used_inputs.insert(name.clone());
+            (PlaceFrom::Input(name.clone()), name.clone())
+        }
+        InstallFrom::File(FileRef::Generated { path }) => (PlaceFrom::Generated, path.clone()),
+        InstallFrom::File(FileRef::Description { name }) => {
+            if !at.board.descriptions.contains_key(name) {
+                let known: Vec<&str> = at.board.descriptions.keys().map(String::as_str).collect();
+                return Err(Error::at(
+                    file,
+                    format!("{key}.from.description"),
+                    format!(
+                        "{} installs the board's description `{name}`, and the board {} ({}) states none of that name under [descriptions]{}",
+                        component.name,
+                        at.board.name,
+                        at.board.file.display(),
+                        if known.is_empty() {
+                            String::new()
+                        } else {
+                            format!("; it has {}", known.join(", "))
+                        }
+                    ),
+                ));
+            }
+            (PlaceFrom::Description(name.clone()), name.clone())
+        }
+        InstallFrom::File(FileRef::Local { file: local }) => {
+            let inside = local.path().strip_prefix(&dir).map_err(|_| {
+                Error::at(
+                    file,
+                    format!("{key}.from"),
+                    format!(
+                        "{} is outside the component's directory",
+                        local.path().display()
+                    ),
+                )
+            })?;
+            (PlaceFrom::Beside, inside.display().to_string())
+        }
+    };
+    Ok(Some(found))
+}
+
+/// The node a group of entries is placed from. `tag` tells its nodes
+/// apart from another group's of the same kind.
+fn from_node(
+    g: &mut Graph<'_>,
+    at: &OsIn<'_>,
+    component: &Component,
+    build: Option<u32>,
+    generated: Option<u32>,
+    group: &PlaceFrom,
+    tag: &str,
+) -> Result<u32, Error> {
+    let file = &component.file;
+    let image = &at.image.name;
+    let dir = file.parent().unwrap_or(Path::new("/")).to_path_buf();
+    let node =
+        match group {
+            PlaceFrom::Built => build.ok_or_else(|| {
+                Error::at(
+                    file,
+                    "install",
+                    "an entry is placed from the build's output, and the component has no build",
+                )
+            })?,
+            PlaceFrom::Beside => {
+                let node = g.add(
+                    "gaia.source.path",
+                    format!("{image}.{}{tag}.files", component.name),
+                    file,
+                    "install",
+                )?;
+                g.set(node, "path", Lit::Str(dir.display().to_string()));
+                node
+            }
+            PlaceFrom::Source(name) => {
+                let source = component.sources.get(name).ok_or_else(|| {
+                    Error::at(file, "install", format!("no source named `{name}`"))
+                })?;
+                component_source(g, component, name, source, at.lock, at.board)?
+            }
+            PlaceFrom::Input(name) => {
+                let path = at.setup.inputs.get(name).ok_or_else(|| {
+                    Error::at(file, "install", format!("no input named `{name}`"))
+                })?;
+                let node = g.add(
+                    "gaia.source.input",
+                    format!("{image}.{}{tag}.input.{name}", component.name),
+                    file,
+                    "install",
+                )?;
+                g.set(node, "path", Lit::Str(path.display().to_string()));
+                g.set(node, "name", Lit::Str(name.clone()));
+                node
+            }
+            PlaceFrom::Generated => generated.ok_or_else(|| {
+                Error::at(
+                    file,
+                    "install",
+                    "names a generated file, but there is no [generate]",
+                )
+            })?,
+            PlaceFrom::Description(name) => {
+                let described = at.board.descriptions.get(name).ok_or_else(|| {
+                    Error::at(file, "install", format!("no description named `{name}`"))
+                })?;
+                let node = g.add(
+                    "gaia.source.input",
+                    format!("{image}.{}{tag}.description.{name}", component.name),
+                    &at.board.file,
+                    &format!("descriptions.{name}"),
+                )?;
+                g.set(
+                    node,
+                    "path",
+                    Lit::Str(described.path().display().to_string()),
+                );
+                g.set(node, "name", Lit::Str(name.clone()));
+                node
+            }
+        };
+    Ok(node)
 }
 
 /// A constant, said with its type.

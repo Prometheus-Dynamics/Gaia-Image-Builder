@@ -2483,3 +2483,154 @@ fn the_k230_wrapped_areas_go_through_firmware_k230() {
         "{text}"
     );
 }
+
+/// A file of the root filesystem made of the OS's and components' parts:
+/// each fragment is placed alone and goes to the file's assembly, not to
+/// the merge; the assembly reads the OS's tree and is merged as a layer.
+#[test]
+fn fragments_go_to_their_files_assembly_in_the_products_order() {
+    let dir = project();
+    let product = dir
+        .path()
+        .join("examples/products/zero-3e-demo/product.toml");
+    let components = dir.path().join("examples/components");
+    let gadget = components.join("usb-gadget-network/component.toml");
+    let hello = components.join("hello-rust/component.toml");
+    // The product calls it `extlinux`; its own name is extlinux-zero-3e.
+    let extlinux = components.join("extlinux-zero-3e/component.toml");
+    std::fs::write(
+        components.join("extlinux-zero-3e/mdev.fragment"),
+        "^mmcblk[0-9]+$ root:disk 0660\n",
+    )
+    .expect("write");
+    std::fs::write(
+        components.join("usb-gadget-network/files/mdev.fragment"),
+        "^ttyGS[0-9]+$ root:root 0600\n",
+    )
+    .expect("write");
+    let add = |path: &Path, text: &str| {
+        let original = std::fs::read_to_string(path).expect("read");
+        std::fs::write(path, format!("{original}\n{text}")).expect("write");
+    };
+    add(
+        &gadget,
+        "[[fragments]]\nfrom = { file = \"files/mdev.fragment\" }\nto = \"/etc/mdev.conf\"\n",
+    );
+    add(
+        &extlinux,
+        "[[fragments]]\nfrom = { file = \"mdev.fragment\" }\nto = \"/etc/mdev.conf\"\n",
+    );
+    add(
+        &hello,
+        "[[fragments]]\nfrom = \"share/mdev.conf\"\nto = \"/etc/mdev.conf\"\n",
+    );
+    edit(
+        &product,
+        "budget = \"1G\"\n",
+        "budget = \"1G\"\n\n[[images.assembled]]\npath = \"/etc/mdev.conf\"\norder = [\"hello-rust\", \"os\", \"extlinux\", \"usb-gadget-network\"]\nrule_key = 0\n",
+    );
+    let out = plan(dir.path(), &["--json"]);
+    let err = String::from_utf8_lossy(&out.stderr);
+    assert!(out.status.success(), "{err}");
+    let both: serde_json::Value = serde_json::from_slice(&out.stdout).expect("json");
+    let graph = &both["graph"]["graph"];
+    let nodes = graph["nodes"].as_array().expect("nodes");
+    let label = |i: &serde_json::Value| {
+        let n = &nodes[i.as_u64().expect("index") as usize];
+        n["label"]
+            .as_str()
+            .or(n["id"].as_str())
+            .unwrap_or("?")
+            .to_string()
+    };
+    let edges: Vec<String> = graph["edges"]
+        .as_array()
+        .expect("edges")
+        .iter()
+        .map(|e| {
+            format!(
+                "{}.{} -> {}.{}",
+                label(&e["from"]["node"]),
+                e["from"]["port"].as_str().unwrap_or_default(),
+                label(&e["to"]["node"]),
+                e["to"]["port"].as_str().unwrap_or_default()
+            )
+        })
+        .collect();
+    let node = |label: &str| {
+        nodes
+            .iter()
+            .find(|n| n["label"] == label)
+            .unwrap_or_else(|| panic!("no node {label}"))
+    };
+    let assembly = node("zero-3e-demo.assembled0");
+    assert_eq!(assembly["id"], "gaia.tree.assemble");
+    let value = |port: &str| assembly["consts"][port]["value"].clone();
+    assert_eq!(value("path"), "/etc/mdev.conf");
+    // The order by the components' own names.
+    assert_eq!(
+        value("order"),
+        "[\"hello-rust\",\"os\",\"extlinux-zero-3e\",\"usb-gadget-network\"]"
+    );
+    assert_eq!(value("rule_key"), 0);
+    let into = |to: &str| -> Vec<&String> { edges.iter().filter(|e| e.ends_with(to)).collect() };
+    let parts: Vec<&String> = edges
+        .iter()
+        .filter(|e| e.contains("-> zero-3e-demo.assembled0.parts"))
+        .collect();
+    assert_eq!(parts.len(), 3, "{parts:?}");
+    for owner in ["usb-gadget-network", "hello-rust", "extlinux-zero-3e"] {
+        let place = format!("zero-3e-demo.{owner}.fragment0");
+        assert_eq!(node(&place)["id"], "gaia.tree.place");
+        assert!(
+            parts
+                .iter()
+                .any(|e| e.starts_with(&format!("{place}.layer -> "))),
+            "{owner}: {parts:?}"
+        );
+        // Not merged itself: the assembly's layer is.
+        assert!(
+            !edges
+                .iter()
+                .any(|e| e.starts_with(&format!("{place}.layer -> zero-3e-demo.rootfs."))),
+            "{owner} is merged"
+        );
+    }
+    // The gadget's fragment is beside it, hello-rust's in its build.
+    assert!(
+        into("zero-3e-demo.usb-gadget-network.fragment0.from")
+            .iter()
+            .any(|e| e.starts_with("zero-3e-demo.usb-gadget-network.fragment0.files.")),
+        "{edges:?}"
+    );
+    assert_eq!(into("zero-3e-demo.hello-rust.fragment0.from").len(), 1);
+    assert!(
+        !into("zero-3e-demo.hello-rust.fragment0.from")[0].contains(".files."),
+        "{edges:?}"
+    );
+    assert_eq!(into("zero-3e-demo.assembled0.base").len(), 1);
+    assert!(
+        into("zero-3e-demo.assembled0.base")[0].contains(".rootfs -> "),
+        "the OS's tree: {edges:?}"
+    );
+    assert!(
+        edges
+            .iter()
+            .any(|e| e.starts_with("zero-3e-demo.assembled0.layer -> zero-3e-demo.rootfs.layers")),
+        "{edges:?}"
+    );
+
+    // A fragment the product does not order is refused when it is read.
+    edit(
+        &product,
+        "order = [\"hello-rust\", \"os\", \"extlinux\", \"usb-gadget-network\"]",
+        "order = [\"os\", \"extlinux\", \"usb-gadget-network\"]",
+    );
+    let out = plan(dir.path(), &[]);
+    assert!(!out.status.success());
+    let err = String::from_utf8_lossy(&out.stderr);
+    assert!(
+        err.contains("hello-rust is not in the order of /etc/mdev.conf in the image zero-3e-demo"),
+        "{err}"
+    );
+}

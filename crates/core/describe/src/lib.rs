@@ -35,10 +35,10 @@ pub use board::{
 };
 pub use common::{FileRef, ImagePlatform, Mode, RelPath, SizeText, Source, Subdir};
 pub use component::{
-    Build, Component, Generate, GenerateImage, GenerateTool, Group, InSource, Install, InstallFrom,
-    Package, Requires, Service, User,
+    Build, Component, Fragment, Generate, GenerateImage, GenerateTool, Group, InSource, Install,
+    InstallFrom, Package, Requires, Service, User,
 };
 pub use error::Error;
-pub use product::{ImageSpec, Loaded, OsProvider, OsSpec, Product};
+pub use product::{Assembled, ImageSpec, Loaded, OsProvider, OsSpec, Product};
 pub use read::VERSION;
 pub use validate::{Kind, kind_of, validate};
