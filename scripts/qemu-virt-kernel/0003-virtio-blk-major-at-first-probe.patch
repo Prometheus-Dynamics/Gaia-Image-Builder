@@ -1,0 +1,79 @@
+--- a/drivers/block/virtio_blk.c
++++ b/drivers/block/virtio_blk.c
+@@ -44,6 +44,31 @@
+ static int major;
+ static DEFINE_IDA(vd_index_ida);
+ 
++/*
++ * Gaia (the board-like QEMU profile): the block major is taken when the
++ * first virtio disk is probed, not at init, so a guest with no virtio disk
++ * leaves the dynamic majors to the drivers a board has (device-mapper gets
++ * 254, as on the board). A guest with a virtio disk takes it at that
++ * disk's probe.
++ */
++static DEFINE_MUTEX(major_lock);
++
++static int virtblk_get_major(void)
++{
++	int ret = 0;
++
++	mutex_lock(&major_lock);
++	if (!major) {
++		ret = register_blkdev(0, "virtblk");
++		if (ret > 0) {
++			major = ret;
++			ret = 0;
++		}
++	}
++	mutex_unlock(&major_lock);
++	return ret;
++}
++
+ static struct workqueue_struct *virtblk_wq;
+ 
+ struct virtio_blk_vq {
+@@ -1452,6 +1477,10 @@
+ 		return -EINVAL;
+ 	}
+ 
++	err = virtblk_get_major();
++	if (err)
++		return err;
++
+ 	err = ida_alloc_range(&vd_index_ida, 0,
+ 			      minor_to_index(1 << MINORBITS) - 1, GFP_KERNEL);
+ 	if (err < 0)
+@@ -1701,20 +1730,14 @@
+ 	if (!virtblk_wq)
+ 		return -ENOMEM;
+ 
+-	major = register_blkdev(0, "virtblk");
+-	if (major < 0) {
+-		error = major;
+-		goto out_destroy_workqueue;
+-	}
+-
+ 	error = register_virtio_driver(&virtio_blk);
+ 	if (error)
+-		goto out_unregister_blkdev;
++		goto out_destroy_workqueue;
+ 	return 0;
+ 
+-out_unregister_blkdev:
+-	unregister_blkdev(major, "virtblk");
+ out_destroy_workqueue:
++	if (major)
++		unregister_blkdev(major, "virtblk");
+ 	destroy_workqueue(virtblk_wq);
+ 	return error;
+ }
+@@ -1722,7 +1745,8 @@
+ static void __exit virtio_blk_fini(void)
+ {
+ 	unregister_virtio_driver(&virtio_blk);
+-	unregister_blkdev(major, "virtblk");
++	if (major)
++		unregister_blkdev(major, "virtblk");
+ 	destroy_workqueue(virtblk_wq);
+ }
+ module_init(virtio_blk_init);

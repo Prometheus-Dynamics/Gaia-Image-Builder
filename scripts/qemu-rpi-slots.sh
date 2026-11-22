@@ -114,7 +114,11 @@
 #   The virt kernel's patched i6300esb (scripts/qemu-virt-kernel) registers
 #   the watchdog on a "bcm2835-wdt" child of that device with no device
 #   tree node of its own, as the BCM2712's MFD cell is, and starts it at
-#   probe, marked as running. The device trees read are the boot's
+#   probe, marked as running. It has the board driver's (bcm2835_wdt's)
+#   identity, "Broadcom BCM2835 Watchdog timer", and its hardware counts
+#   at most that driver's 15999 ms, with no maximum timeout: the watchdog
+#   core feeds it for a longer one (gaia,identity and
+#   gaia,max-hw-heartbeat-ms). The device trees read are the boot's
 #   device_tree= or else every .dtb in its os_prefix directory, which must
 #   agree. Without kernel_watchdog_timeout there is no node, and the
 #   i6300esb is the plain one, stopped until opened. --watchdog-scale P
@@ -806,6 +810,9 @@ firmware_watchdog() {
 	fdtput -p -t s "$state/virt.dtb" "$path" compatible gaia,firmware-watchdog
 	fdt_reg "$path" "$address" "$size"
 	fdtput -t x "$state/virt.dtb" "$path" timeout-sec "$(printf %x "$boot_watchdog")"
+	# bcm2835_wdt's, the driver both power-management compatibles bind.
+	fdtput -t s "$state/virt.dtb" "$path" gaia,identity "Broadcom BCM2835 Watchdog timer"
+	fdtput -t x "$state/virt.dtb" "$path" gaia,max-hw-heartbeat-ms "$(printf %x 15999)"
 	[[ $watchdog_scale -eq 100 ]] || fdtput -t x "$state/virt.dtb" "$path" gaia,time-scale-percent "$(printf %x "$watchdog_scale")"
 }
 

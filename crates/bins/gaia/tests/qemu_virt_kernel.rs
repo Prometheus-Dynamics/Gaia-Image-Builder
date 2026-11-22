@@ -100,8 +100,8 @@ fn virt_patches() -> Vec<String> {
         .collect();
     names.sort();
     assert!(
-        names.len() >= 2,
-        "the watchdog's and the UDC's patches: {names:?}"
+        names.len() >= 3,
+        "the watchdog's, the UDC's and virtio_blk's patches: {names:?}"
     );
     names
 }

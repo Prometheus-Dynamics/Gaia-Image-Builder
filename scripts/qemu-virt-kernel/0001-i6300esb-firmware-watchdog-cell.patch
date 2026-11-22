@@ -10,7 +10,7 @@
  
  /* Module and version information */
  #define ESB_MODULE_NAME "i6300ESB timer"
-@@ -93,6 +96,10 @@
+@@ -93,6 +96,14 @@
  	struct watchdog_device wdd;
  	void __iomem *base;
  	struct pci_dev *pdev;
@@ -18,21 +18,33 @@
 +	struct platform_device *cell;
 +	/* Gaia: the hardware counts this many percent of each second asked. */
 +	u32 scale;
++	/* Gaia: in the cell shape, the board watchdog's identity, and its
++	 * hardware's longest countdown in ms (0: the i6300ESB's own). */
++	struct watchdog_info info;
++	u32 hw_ms;
  };
  
  #define to_esb_dev(wptr) container_of(wptr, struct esb_dev, wdd)
-@@ -163,7 +170,9 @@
+@@ -163,7 +174,17 @@
  	 * val will be 1 << 9 = 512, then write that to two
  	 * timers => 2 * 512 = 1024 (which is decremented at 1KHz)
  	 */
 -	val = time << 9;
-+	/* Gaia: a slower guest's watchdog counts a longer hardware time (see
-+	 * esb_cell); the timeout userspace sees is the one asked for. */
-+	val = (u32)min_t(u64, (u64)time * edev->scale / 100, ESB_HEARTBEAT_MAX) << 9;
++	u64 ms = (u64)time * 1000;
++
++	/* Gaia: in the cell shape the hardware counts no longer than the
++	 * board's can (the watchdog core feeds it for a longer timeout, as
++	 * it does the board's), and a slower guest's watchdog counts a
++	 * longer hardware time (see esb_cell); the timeout userspace sees is
++	 * the one asked for. */
++	if (edev->hw_ms)
++		ms = min_t(u64, ms, edev->hw_ms);
++	val = (u32)min_t(u64, ms * edev->scale / 100 * 512 / 1000,
++			 (u64)ESB_HEARTBEAT_MAX << 9);
  
  	/* Write timer 1 */
  	esb_unlock_registers(edev);
-@@ -286,6 +295,63 @@
+@@ -286,6 +307,80 @@
  	esb_timer_set_heartbeat(&edev->wdd, edev->wdd.timeout);
  }
  
@@ -49,13 +61,19 @@
 + * The node's gaia,time-scale-percent (100 when absent) stretches every
 + * hardware countdown, for a guest that runs slower than the board: the
 + * timeouts userspace asks for and reads stay as asked.
++ * The node can also give the board watchdog's own facts: gaia,identity
++ * (the identity userspace reads) and gaia,max-hw-heartbeat-ms (the
++ * longest countdown its hardware takes; the watchdog then has no
++ * maximum timeout and the core feeds the hardware within it, as
++ * bcm2835_wdt's has none and is fed within 15999 ms).
 + * Returns 1 when the shape is made, 0 when the tree asks for none.
 + */
 +static int esb_cell(struct esb_dev *edev)
 +{
 +	struct device_node *np;
 +	struct platform_device *parent, *cell;
-+	u32 timeout;
++	const char *identity;
++	u32 timeout, hw_ms;
 +	int ret;
 +
 +	np = of_find_compatible_node(NULL, NULL, "gaia,firmware-watchdog");
@@ -72,6 +90,17 @@
 +	if (of_property_read_u32(np, "gaia,time-scale-percent", &edev->scale) ||
 +	    edev->scale < 100 || edev->scale > 10000)
 +		edev->scale = 100;
++	if (!of_property_read_string(np, "gaia,identity", &identity)) {
++		edev->info = *edev->wdd.info;
++		strscpy(edev->info.identity, identity, sizeof(edev->info.identity));
++		edev->wdd.info = &edev->info;
++	}
++	if (!of_property_read_u32(np, "gaia,max-hw-heartbeat-ms", &hw_ms) &&
++	    hw_ms >= ESB_HEARTBEAT_MIN * 1000 && hw_ms <= ESB_HEARTBEAT_MAX * 1000) {
++		edev->hw_ms = hw_ms;
++		edev->wdd.max_hw_heartbeat_ms = hw_ms;
++		edev->wdd.max_timeout = 0;
++	}
 +	of_node_put(np);
 +
 +	cell = platform_device_alloc("bcm2835-wdt", PLATFORM_DEVID_NONE);
@@ -96,7 +125,7 @@
  static int esb_probe(struct pci_dev *pdev,
  		const struct pci_device_id *ent)
  {
-@@ -298,6 +364,7 @@
+@@ -298,6 +393,7 @@
  
  	/* Check whether or not the hardware watchdog is there */
  	edev->pdev = pdev;
@@ -104,7 +133,7 @@
  	if (!esb_getdevice(edev))
  		return -ENODEV;
  
-@@ -311,17 +378,29 @@
+@@ -311,17 +407,29 @@
  	watchdog_set_nowayout(&edev->wdd, nowayout);
  	watchdog_stop_on_reboot(&edev->wdd);
  	watchdog_stop_on_unregister(&edev->wdd);
@@ -135,7 +164,7 @@
  err_unmap:
  	iounmap(edev->base);
  	pci_release_region(edev->pdev, 0);
-@@ -334,6 +413,8 @@
+@@ -334,6 +442,8 @@
  	struct esb_dev *edev = dev_get_drvdata(&pdev->dev);
  
  	watchdog_unregister_device(&edev->wdd);

@@ -35,12 +35,25 @@ scripts/qemu-rpi-slots.sh --profile board --fresh --net user --max-boots 1 \
 - `--print` shows the first boot's plan and QEMU line without booting. `--dtb` builds and checks its device tree.
 - `--max-boots 1` stops at the first restart.
 - The kernel must have PCI host generic, SDHCI PCI, MMC block, erofs, dm-verity, ext4, vfat and i6300esb; for the
-  firmware's watchdog, the i6300esb patch. `qemu-virt-kernel.sh` makes such a kernel from the board's own.
+  board profile, the patches in `scripts/qemu-virt-kernel/` (the watchdog, the UDC, virtio_blk's major).
+  `qemu-virt-kernel.sh` makes such a kernel from the board's own.
 - A watchdog reset ends the boot and the next starts from config.txt, as on the board. The runner reads QEMU's
   `WATCHDOG` event from `<work dir>/qmp-events.sock` into `boot-N.events` and says how long after the guest started
   it came.
 - With `--usb-host`, the stock host's serial log is `<work dir>/boot-N.usb-host.log`, and its `stock-host:` lines are
   printed when the boot ends. When the stock host is done, it powers off, the board guest is quit and the run ends.
+
+The guest's sysfs against a board's, while the guest runs (without `--usb-host`, which ends the run early). The
+image's console must let root log in without a password:
+
+```
+scripts/qemu-board-sysfs.py collect <work dir> <guest listing>
+scripts/qemu-board-sysfs.py diff <guest listing> <board listing>...
+```
+
+`collect` waits for the console, logs in and lists `/sys/class/block`, `/sys/class/udc` and `/sys/class/watchdog`
+in the form Atlas lists a board's. `diff` reads Atlas's listings as they are, several of one board merged, and prints
+every fact as `same`, `differs`, `board only` or `guest only`.
 
 ## What the profile gives
 
@@ -62,7 +75,12 @@ scripts/qemu-rpi-slots.sh --profile board --fresh --net user --max-boots 1 \
   Raze), with its CPU address, so the kernel names the device `107d200000.watchdog` as on the board. The patched
   i6300esb registers the watchdog on a `bcm2835-wdt` child of it that has no device-tree node of its own (the BCM2712's
   MFD cell), and starts it at probe marked as running. So `/sys/class/watchdog/watchdog0/device` has no `of_node`,
-  and its parent's is the image's watchdog path: the shape lemnosd's board file has to match.
+  and its parent's is the image's watchdog path: the shape lemnosd's board file has to match. It also has the board
+  driver's facts, from the node's `gaia,identity` and `gaia,max-hw-heartbeat-ms`: bcm2835_wdt's identity "Broadcom
+  BCM2835 Watchdog timer", and no maximum timeout, with the hardware counting at most 15999 ms and the watchdog core
+  feeding it for a longer one, as bcm2835_wdt's is fed.
+- **Block majors.** The virt kernel's virtio_blk takes its major only when a virtio disk is probed (patch 0003). The
+  board profile has none, so device-mapper gets 254 and `dm-0` is `254:0`, as on the board.
 
 - **The USB device controller.** The image's device tree has the SoC's dwc2 (`/axi/usb@480000` on the Raze,
   `brcm,bcm2835-usb`), disabled; the board overlay's fragment@7 enables it with `dr_mode = "peripheral"`. Where the
@@ -110,8 +128,11 @@ A fault that depends on FIFO sizing would not show.
 - The kernel and device tree are not the image's. Each boot records which were used. The kernel is built from the
   image's own source and configuration, with the same release string, so the image's modules (lemnos.ko among them)
   load.
-- The watchdog is QEMU's i6300esb behind the board's shape; its identity is "i6300ESB timer", not "Broadcom BCM2835
-  Watchdog timer". The device tree node's compatible is `gaia,firmware-watchdog`, not `brcm,bcm2712-pm`.
+- The eMMC controller is on PCI, so the block devices' paths have the PCI host and slot in them:
+  `soc@107c000000/4010000000.mmc/pci0000:00/0000:00:01.0/mmc_host/…`, where the board has
+  `soc@107c000000/1000fff000.mmc/mmc_host/…`. The node path (`of_node`) is the board's; the device names are not.
+- The watchdog is QEMU's i6300esb behind the board's shape and facts. The device tree node's compatible is
+  `gaia,firmware-watchdog`, not `brcm,bcm2712-pm`.
 - **Speed.** TCG runs this boot about 4.6 times slower than the board. The image's timeouts (15 s for slot-init and the
   firmware) would then expire before lemnosd starts, whatever it does. `--watchdog-scale P` makes the watchdog's
   hardware count P% of each second asked; the timeouts that userspace sets and reads stay as asked. P is measured, not
@@ -181,6 +202,34 @@ ep1in and ep1out, NCM's data interface ep2out and ep2in, and ACM's ep3out and ep
 
 Wall time: 85 s for 0a94343e (until the reset) and 40 s for 47db1d24 (until the stock host was done).
 
-## Still to come
+## Proof: sysfs against the board (2026-11-22)
 
-- A diff of `/sys/class/block`, `/sys/class/watchdog` and `/sys/class/udc` against listings from the real board.
+Atlas's listings: Raze #1 running an Atlas install (`gaia-listing-raze1-993.txt` and `q4-raze1.clean.txt`, merged),
+and Raze #2 at its staging boot (`gaia-listing-raze2-stage.txt`). The guest: 47db1d24 in the board profile, scale
+459%, with patches 0001–0003.
+
+Against Raze #1: 98 facts the same, 9 that differ, 7 the guest has and the listings do not.
+
+| Differs | Board | Guest | Why |
+|---|---|---|---|
+| the 6 eMMC device links | `…/1000fff000.mmc/mmc_host/…` | `…/4010000000.mmc/pci0000:00/0000:00:01.0/mmc_host/…` | the controller is on PCI |
+| `mmcblk0` size | 30535680 | 33554432 | QEMU's user area is a power of two |
+| `mmcblk0p2` size | 30371840 | 77824 | the board's data partition fills the eMMC after the install; the image's is as built |
+| `dm-0`, `loop0` sizes | 81992, 82656 | 36024, 36320 | Raze #1 runs a different image |
+
+The same:
+- every link's target under `/sys/devices` but the eMMC's: `udc/1000480000.usb` and
+  `watchdog0` → `…/107d200000.watchdog/bcm2835-wdt/watchdog/watchdog0`;
+- the watchdog's identity, timeout (15), state (active), status (0x8000) and bootstatus;
+- the block devices' numbers, including `dm-0` 254:0 (253:0 before patch 0003);
+- the boot areas (8192 sectors, `ro` and `force_ro` 1);
+- the partitions' flags, and `mmcblk0p1`'s size;
+- the eMMC card's attribute names.
+
+Before patch 0001 gave the watchdog the board's identity, the guest's was "i6300ESB timer".
+
+Against Raze #2's staging boot, the same links differ. Its watchdog is `inactive`, 0x0: that boot had no
+`kernel_watchdog_timeout`. It lists no `dm-0`.
+
+The faults above still show on these patches: 0a94343e on the same kernel gave `duplicate endpoint with address 0x2`,
+`can't set config #1, error -32` and the watchdog reset 75.1 s after the guest started.

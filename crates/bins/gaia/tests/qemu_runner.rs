@@ -474,6 +474,12 @@ fn the_board_profile_gives_an_emmc_and_the_firmwares_facts() {
     assert_eq!(get(&[wdt, "compatible"]), "gaia,firmware-watchdog");
     assert_eq!(get(&["-t", "x", wdt, "reg"]), "10 7d200000 0 308");
     assert_eq!(get(&["-t", "i", wdt, "timeout-sec"]), "15");
+    // The board driver's facts: bcm2835_wdt's identity and hardware limit.
+    assert_eq!(
+        get(&[wdt, "gaia,identity"]),
+        "Broadcom BCM2835 Watchdog timer"
+    );
+    assert_eq!(get(&["-t", "i", wdt, "gaia,max-hw-heartbeat-ms"]), "15999");
     assert_eq!(get(&["/soc@107c000000", "compatible"]), "simple-bus");
     let unscaled = Command::new("fdtget")
         .args([&dtb, wdt, "gaia,time-scale-percent"])
