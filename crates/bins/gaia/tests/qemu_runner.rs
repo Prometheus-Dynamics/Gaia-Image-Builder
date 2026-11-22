@@ -371,6 +371,50 @@ fn the_disks_node_is_at_the_boot_sources_path() {
     assert!(!out.status.success(), "a count was given");
 }
 
+/// Puts a device tree at `name` on the disk's boot partition: a SoC bus at
+/// /soc@107c000000 whose ranges put its 0 at 0x10_0000_0000 (as the
+/// BCM2712's does), with a power-management block at `pm` when given.
+fn put_dtb(dir: &Path, disk: &Path, name: &str, pm: Option<u32>) {
+    let block = match pm {
+        Some(at) => format!(
+            "watchdog@{at:x} {{ compatible = \"brcm,bcm2712-pm\"; reg = <{at:#x} 0x308>; }};"
+        ),
+        None => String::new(),
+    };
+    let dts = dir.join("image.dts");
+    std::fs::write(
+        &dts,
+        format!(
+            "/dts-v1/;\n/ {{ #address-cells = <2>; #size-cells = <2>;\n soc@107c000000 {{ compatible = \"simple-bus\"; #address-cells = <1>; #size-cells = <1>; ranges = <0x0 0x10 0x0 0x80000000>; {block} }};\n}};\n"
+        ),
+    )
+    .expect("write");
+    let dtb = dir.join("image.dtb");
+    run(
+        "dtc",
+        &[
+            "-q",
+            "-I",
+            "dts",
+            "-O",
+            "dtb",
+            "-o",
+            dtb.to_str().expect("utf-8"),
+            dts.to_str().expect("utf-8"),
+        ],
+    );
+    run(
+        "mcopy",
+        &[
+            "-o",
+            "-i",
+            &format!("{}@@1M", disk.display()),
+            dtb.to_str().expect("utf-8"),
+            &format!("::{name}"),
+        ],
+    );
+}
+
 /// The board profile: the disk is an eMMC whose user area is the image,
 /// after the two boot areas and the RPMB area (4 MiB each), a power of two
 /// in size; the PCI host it sits on is at the boot source's path; and
@@ -394,6 +438,9 @@ fn the_board_profile_gives_an_emmc_and_the_firmwares_facts() {
     }
     let dir = tempfile::tempdir().expect("tempdir");
     let disk = disk(dir.path());
+    put_dtb(dir.path(), &disk, "slots/bay0/board.dtb", Some(0x7d200000));
+    // Another tree beside it, which the boot's device_tree= leaves unread.
+    put_dtb(dir.path(), &disk, "slots/bay0/other.dtb", Some(0x7d300000));
     let (ok, out) = runner(
         dir.path(),
         &disk,
@@ -405,6 +452,10 @@ fn the_board_profile_gives_an_emmc_and_the_firmwares_facts() {
         .last()
         .expect("the device tree's path")
         .to_string();
+    // Kept: later runs write the state's tree again.
+    let first = dir.path().join("first.dtb");
+    std::fs::write(&first, std::fs::read(&dtb).expect("the tree")).expect("copy");
+    let dtb = first.display().to_string();
     let get = |args: &[&str]| {
         let out = Command::new("fdtget")
             .arg(&dtb)
@@ -417,6 +468,76 @@ fn the_board_profile_gives_an_emmc_and_the_firmwares_facts() {
         get(&["/soc@107c000000/mmc@fff000", "compatible"]),
         "pci-host-ecam-generic"
     );
+    // The firmware's watchdog: at the image's power-management block's path,
+    // its address as the CPU sees it, armed for kernel_watchdog_timeout.
+    let wdt = "/soc@107c000000/watchdog@7d200000";
+    assert_eq!(get(&[wdt, "compatible"]), "gaia,firmware-watchdog");
+    assert_eq!(get(&["-t", "x", wdt, "reg"]), "10 7d200000 0 308");
+    assert_eq!(get(&["-t", "i", wdt, "timeout-sec"]), "15");
+    assert_eq!(get(&["/soc@107c000000", "compatible"]), "simple-bus");
+    let unscaled = Command::new("fdtget")
+        .args([&dtb, wdt, "gaia,time-scale-percent"])
+        .output()
+        .expect("fdtget");
+    assert!(!unscaled.status.success(), "a time scale by default");
+    // --watchdog-scale: the hardware's count stretched, and said so.
+    let (ok, out) = runner(
+        dir.path(),
+        &disk,
+        &["--profile", "board", "--watchdog-scale", "250", "--dtb"],
+    );
+    assert!(ok, "{out}");
+    let scaled = out
+        .lines()
+        .last()
+        .expect("the device tree's path")
+        .to_string();
+    let percent = Command::new("fdtget")
+        .args(["-t", "i", &scaled, wdt, "gaia,time-scale-percent"])
+        .output()
+        .expect("fdtget");
+    assert_eq!(String::from_utf8_lossy(&percent.stdout).trim(), "250");
+    for bad in ["99", "10001", "x"] {
+        let (ok, out) = runner(
+            dir.path(),
+            &disk,
+            &["--profile", "board", "--watchdog-scale", bad, "--dtb"],
+        );
+        assert!(
+            !ok && out.contains("--watchdog-scale is a percentage from 100 to 10000"),
+            "{bad}: {out}"
+        );
+    }
+    // Booted from elsewhere (mode 6, /axi/nvme), the bus is made for it.
+    let (ok, out) = runner(
+        dir.path(),
+        &disk,
+        &["--profile", "board", "--boot-mode", "6", "--dtb"],
+    );
+    assert!(ok, "{out}");
+    let other = out
+        .lines()
+        .last()
+        .expect("the device tree's path")
+        .to_string();
+    let get_other = |args: &[&str]| {
+        let out = Command::new("fdtget")
+            .arg(&other)
+            .args(args)
+            .output()
+            .expect("fdtget");
+        String::from_utf8_lossy(&out.stdout).trim().to_string()
+    };
+    assert_eq!(
+        get_other(&["/axi/nvme", "compatible"]),
+        "pci-host-ecam-generic"
+    );
+    assert_eq!(get_other(&["/soc@107c000000", "compatible"]), "simple-bus");
+    assert_eq!(
+        get_other(&["-t", "x", "/soc@107c000000", "#address-cells"]),
+        "2"
+    );
+    assert_eq!(get_other(&["-t", "x", wdt, "reg"]), "10 7d200000 0 308");
     assert_eq!(get(&["-t", "x", "/chosen/bootloader", "count"]), "1");
     assert_eq!(get(&["-t", "x", "/chosen/bootloader", "rsts"]), "1000");
     assert_eq!(get(&["-t", "x", "/chosen/bootloader", "partition"]), "1");
@@ -522,6 +643,51 @@ fn the_board_profile_gives_an_emmc_and_the_firmwares_facts() {
     assert!(
         ok && out.contains(&format!("user area {} bytes", 128 << 20)),
         "{out}"
+    );
+
+    // A boot whose device trees have no power-management block, while its
+    // config arms the firmware's watchdog, is refused; one that does not arm
+    // it gets no node.
+    put_dtb(dir.path(), &disk, "slots/bay0/board.dtb", None);
+    let (ok, out) = runner(
+        dir.path(),
+        &disk,
+        &["--profile", "board", "--fresh", "--dtb"],
+    );
+    assert!(
+        !ok && out.contains("have no power-management block"),
+        "{out}"
+    );
+    let config = dir.path().join("config.txt");
+    std::fs::write(&config, "include default.txt\n[all]\nkernel=kernel8.img\ncmdline=cmdline.txt\ninitramfs initramfs.cpio followkernel\ndevice_tree=board.dtb\n").expect("write");
+    run(
+        "mcopy",
+        &[
+            "-o",
+            "-i",
+            &format!("{}@@1M", disk.display()),
+            config.to_str().expect("utf-8"),
+            "::config.txt",
+        ],
+    );
+    let (ok, out) = runner(
+        dir.path(),
+        &disk,
+        &["--profile", "board", "--fresh", "--dtb"],
+    );
+    assert!(ok, "{out}");
+    let bare = out
+        .lines()
+        .last()
+        .expect("the device tree's path")
+        .to_string();
+    let none = Command::new("fdtget")
+        .args([&bare, wdt, "compatible"])
+        .output()
+        .expect("fdtget");
+    assert!(
+        !none.status.success(),
+        "a watchdog node with no kernel_watchdog_timeout"
     );
 }
 

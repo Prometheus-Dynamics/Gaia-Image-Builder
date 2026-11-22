@@ -1,0 +1,146 @@
+--- a/drivers/watchdog/i6300esb.c
++++ b/drivers/watchdog/i6300esb.c
+@@ -37,6 +37,9 @@
+ #include <linux/ioport.h>
+ #include <linux/uaccess.h>
+ #include <linux/io.h>
++#include <linux/of.h>
++#include <linux/of_platform.h>
++#include <linux/platform_device.h>
+ 
+ /* Module and version information */
+ #define ESB_MODULE_NAME "i6300ESB timer"
+@@ -93,6 +96,10 @@
+ 	struct watchdog_device wdd;
+ 	void __iomem *base;
+ 	struct pci_dev *pdev;
++	/* Gaia: the cell the watchdog is registered on (see esb_cell). */
++	struct platform_device *cell;
++	/* Gaia: the hardware counts this many percent of each second asked. */
++	u32 scale;
+ };
+ 
+ #define to_esb_dev(wptr) container_of(wptr, struct esb_dev, wdd)
+@@ -163,7 +170,9 @@
+ 	 * val will be 1 << 9 = 512, then write that to two
+ 	 * timers => 2 * 512 = 1024 (which is decremented at 1KHz)
+ 	 */
+-	val = time << 9;
++	/* Gaia: a slower guest's watchdog counts a longer hardware time (see
++	 * esb_cell); the timeout userspace sees is the one asked for. */
++	val = (u32)min_t(u64, (u64)time * edev->scale / 100, ESB_HEARTBEAT_MAX) << 9;
+ 
+ 	/* Write timer 1 */
+ 	esb_unlock_registers(edev);
+@@ -286,6 +295,63 @@
+ 	esb_timer_set_heartbeat(&edev->wdd, edev->wdd.timeout);
+ }
+ 
++/*
++ * Gaia (the board-like QEMU profile): a firmware-armed watchdog in a board's
++ * shape. When the device tree has a node compatible "gaia,firmware-watchdog"
++ * (at the path the board's own watchdog node has), the watchdog is
++ * registered on a child of that node's platform device, a "bcm2835-wdt"
++ * device with no of_node of its own, as bcm2835-pm's MFD cell is on the
++ * BCM2712. The child takes no driver. The watchdog starts at probe with the
++ * node's timeout-sec and is marked WDOG_HW_RUNNING, as bcm2835_wdt marks a
++ * watchdog the firmware armed, so the watchdog core feeds it until it is
++ * opened (CONFIG_WATCHDOG_OPEN_TIMEOUT) and not after the last close.
++ * The node's gaia,time-scale-percent (100 when absent) stretches every
++ * hardware countdown, for a guest that runs slower than the board: the
++ * timeouts userspace asks for and reads stay as asked.
++ * Returns 1 when the shape is made, 0 when the tree asks for none.
++ */
++static int esb_cell(struct esb_dev *edev)
++{
++	struct device_node *np;
++	struct platform_device *parent, *cell;
++	u32 timeout;
++	int ret;
++
++	np = of_find_compatible_node(NULL, NULL, "gaia,firmware-watchdog");
++	if (!np)
++		return 0;
++	parent = of_find_device_by_node(np);
++	if (!parent) {
++		of_node_put(np);
++		return -EPROBE_DEFER;
++	}
++	if (!of_property_read_u32(np, "timeout-sec", &timeout) &&
++	    timeout >= ESB_HEARTBEAT_MIN && timeout <= ESB_HEARTBEAT_MAX)
++		edev->wdd.timeout = timeout;
++	if (of_property_read_u32(np, "gaia,time-scale-percent", &edev->scale) ||
++	    edev->scale < 100 || edev->scale > 10000)
++		edev->scale = 100;
++	of_node_put(np);
++
++	cell = platform_device_alloc("bcm2835-wdt", PLATFORM_DEVID_NONE);
++	if (!cell) {
++		put_device(&parent->dev);
++		return -ENOMEM;
++	}
++	cell->dev.parent = &parent->dev;
++	put_device(&parent->dev);
++	ret = device_set_driver_override(&cell->dev, "gaia,none");
++	if (!ret)
++		ret = platform_device_add(cell);
++	if (ret) {
++		platform_device_put(cell);
++		return ret;
++	}
++	edev->cell = cell;
++	edev->wdd.parent = &cell->dev;
++	return 1;
++}
++
+ static int esb_probe(struct pci_dev *pdev,
+ 		const struct pci_device_id *ent)
+ {
+@@ -298,6 +364,7 @@
+ 
+ 	/* Check whether or not the hardware watchdog is there */
+ 	edev->pdev = pdev;
++	edev->scale = 100;
+ 	if (!esb_getdevice(edev))
+ 		return -ENODEV;
+ 
+@@ -311,17 +378,29 @@
+ 	watchdog_set_nowayout(&edev->wdd, nowayout);
+ 	watchdog_stop_on_reboot(&edev->wdd);
+ 	watchdog_stop_on_unregister(&edev->wdd);
++	ret = esb_cell(edev);
++	if (ret < 0)
++		goto err_unmap;
+ 	esb_initdevice(edev);
++	if (edev->cell) {
++		esb_timer_start(&edev->wdd);
++		set_bit(WDOG_HW_RUNNING, &edev->wdd.status);
++		dev_info(&pdev->dev, "armed at probe as the firmware's watchdog: %u s, on %s, counting %u%% of each second\n",
++			 edev->wdd.timeout, dev_name(&edev->cell->dev), edev->scale);
++	}
+ 
+ 	/* Register the watchdog so that userspace has access to it */
+ 	ret = watchdog_register_device(&edev->wdd);
+ 	if (ret != 0)
+-		goto err_unmap;
++		goto err_cell;
+ 	dev_info(&pdev->dev,
+ 		"initialized. heartbeat=%d sec (nowayout=%d)\n",
+ 		edev->wdd.timeout, nowayout);
+ 	return 0;
+ 
++err_cell:
++	if (edev->cell)
++		platform_device_unregister(edev->cell);
+ err_unmap:
+ 	iounmap(edev->base);
+ 	pci_release_region(edev->pdev, 0);
+@@ -334,6 +413,8 @@
+ 	struct esb_dev *edev = dev_get_drvdata(&pdev->dev);
+ 
+ 	watchdog_unregister_device(&edev->wdd);
++	if (edev->cell)
++		platform_device_unregister(edev->cell);
+ 	iounmap(edev->base);
+ 	pci_release_region(edev->pdev, 0);
+ 	pci_disable_device(edev->pdev);

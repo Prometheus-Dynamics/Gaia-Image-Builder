@@ -8,7 +8,10 @@
 # DEVICES is a description tree (a copy is made under OUT; the original is
 # not written), PRODUCT and BOARD the product and board files under it
 # (relative to DEVICES). The copy's board gets scripts/qemu-virt-kernel.config
-# as its last kernel fragment, and the product is built until its image's
+# as its last kernel fragment and scripts/qemu-virt-kernel/*.patch as its
+# last kernel patches (appended to the board's own `patches`; a board that
+# names none while its family does is refused, since a board's list would
+# replace the family's), and the product is built until its image's
 # `kernel` step, with the store the environment names (GAIA_STORE). Every
 # fragment line must take, as in any build: a line the kernel drops fails.
 # OUT/Image is the kernel, uncompressed. When the board makes an Image.gz
@@ -17,7 +20,9 @@
 # OUT/build.log the build. The kernel is the board's own source and
 # configuration but for the added lines, so it boots the image's initramfs
 # and slot chain as the board would. Pi hardware (RP1, the bcm2835 watchdog,
-# the firmware's boot count) is absent on virt.
+# the firmware's boot count) is absent on virt; the patches let the board
+# profile of scripts/qemu-rpi-slots.sh stand in for some of it (see
+# docs/board-qemu.md).
 #
 # Needs gaia on PATH ($GAIA names another), python3, and GAIA_STORE set.
 set -euo pipefail
@@ -31,10 +36,17 @@ gaia=${GAIA:-gaia}
 mkdir -p "$out"
 cp -a "$devices" "$out/devices"
 cp "$here/qemu-virt-kernel.config" "$(dirname "$out/devices/$board")/qemu-virt-kernel.config"
-# The board's fragment list gains the virt fragment, last, so its lines win.
-python3 -I - "$out/devices/$board" <<'PY'
-import re, sys
-path = sys.argv[1]
+mkdir -p "$(dirname "$out/devices/$board")/qemu-virt-kernel"
+patches=()
+for patch in "$here"/qemu-virt-kernel/*.patch; do
+	cp "$patch" "$(dirname "$out/devices/$board")/qemu-virt-kernel/"
+	patches+=("qemu-virt-kernel/$(basename "$patch")")
+done
+# The board's fragment list gains the virt fragment, last, so its lines win;
+# its kernel patches gain the virt patches, last.
+python3 -I - "$out/devices/$board" "${patches[@]}" <<'PY'
+import os, re, sys, tomllib
+path, patches = sys.argv[1], sys.argv[2:]
 text = open(path).read()
 match = re.search(r'^(fragments\s*=\s*\[)(.*?)(\])', text, re.M | re.S)
 if not match:
@@ -42,6 +54,23 @@ if not match:
 items = match.group(2).rstrip().rstrip(",")
 added = (items + ", " if items.strip() else "") + '"qemu-virt-kernel.config"'
 text = text[: match.start()] + match.group(1) + added + match.group(3) + text[match.end():]
+if patches:
+    quoted = ", ".join(f'{{ file = "{p}" }}' for p in patches)
+    kernel = tomllib.loads(text).get("kernel", {})
+    if "patches" in kernel:
+        match = re.search(r'^(patches\s*=\s*\[)(.*?)(\])', text, re.M | re.S)
+        items = match.group(2).rstrip().rstrip(",")
+        text = text[: match.start()] + match.group(1) + (items + ", " if items.strip() else "") + quoted + match.group(3) + text[match.end():]
+    else:
+        family = tomllib.loads(text).get("extends")
+        if family:
+            fam = tomllib.load(open(os.path.join(os.path.dirname(path), family), "rb"))
+            if fam.get("kernel", {}).get("patches"):
+                sys.exit(f"{path}: names no kernel `patches` while its family does; a board's list would replace the family's")
+        match = re.search(r'^fragments\s*=\s*\[.*?\]\n', text, re.M | re.S)
+        text = text[: match.end()] + f"patches = [{quoted}]\n" + text[match.end():]
+    if [p.get("file") for p in tomllib.loads(text)["kernel"]["patches"][-len(patches):]] != patches:
+        sys.exit(f"{path}: the virt patches are not the board's last kernel patches")
 open(path, "w").write(text)
 PY
 cd "$(dirname "$out/devices/$product")"

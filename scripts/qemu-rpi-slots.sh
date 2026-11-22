@@ -59,8 +59,12 @@
 # When the kernel logs "Restarting system with command '...tryboot...'"
 # (`reboot "0 tryboot"`), the next boot is a tryboot; any other restart or a
 # panic restart boots config.txt again, which is what the firmware does (a
-# panic forgets a pending tryboot). "Power down", or QEMU quitting without a
-# restart in the log, ends the loop.
+# panic forgets a pending tryboot). A watchdog that fires is a restart too,
+# as on the board: QEMU's WATCHDOG event (read from a second QMP socket,
+# <state>/qmp-events.sock, which QEMU waits on before it starts, and
+# logged in <state>/boot-N.events) ends the boot, and the next boots
+# config.txt. "Power down", or QEMU quitting without a restart in the log
+# or a watchdog event, ends the loop.
 #
 # Network (--net):
 # - tap: the host's tap qtap0 (a NetworkManager "shared" connection at
@@ -99,7 +103,26 @@
 #   [boot_count...] sections test too; rsts, 0x1000 on the first boot (a
 #   power-on) and 0x20 after a restart; and partition, the number of the
 #   FAT partition booted. These are the values Atlas read on Raze #1 and #2;
-# - config.txt's kernel_watchdog_timeout is read and recorded per boot.
+# - the firmware's watchdog: when the boot's config.txt sets
+#   kernel_watchdog_timeout, the firmware arms the SoC's watchdog before the
+#   kernel starts, and the kernel finds it running. Here a node compatible
+#   "gaia,firmware-watchdog" (timeout-sec from that setting) is put at the
+#   path the image's own device tree has its power-management block at
+#   (compatible brcm,bcm2712-pm or brcm,bcm2835-pm, whose watchdog cell the
+#   firmware arms), with that block's address as the CPU sees it, so the
+#   kernel names its device as the board's (107d200000.watchdog on a CM5).
+#   The virt kernel's patched i6300esb (scripts/qemu-virt-kernel) registers
+#   the watchdog on a "bcm2835-wdt" child of that device with no device
+#   tree node of its own, as the BCM2712's MFD cell is, and starts it at
+#   probe, marked as running. The device trees read are the boot's
+#   device_tree= or else every .dtb in its os_prefix directory, which must
+#   agree. Without kernel_watchdog_timeout there is no node, and the
+#   i6300esb is the plain one, stopped until opened. --watchdog-scale P
+#   makes that watchdog's hardware count P percent of each second asked
+#   (gaia,time-scale-percent; the timeouts userspace sets and reads stay as
+#   asked), for a guest that runs slower than the board under TCG: P is
+#   the guest's time over the board's for the same stretch of the boot,
+#   measured, and each boot records it as not like the board;
 # The default profile (--profile virt) is unchanged: a virtio disk, and no
 # count, rsts or partition in the device tree.
 #
@@ -124,6 +147,9 @@
 #   --boot-count N  the boot count the config sections test (default 0);
 #                   with --profile board, the count before the first boot
 #   --boot-mode N   the firmware's boot mode (default 1)
+#   --watchdog-scale P  with --profile board: the firmware watchdog's
+#                   hardware counts P percent of each second (100-10000,
+#                   default 100; see above)
 #   --hostfwd H:G   with --net user: forward host TCP port H to guest port
 #                   G (repeatable; replaces the defaults)
 #   --append ARGS   add ARGS to every boot's kernel command line
@@ -157,6 +183,7 @@ usage() { sed -n '2,/^set -euo/{/^set -euo/d;s/^# \{0,1\}//;p}' "$0"; }
 args_given=("$@")
 in_netns=0
 profile=virt
+watchdog_scale=100
 # The CM5's eMMC hardware areas (Atlas, Raze #1 and #2: mmcblk0boot0 and
 # mmcblk0boot1 4 MiB block devices, mmcblk0rpmb 4 MiB).
 emmc_boot=$((4 << 20))
@@ -190,6 +217,7 @@ while [[ $# -gt 0 ]]; do
 	case "$1" in
 	--state) state="$2"; shift 2 ;;
 	--profile) profile="$2"; shift 2 ;;
+	--watchdog-scale) watchdog_scale="$2"; shift 2 ;;
 	--fresh) fresh=1; shift ;;
 	--kernel) kernel_override="$2"; shift 2 ;;
 	--disk-size) disk_size="$2"; shift 2 ;;
@@ -243,6 +271,8 @@ for n in "${trial_at[@]}"; do
 done
 [[ ${#trial_at[@]} -eq 0 || -n $trial_append ]] || { echo "--trial-at needs --trial-append" >&2; exit 2; }
 [[ $boot_mode =~ ^[0-9]+$ ]] || { echo "--boot-mode is a number" >&2; exit 2; }
+[[ $watchdog_scale =~ ^[0-9]+$ && $watchdog_scale -ge 100 && $watchdog_scale -le 10000 ]] ||
+	{ echo "--watchdog-scale is a percentage from 100 to 10000, not $watchdog_scale" >&2; exit 2; }
 case "$profile" in
 virt | board) ;;
 *) echo "--profile is virt or board, not $profile" >&2; exit 2 ;;
@@ -412,7 +442,7 @@ read_config() {
 # Sets boot_kernel, boot_initramfs, boot_cmdline from the FAT for tryboot $1.
 plan_boot() {
 	local config=config.txt settings key value prefix="" kernel="" cmdline=cmdline.txt initramfs="" arg out
-	local overlay_prefix=overlays/ name overlays=()
+	local overlay_prefix=overlays/ name overlays=() device_tree=""
 	boot_watchdog=""
 	[[ $1 -eq 0 ]] || config=tryboot.txt
 	cfg_on=1
@@ -428,6 +458,7 @@ plan_boot() {
 		initramfs) initramfs=${value%% *} ;;
 		overlay_prefix) overlay_prefix=$value ;;
 		kernel_watchdog_timeout) boot_watchdog=$value ;;
+		device_tree) device_tree=$value ;;
 		dtoverlay)
 			name=${value%%[,:]*}
 			[[ -z $name ]] || overlays+=("$name")
@@ -439,6 +470,8 @@ plan_boot() {
 		boot_overlays+=("$prefix$overlay_prefix$name.dtbo")
 	done
 	boot_config=$config
+	boot_prefix=$prefix
+	boot_device_tree=$device_tree
 	if [[ -z $kernel ]]; then
 		kernel=kernel8.img
 		fat_has "${prefix}kernel_2712.img" && kernel=kernel_2712.img
@@ -546,6 +579,133 @@ emulate_marker() {
 	fi
 }
 
+# The firmware's watchdog in the image's own device trees: "<path> <address>
+# <size>", the power-management block's node path and its address and size
+# as the CPU sees them (through every parent's ranges). Empty when none has
+# one; fails when they disagree.
+image_watchdog() {
+	local files=() file dir
+	rm -rf "$state/image-dt"
+	mkdir -p "$state/image-dt"
+	if [[ -n $boot_device_tree ]]; then
+		files=("$boot_prefix$boot_device_tree")
+	else
+		dir=${boot_prefix%/}
+		while read -r file; do
+			files+=("${dir:+$dir/}$file")
+		done < <(mdir -b -i "$fat" "::${dir:-/}" 2> /dev/null | sed 's#.*/##' | grep -i '\.dtb$' || true)
+	fi
+	local n=0 got=()
+	for file in ${files[@]+"${files[@]}"}; do
+		fat_has "$file" || continue
+		n=$((n + 1))
+		mcopy -n -i "$fat" "::$file" "$state/image-dt/$n.dtb"
+		got+=("$state/image-dt/$n.dtb")
+	done
+	[[ ${#got[@]} -gt 0 ]] || return 0
+	python3 - "${got[@]}" <<'FDT'
+import struct, sys
+
+def nodes(blob):
+    """(path, props) for every node of a flattened device tree."""
+    magic, _, off_struct, off_strings = struct.unpack(">IIII", blob[:16])
+    if magic != 0xD00DFEED:
+        sys.exit("not a device tree")
+    pos, stack, out = off_struct, [], []
+    def name_at(o):
+        return blob[off_strings + o : blob.index(b"\0", off_strings + o)].decode()
+    while True:
+        (token,) = struct.unpack(">I", blob[pos : pos + 4])
+        pos += 4
+        if token == 1:
+            end = blob.index(b"\0", pos)
+            name = blob[pos:end].decode()
+            pos = (end + 4) & ~3
+            stack.append((name, {}))
+            out.append(("/" + "/".join(n for n, _ in stack[1:]), stack[-1][1]))
+        elif token == 2:
+            stack.pop()
+        elif token == 3:
+            size, nameoff = struct.unpack(">II", blob[pos : pos + 8])
+            pos += 8
+            stack[-1][1][name_at(nameoff)] = blob[pos : pos + size]
+            pos = (pos + size + 3) & ~3
+        elif token == 4:
+            continue
+        elif token == 9:
+            return out
+
+def cells(data, n):
+    return [struct.unpack(">" + "I" * n, data[i : i + 4 * n]) for i in range(0, len(data), 4 * n)]
+
+def number(cs):
+    v = 0
+    for c in cs:
+        v = (v << 32) | c
+    return v
+
+COMPATIBLE = {"brcm,bcm2712-pm", "brcm,bcm2835-pm"}
+found = set()
+for file in sys.argv[1:]:
+    tree = dict(nodes(open(file, "rb").read()))
+    def prop_int(path, name, default):
+        data = tree.get(path, {}).get(name)
+        return struct.unpack(">I", data)[0] if data else default
+    for path, props in tree.items():
+        compatible = set(props.get("compatible", b"").decode(errors="replace").split("\0"))
+        if not compatible & COMPATIBLE or "reg" not in props:
+            continue
+        parent = path.rsplit("/", 1)[0] or "/"
+        ac, sc = prop_int(parent, "#address-cells", 2), prop_int(parent, "#size-cells", 1)
+        reg = cells(props["reg"], ac + sc)[0]
+        address, size = number(reg[:ac]), number(reg[ac:])
+        # Through each parent's ranges up to the root.
+        node = parent
+        while node != "/":
+            up = node.rsplit("/", 1)[0] or "/"
+            if "ranges" not in tree[node]:
+                sys.exit(f"{path}: {node} has no ranges: no CPU address")
+            rng = tree[node]["ranges"]
+            if rng:
+                cac = prop_int(node, "#address-cells", 2)
+                pac = prop_int(up, "#address-cells", 2)
+                csc = prop_int(node, "#size-cells", 1)
+                for r in cells(rng, cac + pac + csc):
+                    child, parent_at, span = number(r[:cac]), number(r[cac : cac + pac]), number(r[cac + pac :])
+                    if child <= address < child + span:
+                        address = address - child + parent_at
+                        break
+                else:
+                    sys.exit(f"{path}: {address:#x} is outside {node}'s ranges")
+            node = up
+        found.add((path, address, size))
+if len(found) > 1:
+    sys.exit("the image's device trees disagree on the power-management block: " + "; ".join(f"{p} {a:#x}" for p, a, _ in sorted(found)))
+for path, address, size in found:
+    print(path, f"{address:#x}", f"{size:#x}")
+FDT
+}
+
+# The firmware's watchdog node (see the board profile): at the image's path,
+# its parents made simple buses where the virt tree has none.
+firmware_watchdog() {
+	local path address size part at=""
+	read -r path address size <<< "$1"
+	for part in $(tr '/' ' ' <<< "${path%/*}"); do
+		at+="/$part"
+		if ! fdtget "$state/virt.dtb" "$at" compatible > /dev/null 2>&1; then
+			fdtput -p -t s "$state/virt.dtb" "$at" compatible simple-bus
+			fdtput -t x "$state/virt.dtb" "$at" '#address-cells' 2
+			fdtput -t x "$state/virt.dtb" "$at" '#size-cells' 2
+			fdtput -t x "$state/virt.dtb" "$at" ranges
+		fi
+	done
+	fdtput -p -t s "$state/virt.dtb" "$path" compatible gaia,firmware-watchdog
+	fdtput -t x "$state/virt.dtb" "$path" reg $(printf '%x ' $((address >> 32)) $((address & 0xffffffff)) $((size >> 32)) $((size & 0xffffffff)))
+	fdtput -t x "$state/virt.dtb" "$path" timeout-sec "$(printf %x "$boot_watchdog")"
+	[[ $watchdog_scale -eq 100 ]] || fdtput -t x "$state/virt.dtb" "$path" gaia,time-scale-percent "$(printf %x "$watchdog_scale")"
+}
+
 # The virt machine's device tree with /chosen/bootloader/tryboot set to $1,
 # the boot mode $2, the board's serial number, and the disk's node at the
 # boot source's path $3 when there is one.
@@ -562,8 +722,23 @@ make_dtb() {
 		fdtput -t x "$state/virt.dtb" /chosen/bootloader partition "$(printf %x "$fat_part")"
 	fi
 	emulate_marker
-	[[ -n $3 ]] || return 0
-	local node
+	move_node "$3" || return 1
+	if [[ $profile == board ]]; then
+		firmware_wdt=""
+		if [[ -n $boot_watchdog ]]; then
+			[[ $boot_watchdog =~ ^[0-9]+$ && $boot_watchdog -gt 0 ]] || { echo "$boot_config: kernel_watchdog_timeout=$boot_watchdog is not a number of seconds" >&2; return 1; }
+			firmware_wdt=$(image_watchdog) || return 1
+			[[ -n $firmware_wdt ]] || { echo "$boot_config sets kernel_watchdog_timeout, and the image's device trees have no power-management block (brcm,bcm2712-pm or brcm,bcm2835-pm) for the firmware's watchdog" >&2; return 1; }
+			firmware_watchdog "$firmware_wdt"
+		fi
+	fi
+}
+
+# Moves the disk's node (the PCI host's in the board profile) to the boot
+# source's path $1, and checks it there.
+move_node() {
+	[[ -n $1 ]] || return 0
+	local node base
 	if [[ $profile == board ]]; then
 		# The eMMC's controller is on PCI: the PCI host's node moves.
 		node=$(fdtget -l "$state/virt.dtb" / | grep -m1 '^pcie@' || true)
@@ -574,7 +749,7 @@ make_dtb() {
 		node="virtio_mmio@$base"
 	fi
 	dtc -q -I dtb -O dts -o "$state/virt.dts" "$state/virt.dtb"
-	python3 - "$state/virt.dts" "$node" "$3" <<'MOVE'
+	python3 - "$state/virt.dts" "$node" "$1" <<'MOVE'
 import sys
 path, node, to = sys.argv[1], sys.argv[2], sys.argv[3]
 lines = open(path).read().split("\n")
@@ -601,15 +776,15 @@ MOVE
 	dtc -q -I dts -O dtb -o "$state/virt.dtb" "$state/virt.dts"
 	# Where the guest will look for it: there, and the disk's.
 	local compatible reg
-	compatible=$(fdtget "$state/virt.dtb" "$3" compatible 2> /dev/null || true)
+	compatible=$(fdtget "$state/virt.dtb" "$1" compatible 2> /dev/null || true)
 	if [[ $profile == board ]]; then
 		[[ $compatible == pci-host-ecam-generic ]] && return 0
-		echo "the device tree has no PCI host node (the eMMC's controller) at $3: compatible '$compatible'" >&2
+		echo "the device tree has no PCI host node (the eMMC's controller) at $1: compatible '$compatible'" >&2
 		return 1
 	fi
-	reg=$(fdtget -t x "$state/virt.dtb" "$3" reg 2> /dev/null || true)
+	reg=$(fdtget -t x "$state/virt.dtb" "$1" reg 2> /dev/null || true)
 	if [[ $compatible != "virtio,mmio" || " $reg " != *" $base "* ]]; then
-		echo "the device tree has no virtio-mmio node for the disk (transport $base) at $3: compatible '$compatible', reg '$reg'" >&2
+		echo "the device tree has no virtio-mmio node for the disk (transport $base) at $1: compatible '$compatible', reg '$reg'" >&2
 		return 1
 	fi
 }
@@ -722,7 +897,12 @@ while :; do
 		if [[ $profile == board ]]; then
 			echo "disk: QEMU emmc on sdhci-pci, user area $emmc_user bytes (a power of two; not the board's size), boot0/boot1 $emmc_boot bytes, rpmb $emmc_rpmb bytes; its PCI host at the boot source's path ${boot_from:-(none named)}"
 			echo "firmware: count $count, rsts $rsts, partition $fat_part, boot-mode $boot_mode, tryboot $this_tryboot"
-			echo "kernel_watchdog_timeout: ${boot_watchdog:-none} in $boot_config (recorded; not armed by this runner)"
+			if [[ -n $firmware_wdt ]]; then
+				echo "firmware watchdog: armed, $boot_watchdog s (kernel_watchdog_timeout in $boot_config), node gaia,firmware-watchdog at ${firmware_wdt%% *} (the image's power-management block, CPU address ${firmware_wdt#* })"
+				[[ $watchdog_scale -eq 100 ]] || echo "firmware watchdog: NOT like the board: its hardware counts $watchdog_scale% of each second asked (--watchdog-scale), for a guest slower than the board"
+			else
+				echo "firmware watchdog: none ($boot_config sets no kernel_watchdog_timeout)"
+			fi
 		fi
 		if [[ $watchdog -eq 1 ]]; then
 			echo "watchdog: i6300esb attached"
@@ -746,13 +926,52 @@ while :; do
 		args+=(-chardev "socket,id=con,path=$state/console.sock,server=on,wait=off,logfile=$log"
 			-serial chardev:con -monitor none)
 	fi
+	# QEMU's events, from before the first instruction: QEMU waits for this
+	# listener on its socket.
+	events="$state/boot-$boots.events"
+	rm -f "$state/qmp-events.sock"
+	python3 - "$state/qmp-events.sock" "$events" <<'QMP' &
+import json, socket, sys, time
+path, out = sys.argv[1], sys.argv[2]
+for _ in range(600):
+    try:
+        s = socket.socket(socket.AF_UNIX)
+        s.connect(path)
+        break
+    except OSError:
+        s.close()
+        time.sleep(0.1)
+else:
+    sys.exit(f"no QMP events socket at {path}")
+f = s.makefile("rw")
+f.readline()
+f.write(json.dumps({"execute": "qmp_capabilities"}) + "\n")
+f.flush()
+with open(out, "w") as log:
+    # QEMU starts the guest once this listener is connected.
+    log.write(f"{time.time():.6f} START {{}}\n")
+    log.flush()
+    for line in f:
+        msg = json.loads(line)
+        if "event" in msg:
+            stamp = msg.get("timestamp", {})
+            log.write(f"{stamp.get('seconds', 0)}.{stamp.get('microseconds', 0):06d} {msg['event']} {json.dumps(msg.get('data', {}))}\n")
+            log.flush()
+QMP
+	events_pid=$!
 	status=0
-	"$qemu" "${args[@]}" -dtb "$state/virt.dtb" "${qemu_extra[@]}" || status=$?
+	"$qemu" "${args[@]}" -qmp "unix:$state/qmp-events.sock,server=on,wait=on" -dtb "$state/virt.dtb" "${qemu_extra[@]}" || status=$?
+	wait "$events_pid" || true
 	if [[ $status -ne 0 ]]; then
 		echo "== QEMU exited with $status" >&2
 		exit "$status"
 	fi
-	if grep -aq "Restarting system with command '[^']*tryboot" "$log"; then
+	if grep -q ' WATCHDOG ' "$events" 2> /dev/null; then
+		# The watchdog's reset: config.txt again (a pending tryboot is
+		# forgotten, as after a panic).
+		rm -f "$state/tryboot-next"
+		echo "== restart by the watchdog, $(awk '$2 == "START" { t = $1 } $2 == "WATCHDOG" && t { printf "%.1f s after QEMU started the guest", $1 - t; exit }' "$events"): $(grep -m1 ' WATCHDOG ' "$events")" >&2
+	elif grep -aq "Restarting system with command '[^']*tryboot" "$log"; then
 		: > "$state/tryboot-next"
 		echo "== restart into tryboot" >&2
 	elif grep -aqE 'reboot: Restarting system|Rebooting in [0-9]+ seconds' "$log"; then
