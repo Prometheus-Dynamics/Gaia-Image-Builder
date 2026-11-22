@@ -164,6 +164,8 @@ fn the_same_tree_gives_the_same_image_and_it_is_clean() {
     }
     if !tool("dump.erofs").is_empty() {
         for (inside, want) in [
+            // The image's own root: root's and 0755, whoever built it.
+            ("/", "Uid: 0   Gid: 0  Access: 0755/"),
             ("/usr/bin/tool", "Uid: 0   Gid: 0"),
             ("/var/lib/camera/state", "Uid: 1000   Gid: 1000"),
         ] {

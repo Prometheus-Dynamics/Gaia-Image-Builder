@@ -4,7 +4,10 @@
 //! path's uid, gid and mode from the tree's entries (root and the stored
 //! mode for a path not listed), and `mkfs.erofs --tar=f` builds the image
 //! from it. So owners reach the image without root, and the builder's own
-//! uid never does. The UUID comes from the tree's [`owned_digest`], the
+//! uid never does. The stream's first entry is the image's root directory,
+//! `./`: root's, mode 0755, unless the tree lists its root (path `` or `.`).
+//! Without it mkfs.erofs gives the root inode the builder's uid and gid and
+//! mode 0777 (erofs-utils 1.9.4), and the image's `/` is world-writable. The UUID comes from the tree's [`owned_digest`], the
 //! build time is 0 and extended attributes are off, so the same tree gives
 //! the same bytes on every host. The block size is 4096 bytes, named
 //! (`-b4096`), not the build machine's page size, which is mkfs.erofs's
@@ -473,7 +476,9 @@ pub fn image_key(version: &[u8], options: &ImageOptions<'_>, owned: &Digest) -> 
     // ztailpacking asked for are checked against it. No image made before
     // that is taken for one that was.
     // 5: the block size is 4096, named, and checked in the superblock.
-    let mut key = KeyBuilder::new(NAME, 5)
+    // 6: the image's root directory is root's and 0755 (before, the
+    // builder's uid and gid and 0777). No image made before is taken.
+    let mut key = KeyBuilder::new(NAME, 6)
         .config("mkfs.erofs", version)
         .config("compression", options.compression)
         .config("level", options.level.to_string())
@@ -598,6 +603,9 @@ fn remove_tree(dir: &Path) {
 /// The setuid and setgid bits.
 const SETID: u32 = 0o6000;
 
+/// The image's root directory when the tree does not list it: root's, 0755.
+const ROOT_DIR: (u32, u32, u32) = (0, 0, 0o755);
+
 /// The tree as a tar: paths sorted, times 0, numeric owners with no
 /// names, owners and modes from `entries` or root and the stored mode, and
 /// no setuid or setgid bit but on the paths in `keep`. Returns the report of
@@ -633,6 +641,20 @@ fn write_tar(
     let mut report = String::new();
     let mut builder = tar::Builder::new(std::io::BufWriter::new(std::fs::File::create(out)?));
     builder.mode(tar::HeaderMode::Deterministic);
+    // The root directory first: mkfs.erofs takes the root inode's owner and
+    // mode from this entry, and from the builder when there is none.
+    let (uid, gid, mode) = match by_path.get("").or_else(|| by_path.get(".")) {
+        Some(e) => (e.uid, e.gid, e.mode & 0o7777 & !SETID),
+        None => ROOT_DIR,
+    };
+    let mut header = tar::Header::new_gnu();
+    header.set_entry_type(tar::EntryType::Directory);
+    header.set_uid(u64::from(uid));
+    header.set_gid(u64::from(gid));
+    header.set_mtime(0);
+    header.set_mode(mode);
+    header.set_size(0);
+    builder.append_data(&mut header, "./", std::io::empty())?;
     for (path, full) in paths {
         let meta = std::fs::symlink_metadata(&full)?;
         let (uid, gid, mut mode) = match by_path.get(path.as_str()) {
@@ -769,10 +791,56 @@ mod tests {
         assert_eq!(modes["bin/busybox"], 0o755);
         assert_eq!(modes["bin/su"], 0o6750);
         assert_eq!(modes["bin/plain"], 0o755);
+        assert_eq!(modes["./"], 0o755, "{modes:?}");
         let none = write_tar(&root, &entries[2..], &[], &tar)
             .expect("io")
             .expect("ok");
         assert_eq!(none, "no setuid or setgid bits\n");
+    }
+
+    /// The stream's first entry is the root directory, root's and 0755, or
+    /// as the tree lists it: never the stored directory's owner or mode.
+    #[test]
+    fn the_root_directory_comes_first_and_is_roots() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let root = dir.path().join("root");
+        std::fs::create_dir_all(root.join("etc")).expect("mkdir");
+        std::fs::set_permissions(
+            &root,
+            <std::fs::Permissions as std::os::unix::fs::PermissionsExt>::from_mode(0o777),
+        )
+        .expect("chmod");
+        let tar = dir.path().join("t.tar");
+        let first = |entries: &[FileEntry]| {
+            write_tar(&root, entries, &[], &tar)
+                .expect("io")
+                .expect("ok");
+            let mut archive = tar::Archive::new(std::fs::File::open(&tar).expect("open"));
+            let mut all = archive.entries().expect("entries");
+            let e = all.next().expect("an entry").expect("entry");
+            let h = e.header();
+            (
+                e.path().expect("path").display().to_string(),
+                h.entry_type(),
+                h.uid().expect("uid"),
+                h.gid().expect("gid"),
+                h.mode().expect("mode"),
+            )
+        };
+        assert_eq!(
+            first(&[]),
+            ("./".into(), tar::EntryType::Directory, 0, 0, 0o755)
+        );
+        let listed = FileEntry {
+            path: "".into(),
+            mode: 0o40750,
+            uid: 5,
+            gid: 6,
+        };
+        assert_eq!(
+            first(&[listed]),
+            ("./".into(), tar::EntryType::Directory, 5, 6, 0o750)
+        );
     }
 
     fn options<'a>(compression: &'a str, level: u32, extended: &'a [&'a str]) -> ImageOptions<'a> {
