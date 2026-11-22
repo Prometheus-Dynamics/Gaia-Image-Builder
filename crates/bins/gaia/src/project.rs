@@ -17,6 +17,8 @@ const PATH_TOOLS: &[(&str, &str)] = &[
     ("mke2fs", "mke2fs"),
     ("debugfs", "debugfs"),
     ("mkfs_erofs", "mkfs.erofs"),
+    ("mformat", "mformat"),
+    ("mcopy", "mcopy"),
     ("patch", "patch"),
 ];
 

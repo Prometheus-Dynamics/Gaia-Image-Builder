@@ -1,0 +1,124 @@
+# A Raspberry Pi boot served whole into RAM (`boot_ramdisk=1`): what a
+# board's EEPROM asks for when it boots over USB (rpiboot) or the network
+# with no disk of its own to read. It asks for config.txt, finds
+# `boot_ramdisk=1`, then asks for boot.img and boots from the FAT image as
+# it would from a boot partition.
+#
+# The output `boot` is that directory: config.txt (`boot_ramdisk=1` and
+# nothing else) and boot.img, a FAT16 image (deterministic: see
+# gaia.fs.vfat) holding, at its root:
+# - the kernel, as `kernel_name` (kernel8.img);
+# - the built tree as a newc initramfs, as `initramfs_name`; the whole
+#   system runs from it;
+# - the device trees and overlays `device_trees` names, out of the kernel
+#   build's (`path` or `path=to`, e.g. `dwc2.dtbo=overlays/dwc2.dtbo`);
+# - config.txt (`config`, the firmware's settings: it must load the kernel
+#   and the initramfs by those names) and cmdline.txt (`cmdline`), as the
+#   product and board give them.
+# `boot-image` is boot.img alone.
+#
+# Proven shape: Atlas's RAM stage booted Raze #2 (a CM5, EEPROM-entered
+# USB boot) this way on 2026-11-22. That image was not made by this recipe.
+version = 1
+name = "rpi-ramdisk-boot"
+description = "A Raspberry Pi RAM boot: config.txt with boot_ramdisk=1 beside a FAT16 boot.img of the kernel, the built tree as initramfs, device trees, config.txt and cmdline.txt."
+
+[stages]
+initramfs = "gaia.initramfs"
+kernel = "gaia.tree.role"
+cpio = "gaia.tree.role"
+device_trees = "gaia.tree.select"
+config = "gaia.tree.text"
+cmdline = "gaia.tree.text"
+fat = "gaia.fs.vfat"
+outer = "gaia.tree.text"
+serve = "gaia.tree.file"
+
+[[connects]]
+from = "kernel.tree"
+to = "cpio.tree"
+
+[[connects]]
+from = "initramfs.archive"
+to = "cpio.from"
+
+[[connects]]
+from = "cpio.tree"
+to = "device_trees.tree"
+
+[[connects]]
+from = "device_trees.tree"
+to = "config.tree"
+
+[[connects]]
+from = "config.tree"
+to = "cmdline.tree"
+
+[[connects]]
+from = "cmdline.tree"
+to = "fat.tree"
+
+[[connects]]
+from = "outer.tree"
+to = "serve.tree"
+
+[[connects]]
+from = "fat.image"
+to = "serve.file"
+
+[inputs]
+build = ["initramfs.tree"]
+kernel = ["kernel.from"]
+device-trees = ["device_trees.from"]
+
+[outputs]
+boot = "serve.tree"
+boot-image = "fat.image"
+
+[consts]
+"config.path" = "config.txt"
+"cmdline.path" = "cmdline.txt"
+# FAT16: what the firmware was proven to boot from; FAT32 is untried.
+"fat.fat_size" = 16
+"outer.path" = "config.txt"
+"outer.text" = "boot_ramdisk=1\n"
+"serve.path" = "boot.img"
+
+[parameters.kernel_name]
+type = "string"
+default = "kernel8.img"
+description = "The kernel's name in boot.img; config.txt's kernel= names it."
+sets = ["kernel.role"]
+
+[parameters.kernel_path]
+type = "string"
+default = ""
+description = "The kernel's file in the kernel build's output, when it holds more than one (e.g. Image beside Image.gz); empty takes its one file."
+sets = ["kernel.path"]
+
+[parameters.initramfs_name]
+type = "string"
+default = "initramfs.cpio"
+description = "The initramfs's name in boot.img; config.txt's `initramfs <name> followkernel` names it."
+sets = ["cpio.role"]
+
+[parameters.device_trees]
+type = "string"
+description = "The device trees and overlays boot.img holds, out of the kernel build's: whitespace-separated, each `path` (the same path in boot.img) or `path=to`."
+sets = ["device_trees.files"]
+
+[parameters.config]
+type = "string"
+description = "boot.img's config.txt, as the firmware reads it."
+sets = ["config.text"]
+
+[parameters.cmdline]
+type = "string"
+description = "boot.img's cmdline.txt: the kernel command line."
+sets = ["cmdline.text"]
+
+[parameters.size]
+type = "int"
+default = 0
+description = "boot.img's size in bytes; 0 sizes it to the content (see gaia.fs.vfat)."
+sets = ["fat.size"]

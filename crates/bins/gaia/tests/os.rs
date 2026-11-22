@@ -1362,6 +1362,135 @@ fn what_an_image_names_and_its_recipe_does_not_take_is_refused() {
     );
 }
 
+/// `rpi-ramdisk-boot`: the image's whole tree as the initramfs, the kernel
+/// build's kernel and the device trees the product names, with the
+/// product's config.txt and cmdline.txt, in a FAT16 boot.img; the output is
+/// that image beside the outer config.txt.
+#[test]
+fn a_ramdisk_boot_takes_the_kernel_the_tree_and_the_named_device_trees() {
+    let dir = project();
+    let product = dir
+        .path()
+        .join("examples/products/zero-3e-demo/product.toml");
+    edit(
+        &product,
+        "recipe = \"sd-image\"",
+        "recipe = \"rpi-ramdisk-boot\"",
+    );
+    edit(
+        &product,
+        "id = \"zero-3e-demo\"",
+        "device_trees = \"board.dtb gadget.dtbo=overlays/gadget.dtbo\"\nconfig = \"kernel=kernel8.img\\ninitramfs initramfs.cpio followkernel\\n\"\ncmdline = \"rdinit=/init\"",
+    );
+    let out = plan(
+        dir.path(),
+        &[
+            "--tool",
+            "mformat=/opt/tools/mformat",
+            "--tool",
+            "mcopy=/opt/tools/mcopy",
+        ],
+    );
+    let err = String::from_utf8_lossy(&out.stderr);
+    assert!(out.status.success(), "{err}");
+    let text = String::from_utf8_lossy(&out.stdout)
+        .split(' ')
+        .filter(|word| !word.is_empty())
+        .collect::<Vec<_>>()
+        .join(" ");
+    for line in [
+        "zero-3e-demo.rootfs.tree -> zero-3e-demo::initramfs.tree",
+        "zero-3e-demo.kernel.kernel -> zero-3e-demo::kernel.from",
+        "zero-3e-demo::kernel.tree -> zero-3e-demo::cpio.tree",
+        "zero-3e-demo::initramfs.archive -> zero-3e-demo::cpio.from",
+        "zero-3e-demo.kernel.device_trees -> zero-3e-demo::device_trees.from",
+        "zero-3e-demo::cpio.tree -> zero-3e-demo::device_trees.tree",
+        "zero-3e-demo::device_trees.tree -> zero-3e-demo::config.tree",
+        "zero-3e-demo::config.tree -> zero-3e-demo::cmdline.tree",
+        "zero-3e-demo::cmdline.tree -> zero-3e-demo::fat.tree",
+        "zero-3e-demo::outer.tree -> zero-3e-demo::serve.tree",
+        "zero-3e-demo::fat.image -> zero-3e-demo::serve.file",
+        "zero-3e-demo::serve.tree -> host.zero-3e-demo.boot",
+        "zero-3e-demo::fat.image -> host.zero-3e-demo.boot-image",
+        // boot.img's mtools.
+        "tool mformat = /opt/tools/mformat",
+        "tool mcopy = /opt/tools/mcopy",
+    ] {
+        assert!(text.contains(line), "the plan has no line {line:?}\n{text}");
+    }
+    // With no --tool, mtools are looked up on PATH, as mke2fs is.
+    let bin = dir.path().join("bin");
+    std::fs::create_dir_all(&bin).expect("mkdir");
+    for tool in ["mformat", "mcopy"] {
+        std::fs::write(bin.join(tool), "#!/bin/sh\n").expect("write");
+        std::fs::set_permissions(
+            bin.join(tool),
+            std::os::unix::fs::PermissionsExt::from_mode(0o755),
+        )
+        .expect("chmod");
+    }
+    let path = format!(
+        "{}:{}",
+        bin.display(),
+        std::env::var("PATH").unwrap_or_default()
+    );
+    let looked_up = plan_env(dir.path(), &[], &[("PATH", path.as_str())]);
+    let err = String::from_utf8_lossy(&looked_up.stderr);
+    assert!(looked_up.status.success(), "{err}");
+    let found = String::from_utf8_lossy(&looked_up.stdout)
+        .split(' ')
+        .filter(|word| !word.is_empty())
+        .collect::<Vec<_>>()
+        .join(" ");
+    for tool in ["mformat", "mcopy"] {
+        let line = format!("tool {tool} = {}", bin.join(tool).display());
+        assert!(
+            found.contains(&line),
+            "the plan has no line {line:?}\n{found}"
+        );
+    }
+    // What the firmware is proven to read: the outer config.txt with
+    // boot_ramdisk=1 alone, beside boot.img, a FAT16 image with the
+    // kernel, the initramfs and the product's two files by their names.
+    let json = plan(
+        dir.path(),
+        &[
+            "--tool",
+            "mformat=/opt/tools/mformat",
+            "--tool",
+            "mcopy=/opt/tools/mcopy",
+            "--json",
+        ],
+    );
+    let both: serde_json::Value = serde_json::from_slice(&json.stdout).expect("json");
+    let nodes = both["graph"]["graph"]["nodes"].as_array().expect("nodes");
+    let consts = |label: &str| {
+        &nodes
+            .iter()
+            .find(|n| n["label"] == label)
+            .unwrap_or_else(|| panic!("no node {label}"))["consts"]
+    };
+    let value = |label: &str, port: &str| consts(label)[port]["value"].clone();
+    assert_eq!(value("zero-3e-demo::outer", "path"), "config.txt");
+    assert_eq!(value("zero-3e-demo::outer", "text"), "boot_ramdisk=1\n");
+    assert_eq!(value("zero-3e-demo::serve", "path"), "boot.img");
+    assert_eq!(value("zero-3e-demo::fat", "fat_size"), 16);
+    assert_eq!(value("zero-3e-demo::fat", "size"), 0);
+    assert_eq!(value("zero-3e-demo::kernel", "role"), "kernel8.img");
+    assert_eq!(value("zero-3e-demo::cpio", "role"), "initramfs.cpio");
+    assert_eq!(value("zero-3e-demo::config", "path"), "config.txt");
+    assert_eq!(
+        value("zero-3e-demo::config", "text"),
+        "kernel=kernel8.img\ninitramfs initramfs.cpio followkernel\n"
+    );
+    assert_eq!(value("zero-3e-demo::cmdline", "path"), "cmdline.txt");
+    assert_eq!(value("zero-3e-demo::cmdline", "text"), "rdinit=/init");
+    assert_eq!(
+        value("zero-3e-demo::device_trees", "files"),
+        "board.dtb gadget.dtbo=overlays/gadget.dtbo"
+    );
+}
+
 /// A recipe takes what the image's generator wrote by role, the board's
 /// base command line and the OS build's host tools: no file name of the
 /// generator's is in the recipe or the product.

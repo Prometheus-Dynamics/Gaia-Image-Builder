@@ -117,6 +117,12 @@ fn every_recipe_plans_for_the_generic_test_board() {
         if recipe.inputs.contains_key("generated") {
             continue;
         }
+        // One that takes the kernel build's device trees needs a board with
+        // an OS that builds a kernel: planned on the example board
+        // (`a_ramdisk_boot_takes_the_kernel_the_tree_and_the_named_device_trees`).
+        if recipe.inputs.contains_key("device-trees") {
+            continue;
+        }
         let dir = tempfile::tempdir().expect("tempdir");
         product(dir.path(), &examples, name, recipe);
         let mut args = vec![

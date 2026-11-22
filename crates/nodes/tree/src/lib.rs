@@ -25,6 +25,12 @@
 //!   both give it the same mode and owner. Every path of the result has an
 //!   entry: its mode, its owner ids, and the layers that own it.
 //!
+//! - **`gaia.tree.select`**: declared files of a build's output (`path` or
+//!   `path=to`) added to a tree: a boot directory's device trees and
+//!   overlays, at the paths the firmware reads.
+//! - **`gaia.tree.text`**: a text file written from a setting (a firmware's
+//!   config.txt, a command line) added to a tree.
+//!
 //! The store keeps modes but never owners, so a tree's owners are in
 //! [`Tree::entries`]. [`owned_digest`](gaia_types::owned_digest) is the digest of a tree with its
 //! entries: what a later step keys on so an owner change reaches it.
@@ -43,7 +49,9 @@ mod overlay;
 mod pick;
 mod place;
 mod role;
+mod select;
 mod services;
+mod text;
 mod under;
 mod walk;
 
@@ -67,7 +75,9 @@ pub use overlay::{
 pub use pick::tree_pick;
 pub use place::tree_place;
 pub use role::tree_role;
+pub use select::tree_select;
 pub use services::{enable_units, tree_services, undeclared};
+pub use text::tree_text;
 pub use under::tree_under;
 
 use daedalus::prelude::*;
@@ -75,7 +85,7 @@ use gaia_store::Digest;
 use gaia_types::Tree;
 
 /// The nodes, for a registry.
-pub const NODES: [&NodeRecord; 17] = [
+pub const NODES: [&NodeRecord; 19] = [
     &artifact::TREE_ARTIFACT_NODE,
     &generate_image::GENERATE_IMAGE_NODE,
     &generate_image::GENERATE_TREE_NODE,
@@ -88,6 +98,8 @@ pub const NODES: [&NodeRecord; 17] = [
     &under::TREE_UNDER_NODE,
     &place::TREE_PLACE_NODE,
     &file::TREE_FILE_NODE,
+    &select::TREE_SELECT_NODE,
+    &text::TREE_TEXT_NODE,
     &layer::TREE_LAYER_NODE,
     &links::TREE_LINKS_NODE,
     &accounts::TREE_ACCOUNTS_NODE,
