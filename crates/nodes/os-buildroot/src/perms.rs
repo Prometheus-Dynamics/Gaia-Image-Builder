@@ -15,6 +15,11 @@
 //! links, so [`unpack`] lists them and does not write them. Those under
 //! `/dev` are left out, since a running system mounts devtmpfs over `/dev`;
 //! one anywhere else fails the step by name ([`outside_dev`]).
+//!
+//! Extended attributes (a file capability, `security.capability`, set by a
+//! permission table's `|xattr` line, or any other) are in the tar as PAX
+//! records. The tree and the filesystem nodes do not carry them yet, so
+//! [`unpack`] lists each one and the step fails by name rather than drop it.
 
 use gaia_types::FileEntry;
 use std::io;
@@ -31,7 +36,13 @@ pub const TAR: &str = "rootfs.tar";
 #[derive(Debug, Default, PartialEq, Eq)]
 pub struct Unpacked {
     pub devices: Vec<String>,
+    /// Each extended attribute a path carries, as `<path>: <name>`.
+    pub xattrs: Vec<String>,
 }
+
+/// The PAX record key prefixes tar writes an extended attribute under
+/// (GNU tar's, and libarchive's).
+const XATTR_KEYS: [&str; 2] = ["SCHILY.xattr.", "LIBARCHIVE.xattr."];
 
 /// Why device nodes under `/dev` are left out of the root filesystem.
 pub const DEVICES_LEFT_OUT: &str = "devtmpfs is mounted over /dev at boot";
@@ -44,6 +55,22 @@ pub fn outside_dev(devices: &[String]) -> Vec<&str> {
         .map(String::as_str)
         .filter(|device| !device.starts_with("dev/"))
         .collect()
+}
+
+/// Why the step stops, when the tar's paths carry extended attributes
+/// (`xattrs` as [`Unpacked`] lists them): the slot would not keep them.
+pub fn xattrs_refused(xattrs: &[String]) -> Option<String> {
+    let (n, one) = (xattrs.len(), xattrs.len() == 1);
+    (n > 0).then(|| {
+        format!(
+            "the root filesystem has {n} extended attribute{} (a file capability set by a \
+             permission table's |xattr line, or another), which the slot does not keep yet; \
+             the build stops rather than drop {}:\n  {}",
+            if one { "" } else { "s" },
+            if one { "it" } else { "them" },
+            xattrs.join("\n  ")
+        )
+    })
 }
 
 /// Writes the tar `tar` out as the new directory `into`: each file with its
@@ -65,6 +92,17 @@ pub fn unpack(tar: &Path, into: &Path) -> io::Result<Unpacked> {
                 String::from_utf8_lossy(&entry.path_bytes())
             ))
         })?;
+        if let Some(records) = entry.pax_extensions()? {
+            for record in records {
+                let key = record?
+                    .key()
+                    .map_err(|e| invalid(e.to_string()))?
+                    .to_string();
+                if let Some(attr) = XATTR_KEYS.iter().find_map(|k| key.strip_prefix(k)) {
+                    unpacked.xattrs.push(format!("/{}: {attr}", name.display()));
+                }
+            }
+        }
         let path = into.join(&name);
         let header = entry.header();
         let kind = header.entry_type();
@@ -131,6 +169,7 @@ pub fn unpack(tar: &Path, into: &Path) -> io::Result<Unpacked> {
         std::fs::set_permissions(dir, std::fs::Permissions::from_mode(mode))?;
     }
     unpacked.devices.sort();
+    unpacked.xattrs.sort();
     Ok(unpacked)
 }
 
@@ -360,6 +399,61 @@ mod tests {
     }
 
     /// Device nodes under /dev are left out; any other is named.
+    /// A file capability (and any other extended attribute) in the tar's
+    /// PAX records is listed by path and name, and stops the step by name:
+    /// the tree would drop it. A tar without any lists none.
+    #[test]
+    fn extended_attributes_are_named_not_dropped() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        // Out of path order in the tar; listed in path order.
+        let mut builder = tar::Builder::new(Vec::new());
+        builder
+            .append_pax_extensions([("LIBARCHIVE.xattr.trusted.overlay", &b"y"[..])])
+            .expect("pax");
+        add_file(&mut builder, "./etc/plain", 0o644, "text");
+        add_file(&mut builder, "./etc/other", 0o644, "text");
+        builder
+            .append_pax_extensions([
+                ("SCHILY.xattr.user.note", &b"x"[..]),
+                ("SCHILY.xattr.security.capability", &[1u8, 0, 0, 2][..]),
+            ])
+            .expect("pax");
+        add_file(&mut builder, "./bin/ping", 0o755, "elf");
+        let tar = dir.path().join("rootfs.tar");
+        std::fs::write(&tar, builder.into_inner().expect("tar")).expect("write");
+        let unpacked = unpack(&tar, &dir.path().join("root")).expect("unpack");
+        assert_eq!(
+            unpacked.xattrs,
+            [
+                "/bin/ping: security.capability",
+                "/bin/ping: user.note",
+                "/etc/plain: trusted.overlay",
+            ]
+        );
+        let refused = xattrs_refused(&unpacked.xattrs).expect("refused");
+        assert!(
+            refused.starts_with("the root filesystem has 3 extended attributes")
+                && refused.contains("drop them:\n  /bin/ping: security.capability\n"),
+            "{refused}"
+        );
+        let one = xattrs_refused(&unpacked.xattrs[..1]).expect("refused");
+        assert!(
+            one.contains("1 extended attribute (") && one.contains("drop it:"),
+            "{one}"
+        );
+        assert_eq!(xattrs_refused(&[]), None);
+
+        let mut builder = tar::Builder::new(Vec::new());
+        builder
+            .append_pax_extensions([("path", &b"./bin/long"[..])])
+            .expect("pax");
+        add_file(&mut builder, "./bin/x", 0o755, "elf");
+        let tar = dir.path().join("plain.tar");
+        std::fs::write(&tar, builder.into_inner().expect("tar")).expect("write");
+        let unpacked = unpack(&tar, &dir.path().join("plain")).expect("unpack");
+        assert!(unpacked.xattrs.is_empty(), "{:?}", unpacked.xattrs);
+    }
+
     #[test]
     fn device_nodes_outside_dev_are_named() {
         let devices = [

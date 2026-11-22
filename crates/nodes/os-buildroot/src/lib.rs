@@ -968,6 +968,9 @@ fn build_steps(
                 "seconds": started.elapsed().as_secs_f64(),
             }),
         );
+        if let Some(refused) = perms::xattrs_refused(&unpacked.xattrs) {
+            return Err(fail(refused));
+        }
         let outside = perms::outside_dev(&unpacked.devices);
         if !outside.is_empty() {
             return Err(fail(format!(
