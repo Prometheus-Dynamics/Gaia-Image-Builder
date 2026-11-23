@@ -30,6 +30,18 @@
 //!
 //! The report says each library removed, why, its files and their bytes, each
 //! one that stays and what needs it, and the bytes saved.
+//!
+//! Known limits, both on the side of keeping:
+//!
+//! - Two listed libraries that need each other, and that nothing else needs,
+//!   both stay: each has an ELF left in the root that needs it, in every
+//!   round.
+//! - A needed name is matched against a library's file names and SONAMEs in
+//!   the library directories (`lib/`, `lib64/`, `usr/lib/`, `usr/lib64/`,
+//!   `usr/local/lib/`). `RUNPATH` and `RPATH` are not followed, so a listed
+//!   library kept somewhere else is not found: it is neither removed nor
+//!   counted, and a list that names it fails as "the root has no" such
+//!   library.
 
 use crate::elf::{self, Elf};
 use crate::tree::{self, Kind};
