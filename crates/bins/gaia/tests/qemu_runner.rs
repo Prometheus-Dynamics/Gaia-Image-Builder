@@ -1941,6 +1941,148 @@ const RUN_BOUND: u64 = 900;
 #[test]
 #[ignore = "boots the virt kernel and the stock host: run with --ignored and GAIA_RELINK_*"]
 fn a_rebound_udc_is_seen_again_by_the_stock_host() {
+    let run = relink_run("relink-guest-init", &[], "");
+    let (guest, usb, relay) = (&run.guest, &run.usb, &run.relay);
+    assert_eq!(run.first.trim(), "relink test: connection 1");
+    assert_eq!(run.second.trim(), "relink test: connection 2");
+    for line in [
+        "gaia-test: unbinding the UDC",
+        "gaia-test: binding the UDC 1000480000.usb again",
+        "gaia-test: done",
+    ] {
+        assert!(guest.contains(line), "the guest has no {line:?}");
+    }
+    assert_eq!(
+        guest.matches("linked to the host over vsock port").count(),
+        2,
+        "{guest}"
+    );
+    // What a board's host sees: the disconnect, then a new device, a new
+    // NCM interface and a new lease; vhci_hcd's port 0 taken again.
+    assert!(usb.contains("stock-host: USB disconnect: the device on vhci_hcd port 0 is gone"));
+    assert_eq!(
+        usb.matches("stock-host: attached to vhci_hcd port 0, high speed")
+            .count(),
+        2,
+        "{usb}"
+    );
+    assert!(!usb.contains("refused the device"), "{usb}");
+    assert!(usb.contains("new high-speed USB device number 2 using vhci_hcd"));
+    assert!(usb.contains("new high-speed USB device number 3 using vhci_hcd"));
+    assert_eq!(
+        usb.matches("stock-host: CDC NCM interface ").count(),
+        2,
+        "{usb}"
+    );
+    assert_eq!(usb.matches("stock-host: lease ").count(), 2, "{usb}");
+    assert!(usb.contains("stock-host: forward 2: open to"), "{usb}");
+    // The relay took the second pair.
+    assert!(relay.contains("relay 1: ended"), "{relay}");
+    assert!(relay.contains("relay 2: listening"), "{relay}");
+    assert_eq!(relay.matches("accepting connection").count(), 4, "{relay}");
+}
+
+/// A FunctionFS function whose endpoint files another process still holds
+/// cannot be described again, and its mount cannot be taken down, until that
+/// process lets go: the kernel's own FunctionFS, on the board profile's UDC.
+/// The guest (tests/relink/ffs-guest-init) makes an NCM + FunctionFS gadget
+/// with tests/relink/ffs-hold.rs as the function's user side and a second
+/// process holding copies of the endpoint files. After the first connection
+/// the gadget is unbound and the first holder killed, as a daemon that
+/// restarts. A new holder's descriptor write is refused while the copies
+/// are held; when they are let go it is taken, the gadget binds, and the
+/// stock host sees a new device with the vendor interface again. Run as the
+/// test above, with rustc able to build for aarch64-unknown-linux-musl.
+#[test]
+#[ignore = "boots the virt kernel and the stock host: run with --ignored and GAIA_RELINK_*"]
+fn a_held_functionfs_function_is_described_again_only_when_let_go() {
+    let tools = tempfile::tempdir().expect("tempdir");
+    let holder = tools.path().join("ffs-hold");
+    run(
+        "rustc",
+        &[
+            "--edition",
+            "2021",
+            "-O",
+            "--target",
+            "aarch64-unknown-linux-musl",
+            "-C",
+            "panic=abort",
+            "-C",
+            "strip=symbols",
+            "-C",
+            "linker=rust-lld",
+            "-o",
+            holder.to_str().expect("utf-8"),
+            repo()
+                .join("crates/bins/gaia/tests/relink/ffs-hold.rs")
+                .to_str()
+                .expect("utf-8"),
+        ],
+    );
+    let run = relink_run(
+        "relink/ffs-guest-init",
+        &[("ffs-hold", holder)],
+        " ffs=hold again=restart",
+    );
+    let (guest, usb) = (&run.guest, &run.usb);
+    assert_eq!(run.first.trim(), "relink test: connection 1");
+    assert_eq!(run.second.trim(), "relink test: connection 2");
+    // In order: refused while the copies are held, taken once they are let go.
+    let at = |line: &str| {
+        guest
+            .find(line)
+            .unwrap_or_else(|| panic!("the guest has no {line:?}"))
+    };
+    let order = [
+        "ffs-hold[eps]: 2 endpoint files held, no ep0",
+        "gaia-test: unbind the UDC: ok",
+        "gaia-test: the first holder (ep0) is gone; the copies of the endpoint files are still held",
+        "(copies held) ffs-hold[release]: write descriptors: ",
+        "gaia-test: new holder, copies held: the function could NOT be described again",
+        "gaia-test: the copies are let go",
+        "(copies let go) ffs-hold[release]: descriptors and strings written",
+        "gaia-test: new holder, copies let go: the function is described again",
+        "gaia-test: bind the UDC 1000480000.usb again: ok",
+        "gaia-test: done",
+    ];
+    for pair in order.windows(2) {
+        assert!(
+            at(pair[0]) < at(pair[1]),
+            "{:?} is not before {:?}",
+            pair[0],
+            pair[1]
+        );
+    }
+    // The host: a disconnect, then the device again, the vendor interface with it.
+    assert!(usb.contains("stock-host: USB disconnect: the device on vhci_hcd port 0 is gone"));
+    assert!(usb.contains("new high-speed USB device number 3 using vhci_hcd"));
+    assert_eq!(
+        usb.matches("class ff driver  endpoints 02/Bulk 83/Bulk")
+            .count(),
+        2,
+        "{usb}"
+    );
+    assert_eq!(usb.matches("stock-host: lease ").count(), 2, "{usb}");
+}
+
+/// What one run of the relink guest gave.
+struct Relink {
+    /// What the PC read through the forward, before and after the gadget
+    /// came back.
+    first: String,
+    second: String,
+    guest: String,
+    usb: String,
+    relay: String,
+}
+
+/// A RAM boot of the board-profile virt kernel with the test's `/init`
+/// (`init`, under tests/) and `extra` programs in its root, `cmdline` added
+/// to the kernel command line, the stock host plugged in with a forward.
+/// The PC connects once, and again when the host has leased a second time.
+/// Fails when the run does not end within its bound.
+fn relink_run(init_file: &str, extra: &[(&str, PathBuf)], cmdline: &str) -> Relink {
     use std::io::Read;
     let var = |name: &str| {
         PathBuf::from(std::env::var(name).unwrap_or_else(|_| panic!("{name} is not set")))
@@ -1978,10 +2120,15 @@ fn a_rebound_udc_is_seen_again_by_the_stock_host() {
     let _ = std::fs::remove_file(&init);
     std::fs::write(
         &init,
-        std::fs::read(repo().join("crates/bins/gaia/tests/relink-guest-init")).expect("init"),
+        std::fs::read(repo().join("crates/bins/gaia/tests").join(init_file)).expect("init"),
     )
     .expect("init");
     run("chmod", &["755", init.to_str().expect("utf-8")]);
+    for (name, from) in extra {
+        let to = ramfs.join(name);
+        std::fs::write(&to, std::fs::read(from).expect("an extra program")).expect("write");
+        run("chmod", &["755", to.to_str().expect("utf-8")]);
+    }
     let cpio = d.join("initramfs.cpio");
     let status = Command::new("sh")
         .arg("-c")
@@ -2033,7 +2180,7 @@ fn a_rebound_udc_is_seen_again_by_the_stock_host() {
     .expect("write");
     std::fs::write(
         d.join("cmdline.txt"),
-        "console=ttyAMA0 rdinit=/init panic=5\n",
+        format!("console=ttyAMA0 rdinit=/init panic=5{cmdline}\n"),
     )
     .expect("write");
     for (from, name) in [
@@ -2170,41 +2317,11 @@ fn a_rebound_udc_is_seen_again_by_the_stock_host() {
         !timed_out,
         "timed out: the run did not end within {bound} s"
     );
-    assert_eq!(first.trim(), "relink test: connection 1");
-    assert_eq!(second.trim(), "relink test: connection 2");
-    for line in [
-        "gaia-test: unbinding the UDC",
-        "gaia-test: binding the UDC 1000480000.usb again",
-        "gaia-test: done",
-    ] {
-        assert!(guest.contains(line), "the guest has no {line:?}");
+    Relink {
+        first,
+        second,
+        guest,
+        usb,
+        relay,
     }
-    assert_eq!(
-        guest.matches("linked to the host over vsock port").count(),
-        2,
-        "{guest}"
-    );
-    // What a board's host sees: the disconnect, then a new device, a new
-    // NCM interface and a new lease; vhci_hcd's port 0 taken again.
-    assert!(usb.contains("stock-host: USB disconnect: the device on vhci_hcd port 0 is gone"));
-    assert_eq!(
-        usb.matches("stock-host: attached to vhci_hcd port 0, high speed")
-            .count(),
-        2,
-        "{usb}"
-    );
-    assert!(!usb.contains("refused the device"), "{usb}");
-    assert!(usb.contains("new high-speed USB device number 2 using vhci_hcd"));
-    assert!(usb.contains("new high-speed USB device number 3 using vhci_hcd"));
-    assert_eq!(
-        usb.matches("stock-host: CDC NCM interface ").count(),
-        2,
-        "{usb}"
-    );
-    assert_eq!(usb.matches("stock-host: lease ").count(), 2, "{usb}");
-    assert!(usb.contains("stock-host: forward 2: open to"), "{usb}");
-    // The relay took the second pair.
-    assert!(relay.contains("relay 1: ended"), "{relay}");
-    assert!(relay.contains("relay 2: listening"), "{relay}");
-    assert_eq!(relay.matches("accepting connection").count(), 4, "{relay}");
 }

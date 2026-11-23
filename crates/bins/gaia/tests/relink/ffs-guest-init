@@ -1,0 +1,169 @@
+#!/bin/sh
+# Item 7 probe (/init of a RAM boot): an NCM + FunctionFS gadget on the board
+# profile's UDC, the FunctionFS side held by /ffs-hold in the mode the kernel
+# command line names (ffs=hold or ffs=release). After the first connection on
+# TCP 9200 the gadget is disabled and enabled again in the way `again=` names:
+#   udc       the gadget's UDC file is cleared and written again
+#   rebuild   the function is unlinked, functionfs unmounted, the function
+#             removed and made again, mounted, a new holder started, linked,
+#             and the UDC written (the old holder is left running)
+#   restart   a second process holds copies of the endpoint files; the first
+#             holder (the one with ep0) is killed, as a daemon that restarts,
+#             and a new one opens ep0 and writes the descriptors again, with
+#             the copies still held; then the copies are let go and it tries
+#             once more
+#   remount   as restart, but functionfs is unmounted and mounted again
+#             before the new holder, first with the copies held, then let go
+# Every step says whether it worked.
+mount -t proc proc /proc
+mount -t sysfs sysfs /sys
+mount -t devtmpfs devtmpfs /dev
+mount -t configfs configfs /sys/kernel/config
+mkdir -p /tmp /var/lib/misc /dev/ffs
+mount -t tmpfs tmpfs /tmp
+exec > /dev/console 2>&1
+say() { echo "gaia-test: $*"; }
+step() { # step WHAT COMMAND...: runs it, says ok or how it failed
+	what=$1
+	shift
+	if out=$("$@" 2>&1); then say "$what: ok"; else say "$what: FAILED: $out"; fi
+}
+mode=hold
+again=udc
+for word in $(cat /proc/cmdline); do
+	case $word in
+	ffs=*) mode=${word#ffs=} ;;
+	again=*) again=${word#again=} ;;
+	esac
+done
+say "holder mode $mode, re-enable by $again"
+udc=$(ls /sys/class/udc | head -1)
+[ -n "$udc" ] || { say "no UDC"; poweroff -f; }
+g=/sys/kernel/config/usb_gadget/relink
+mkdir -p $g/strings/0x409 $g/functions/ncm.usb0 $g/functions/ffs.relink $g/configs/c.1/strings/0x409
+echo 0x1d6b > $g/idVendor
+echo 0x0104 > $g/idProduct
+echo gaia > $g/strings/0x409/manufacturer
+echo "relink test" > $g/strings/0x409/product
+echo 0001 > $g/strings/0x409/serialnumber
+echo "ncm+ffs" > $g/configs/c.1/strings/0x409/configuration
+holder() { # holder MODE: mounts nothing; starts a holder on /dev/ffs and waits for its descriptors
+	/ffs-hold /dev/ffs "$1" &
+	daemon=$!
+	i=0
+	while [ $i -lt 20 ] && ! [ -e /dev/ffs/ep1 ]; do
+		sleep 1
+		i=$((i + 1))
+	done
+	[ -e /dev/ffs/ep1 ] && say "holder ($1) has the function ready" || say "holder ($1): no endpoint files after 20 s"
+}
+step "mount functionfs" mount -t functionfs relink /dev/ffs
+holder "$mode"
+copies=""
+case $again in
+restart | remount | restart-bound)
+	/ffs-hold /dev/ffs eps &
+	copies=$!
+	sleep 1
+	;;
+esac
+ln -s $g/functions/ncm.usb0 $g/configs/c.1/
+ln -s $g/functions/ffs.relink $g/configs/c.1/
+step "bind the UDC $udc" sh -c "echo $udc > $g/UDC"
+i=0
+while [ ! -e /sys/class/net/usb0 ] && [ $i -lt 30 ]; do
+	sleep 1
+	i=$((i + 1))
+done
+ip addr add 10.77.0.1/24 dev usb0
+ip link set usb0 up
+printf 'start 10.77.0.10\nend 10.77.0.20\ninterface usb0\nlease_file /tmp/leases\noption subnet 255.255.255.0\n' > /tmp/udhcpd.conf
+touch /tmp/leases
+udhcpd /tmp/udhcpd.conf
+cat > /tmp/serve << 'SERVE'
+#!/bin/sh
+n=$(($(cat /tmp/count 2> /dev/null || echo 0) + 1))
+echo $n > /tmp/count
+echo "relink test: connection $n"
+echo "gaia-test: served connection $n" > /dev/console
+SERVE
+chmod +x /tmp/serve
+echo '9200 stream tcp nowait root /tmp/serve serve' > /tmp/inetd.conf
+inetd /tmp/inetd.conf
+say "serving TCP 9200 on usb0"
+count() { cat /tmp/count 2> /dev/null || echo 0; }
+await() { # await N SECONDS: 0 when connection N came in time
+	i=0
+	while [ "$(count)" -lt "$1" ]; do
+		[ $i -lt "$2" ] || return 1
+		sleep 1
+		i=$((i + 1))
+	done
+}
+await 1 300 || { say "no connection 1 in 300 s: powering off"; poweroff -f; }
+sleep 1
+# again=restart-bound: the first holder dies while the gadget is still bound.
+if [ "$again" = restart-bound ]; then
+	say "the UDC stays bound"
+else
+	step "unbind the UDC" sh -c "echo '' > $g/UDC"
+fi
+sleep 3
+if [ "$again" = rebuild ]; then
+	step "unlink the function" rm $g/configs/c.1/ffs.relink
+	step "unmount functionfs" umount /dev/ffs
+	step "remove the function" rmdir $g/functions/ffs.relink
+	step "make the function again" mkdir $g/functions/ffs.relink
+	step "mount functionfs again" mount -t functionfs relink /dev/ffs
+	holder release
+	step "link the function again" ln -s $g/functions/ffs.relink $g/configs/c.1/
+fi
+fresh() { # fresh WHEN: a new holder with ep0, as a restarted daemon; says whether its descriptors were taken
+	/ffs-hold /dev/ffs release > /tmp/fresh.log 2>&1 &
+	daemon=$!
+	sleep 3
+	sed "s/^/($1) /" /tmp/fresh.log
+	if grep -q 'descriptors and strings written' /tmp/fresh.log; then
+		say "new holder, $1: the function is described again"
+		return 0
+	fi
+	say "new holder, $1: the function could NOT be described again"
+	kill $daemon 2> /dev/null
+	return 1
+}
+if [ -n "$copies" ]; then
+	kill $daemon
+	sleep 1
+	say "the first holder (ep0) is gone; the copies of the endpoint files are still held"
+	if [ "$again" = remount ]; then
+		step "unmount functionfs, copies held" umount /dev/ffs
+		step "mount functionfs again, copies held" mount -t functionfs relink /dev/ffs
+	fi
+	if ! fresh "copies held"; then
+		kill $copies
+		sleep 1
+		say "the copies are let go"
+		if [ "$again" = remount ]; then
+			step "unmount functionfs, copies let go" umount /dev/ffs
+			step "mount functionfs again, copies let go" mount -t functionfs relink /dev/ffs
+		fi
+		fresh "copies let go"
+	fi
+fi
+sleep 2
+step "bind the UDC $udc again" sh -c "echo $udc > $g/UDC"
+say "UDC file now: '$(cat $g/UDC)'"
+i=0
+while [ ! -e /sys/class/net/usb0 ] && [ $i -lt 10 ]; do
+	sleep 1
+	i=$((i + 1))
+done
+ip addr add 10.77.0.1/24 dev usb0 2> /dev/null
+ip link set usb0 up 2> /dev/null
+if await $(($(count) + 1)) 90; then
+	say "the host came back: connection $(count)"
+else
+	say "no connection after the re-enable in 90 s"
+fi
+say "done"
+poweroff -f

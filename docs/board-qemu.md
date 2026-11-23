@@ -168,10 +168,21 @@ every fact as `same`, `differs`, `board only` or `guest only`.
   took, so a link that stays down is never silent. A gadget that does not come back within `--usb-host-wait` ends
   the stock host: `the device did not come back`.
   The guest's gadget is the board kernel's own: configfs, and FunctionFS for the functions a daemon serves. Only the
-  UDC under it differs. A bind that fails in the gadget core or in f_fs fails here as on the dwc2, for example a holder
-  that keeps the old FunctionFS endpoint files open. The profile then shows the stock host's disconnect and no new
-  enumeration, as a board's PC would see it. That case is the same kernel code, not yet a run of its own. Nothing in
-  the profile re-enables a gadget or hides a failed bind.
+  UDC under it differs, so what the gadget core or f_fs refuses, it refuses here as on the dwc2. Nothing in the
+  profile re-enables a gadget or hides a failure. What a process that keeps FunctionFS endpoint files open does to a
+  re-enable has been run on it (Linux 7.3.3; the test `a_held_functionfs_function_is_described_again_only_when_let_go`,
+  with `tests/relink/ffs-hold.rs` as the function's user side):
+  - The gadget's UDC cleared and written again, endpoint files held throughout: it works. The same files serve the
+    function again, and the stock host sees a disconnect and the device again.
+  - The process with ep0 gone (a daemon that restarts) while another still holds copies of the endpoint files: the
+    function stays as it was. A new process's descriptor write to ep0 is refused with `ESRCH` ("No such process":
+    f_fs's answer to an ep0 write while the function is active and no setup is waiting), bound or unbound. Unmounting
+    functionfs and mounting it again are both refused with `EBUSY`. While it is still bound, the gadget's other
+    functions keep working.
+  - When the copies are let go, the unmount, the mount and the descriptor write all work, the gadget binds, and the
+    stock host enumerates the device again with the FunctionFS interface.
+  - The function removed from configfs and made again while an old holder keeps its files: the unmount is refused
+    (`EBUSY`), but the new function instance mounts and is described, since it is another instance.
 
 A work dir's disk copy is laid out for one profile. Switching profiles needs `--fresh`.
 
