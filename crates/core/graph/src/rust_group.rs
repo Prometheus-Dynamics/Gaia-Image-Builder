@@ -41,6 +41,8 @@ pub struct RustBuild {
     pub env: String,
     /// The tools tree's digest, empty when the build has none.
     pub tools: String,
+    /// The Rust release and the target stds its toolchain source pins.
+    pub toolchain: String,
 }
 
 impl RustBuild {
@@ -56,6 +58,7 @@ impl RustBuild {
             cc: &self.cc,
             env: &self.env,
             tools: &self.tools,
+            toolchain: &self.toolchain,
         }
     }
 }
@@ -71,6 +74,7 @@ struct SharedKey<'a> {
     cc: &'a str,
     env: &'a str,
     tools: &'a str,
+    toolchain: &'a str,
 }
 
 /// Builds that run one cargo invocation together.
@@ -131,6 +135,7 @@ mod tests {
             cc: "".into(),
             env: "".into(),
             tools: "".into(),
+            toolchain: "1.99.0 aarch64-unknown-linux-musl".into(),
         }
     }
 
@@ -211,6 +216,10 @@ mod tests {
             },
             RustBuild {
                 env: "ZIG_GLOBAL_CACHE_DIR=/build/zig-cache".into(),
+                ..base.clone()
+            },
+            RustBuild {
+                toolchain: "1.98.0 aarch64-unknown-linux-musl".into(),
                 ..base.clone()
             },
             RustBuild {

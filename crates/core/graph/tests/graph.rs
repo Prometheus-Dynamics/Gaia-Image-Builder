@@ -35,6 +35,9 @@ path = "vendor"
 [sources.root]
 image = "{IMAGE}"
 platform = "host"
+[sources.toolchain]
+rust = "{RUST}"
+targets = ["{triple}"]
 [build]
 builder = "rust"
 source = "src"
@@ -93,8 +96,53 @@ recipe = "tarball"
     (dir.join("product.toml"), dir.join("recipes"))
 }
 
+/// The Rust release the components build with.
+const RUST: &str = "1.99.0";
+
+/// The lock entries of `name`'s toolchain for `triple`: each release file,
+/// with a digest of its own.
+fn toolchain_entries(lock: &mut Lock, name: &str, triple: &str) {
+    let pieces = gaia_describe::rust_pieces(RUST, &[triple.to_string()]);
+    for (n, piece) in pieces.into_iter().enumerate() {
+        lock.entries.insert(
+            format!("{name}.toolchain.{}", piece.suffix),
+            Entry::Download {
+                url: piece.url,
+                digest: format!("sha256:{:064x}", n + 1),
+            },
+        );
+    }
+}
+
+/// The steps that make `name`'s toolchain for `triple`: the sysroot, then
+/// each release file and its unpacking.
+fn toolchain_labels(name: &str, triple: &str) -> Vec<String> {
+    let host = gaia_describe::rust_host_triple();
+    let mut labels = vec![format!("{name}.toolchain")];
+    for piece in [
+        "rustc".into(),
+        "cargo".into(),
+        format!("std.{host}"),
+        format!("std.{triple}"),
+    ] {
+        labels.push(format!("{name}.toolchain.{piece}"));
+        labels.push(format!("{name}.toolchain.{piece}.unpacked"));
+    }
+    labels
+}
+
+/// `head`, then `name`'s toolchain steps for `triple`, then `tail`.
+fn with_toolchain(head: &[&str], name: &str, triple: &str, tail: &[&str]) -> Vec<String> {
+    let mut labels: Vec<String> = head.iter().map(|l| l.to_string()).collect();
+    labels.extend(toolchain_labels(name, triple));
+    labels.extend(tail.iter().map(|l| l.to_string()));
+    labels
+}
+
 fn lock() -> Lock {
     let mut lock = Lock::default();
+    toolchain_entries(&mut lock, "hello-a", "x86_64-unknown-linux-musl");
+    toolchain_entries(&mut lock, "hello-b", "aarch64-unknown-linux-musl");
     for name in ["hello-a", "hello-b"] {
         lock.entries.insert(
             format!("{name}.src"),
@@ -180,7 +228,10 @@ fn the_a2_product_is_one_planned_graph() {
         requires,
         [
             "gaia.build.rust",
+            "gaia.build.rust.toolchain",
             "gaia.compress.tar",
+            "gaia.source.archive",
+            "gaia.source.download",
             "gaia.source.git",
             "gaia.source.oci",
             "gaia.source.path"
@@ -193,22 +244,30 @@ fn the_a2_product_is_one_planned_graph() {
         .iter()
         .map(|n| n.label.as_deref().unwrap_or("host"))
         .collect();
-    assert_eq!(
-        labels,
-        [
+    let mut want = with_toolchain(
+        &[
             "host",
             "hello-a.build",
             "hello-a.src",
             "hello-a.root",
             "hello-a.vendor",
-            "a::tar",
+        ],
+        "hello-a",
+        "x86_64-unknown-linux-musl",
+        &["a::tar"],
+    );
+    want.extend(with_toolchain(
+        &[
             "hello-b.build",
             "hello-b.src",
             "hello-b.root",
             "hello-b.vendor",
-            "b::tar"
-        ]
-    );
+        ],
+        "hello-b",
+        "aarch64-unknown-linux-musl",
+        &["b::tar"],
+    ));
+    assert_eq!(labels, want);
     for node in &built.doc.graph.nodes[1..] {
         assert_eq!(
             node.metadata.get(FUSION),
@@ -228,7 +287,7 @@ fn the_a2_product_is_one_planned_graph() {
         "aarch64" => "linux/arm64",
         other => panic!("no platform for {other}"),
     };
-    for root in [3, 8] {
+    for root in [3, 17] {
         let node = &built.doc.graph.nodes[root];
         assert_eq!(
             node.consts.get("platform"),
@@ -244,7 +303,7 @@ fn the_a2_product_is_one_planned_graph() {
     let planned = built.plan(&registry).expect("plans");
     let explain = explain_plan(&planned);
     println!("{}", serde_json::to_string_pretty(&explain).expect("json"));
-    assert_eq!(explain.nodes.len(), 11);
+    assert_eq!(explain.nodes.len(), 29);
 }
 
 /// A product cut down to one kind of step: those steps, what they need, and
@@ -275,20 +334,30 @@ fn a_graph_is_cut_down_to_a_step_and_what_it_needs() {
         .map(|n| n.label.as_deref().unwrap_or("host"))
         .collect();
     // Each build and what it reads: no tar after it.
-    assert_eq!(
-        labels,
-        [
+    let mut want = with_toolchain(
+        &[
             "host",
             "hello-a.build",
             "hello-a.src",
             "hello-a.root",
             "hello-a.vendor",
+        ],
+        "hello-a",
+        "x86_64-unknown-linux-musl",
+        &[],
+    );
+    want.extend(with_toolchain(
+        &[
             "hello-b.build",
             "hello-b.src",
             "hello-b.root",
-            "hello-b.vendor"
-        ]
-    );
+            "hello-b.vendor",
+        ],
+        "hello-b",
+        "aarch64-unknown-linux-musl",
+        &[],
+    ));
+    assert_eq!(labels, want);
     assert_eq!(cut.origins.len(), labels.len());
     let mut edges: Vec<(u32, u32)> = cut
         .doc
@@ -298,14 +367,30 @@ fn a_graph_is_cut_down_to_a_step_and_what_it_needs() {
         .map(|e| (e.from.node, e.to.node))
         .collect();
     edges.sort_unstable();
-    // Renumbered: every edge is into one of the two builds.
-    assert_eq!(edges, [(2, 1), (3, 1), (4, 1), (6, 5), (7, 5), (8, 5)]);
+    // Renumbered: each build takes its source, root, vendor and toolchain;
+    // each toolchain takes its four unpacked files, each unpacked from its
+    // download.
+    let mut want = Vec::new();
+    for build in [1, 14] {
+        let toolchain = build + 4;
+        want.extend((1..=4).map(|n| (build + n, build)));
+        for n in 0..4 {
+            let download = toolchain + 1 + 2 * n;
+            want.push((download, download + 1));
+            want.push((download + 1, toolchain));
+        }
+    }
+    want.sort_unstable();
+    assert_eq!(edges, want);
     assert!(cut.doc.graph.nodes[0].port_types.is_empty(), "no output");
     let requires: Vec<&str> = cut.doc.requires.iter().map(|r| r.id.as_str()).collect();
     assert_eq!(
         requires,
         [
             "gaia.build.rust",
+            "gaia.build.rust.toolchain",
+            "gaia.source.archive",
+            "gaia.source.download",
             "gaia.source.git",
             "gaia.source.oci",
             "gaia.source.path"
@@ -313,7 +398,7 @@ fn a_graph_is_cut_down_to_a_step_and_what_it_needs() {
     );
     // The planner takes what is left.
     let planned = cut.plan(&registry).expect("plans");
-    assert_eq!(explain_plan(&planned).nodes.len(), 9);
+    assert_eq!(explain_plan(&planned).nodes.len(), 27);
 
     // One step by its name: that build and what it reads, not the other.
     let one = whole.clone().until("hello-b.build").expect("cut by name");
@@ -324,20 +409,23 @@ fn a_graph_is_cut_down_to_a_step_and_what_it_needs() {
         .iter()
         .map(|n| n.label.as_deref().unwrap_or("host"))
         .collect();
-    assert_eq!(
-        labels,
-        [
+    let want = with_toolchain(
+        &[
             "host",
             "hello-b.build",
             "hello-b.src",
             "hello-b.root",
-            "hello-b.vendor"
-        ]
+            "hello-b.vendor",
+        ],
+        "hello-b",
+        "aarch64-unknown-linux-musl",
+        &[],
     );
+    assert_eq!(labels, want);
 
     let why = whole.until("gaia.os.buildroot.host").expect_err("no OS");
     assert!(
-        why.starts_with("the product has no step `gaia.os.buildroot.host`; its steps are gaia.build.rust, gaia.compress.tar"),
+        why.starts_with("the product has no step `gaia.os.buildroot.host`; its steps are gaia.build.rust, gaia.build.rust.toolchain, gaia.compress.tar"),
         "{why}"
     );
 }
@@ -373,6 +461,41 @@ fn errors_name_the_description() {
         e.contains(
             "hello-b/component.toml: build.settings.pakage: gaia.build.rust has no input `pakage`"
         ),
+        "{e}"
+    );
+
+    // A Rust build with no toolchain of its own: the build machine's is
+    // not taken in its place.
+    let toolchain = format!(
+        "[sources.toolchain]\nrust = \"{RUST}\"\ntargets = [\"aarch64-unknown-linux-musl\"]\n"
+    );
+    assert!(base.contains(&toolchain));
+    let e = try_with(&base.replace(&toolchain, ""), lock());
+    println!("{}", shown(&e));
+    assert!(
+        e.contains("hello-b/component.toml: sources.toolchain: hello-b's Rust build takes its toolchain from a source: `[sources.toolchain]` with `rust = \"<release>\"` and `targets = [\"aarch64-unknown-linux-musl\"]`; the build machine's Rust is not used"),
+        "{e}"
+    );
+
+    // A toolchain with no std for the build's target, refused by name when
+    // the graph is laid out, before anything runs.
+    let other = toolchain.replace("aarch64-unknown-linux-musl", "riscv64gc-unknown-linux-musl");
+    let e = try_with(&base.replace(&toolchain, &other), lock());
+    println!("{}", shown(&e));
+    assert!(
+        e.contains("hello-b/component.toml: sources.toolchain.targets: hello-b's build is for aarch64-unknown-linux-musl, and its toolchain (Rust 1.99.0) pins no std for it: add \"aarch64-unknown-linux-musl\" to `targets`, then run `gaia lock`"),
+        "{e}"
+    );
+
+    // A release file the lock does not pin.
+    let mut partial = lock();
+    partial
+        .entries
+        .remove("hello-b.toolchain.std.aarch64-unknown-linux-musl");
+    let e = try_with(&base, partial);
+    println!("{}", shown(&e));
+    assert!(
+        e.contains("hello-b/component.toml: sources.toolchain: hello-b.toolchain.std.aarch64-unknown-linux-musl is not in the lock"),
         "{e}"
     );
 
@@ -572,6 +695,9 @@ ref = "master"
 [sources.root]
 image = "{IMAGE}"
 platform = "host"
+[sources.toolchain]
+rust = "{RUST}"
+targets = ["aarch64-unknown-linux-musl"]
 [build]
 builder = "rust"
 source = "src"
@@ -604,6 +730,7 @@ fn lemnos_lock() -> Lock {
 fn lemnos_lock_at(other: Option<(&str, &str)>) -> Lock {
     let mut lock = Lock::default();
     for name in LEMNOS {
+        toolchain_entries(&mut lock, name, "aarch64-unknown-linux-musl");
         let commit = match other {
             Some((odd, commit)) if odd == name => commit,
             _ => COMMIT,

@@ -20,7 +20,7 @@ fn product(dir: &Path) {
     write(
         &dir.join("components/hello/component.toml"),
         &format!(
-            "version = 1\nname = \"hello\"\n[sources.src]\ngit = \"{URL}\"\nref = \"master\"\n[sources.vendor]\npath = \"vendor\"\n[sources.root]\nimage = \"docker.io/library/debian:trixie-slim\"\n[build]\nbuilder = \"rust\"\nsource = \"src\"\n[build.settings]\npackage = \"hello-world\"\nfeatures = \"\"\ntriple = \"x86_64-unknown-linux-musl\"\ncpu = \"\"\n"
+            "version = 1\nname = \"hello\"\n[sources.src]\ngit = \"{URL}\"\nref = \"master\"\n[sources.vendor]\npath = \"vendor\"\n[sources.root]\nimage = \"docker.io/library/debian:trixie-slim\"\n[sources.toolchain]\nrust = \"1.99.0\"\ntargets = [\"x86_64-unknown-linux-musl\"]\n[build]\nbuilder = \"rust\"\nsource = \"src\"\n[build.settings]\npackage = \"hello-world\"\nfeatures = \"\"\ntriple = \"x86_64-unknown-linux-musl\"\ncpu = \"\"\n"
         ),
     );
     std::fs::create_dir_all(dir.join("components/hello/vendor")).expect("mkdir");
@@ -35,9 +35,27 @@ fn product(dir: &Path) {
     write(
         &dir.join("gaia.lock"),
         &format!(
-            "version = 1\n\n[source.\"hello.src\"]\nkind = \"git\"\nurl = \"{URL}\"\nref = \"master\"\ncommit = \"{COMMIT}\"\n[source.\"hello.root\"]\nkind = \"image\"\nreference = \"docker.io/library/debian:trixie-slim\"\ndigest = \"sha256:a72b4433de1cf7d6bae0c4cee74d0547f58601a643b3375f070c51600d63b6b2\"\n"
+            "version = 1\n\n[source.\"hello.src\"]\nkind = \"git\"\nurl = \"{URL}\"\nref = \"master\"\ncommit = \"{COMMIT}\"\n[source.\"hello.root\"]\nkind = \"image\"\nreference = \"docker.io/library/debian:trixie-slim\"\ndigest = \"sha256:a72b4433de1cf7d6bae0c4cee74d0547f58601a643b3375f070c51600d63b6b2\"\n{}",
+            toolchain_lock("hello", "x86_64-unknown-linux-musl")
         ),
     );
+}
+
+/// The lock entries of `name`'s Rust 1.99.0 toolchain for `triple`: each
+/// release file, with a digest of its own (planning fetches nothing).
+fn toolchain_lock(name: &str, triple: &str) -> String {
+    gaia_describe::rust_pieces("1.99.0", &[triple.to_string()])
+        .into_iter()
+        .enumerate()
+        .map(|(n, piece)| {
+            format!(
+                "[source.\"{name}.toolchain.{}\"]\nkind = \"download\"\nurl = \"{}\"\ndigest = \"sha256:{:064x}\"\n",
+                piece.suffix,
+                piece.url,
+                n + 1
+            )
+        })
+        .collect()
 }
 
 fn gaia(dir: &Path, args: &[&str]) -> Output {
@@ -58,19 +76,17 @@ fn gaia(dir: &Path, args: &[&str]) -> Output {
 fn plan_prints_the_graph_and_runs_nothing() {
     let dir = tempfile::tempdir().expect("tempdir");
     product(dir.path());
-    let out = gaia(
-        dir.path(),
-        &["plan", "product.toml", "--tool", "toolchain=/opt/rust"],
-    );
+    let out = gaia(dir.path(), &["plan", "product.toml"]);
     assert!(out.status.success());
     let text = String::from_utf8(out.stdout).expect("utf-8");
     for want in [
-        "tool    toolchain = /opt/rust",
-        "graph: 5 nodes, 5 edges",
+        "graph: 14 nodes, 14 edges",
         "hello.src.tree -> hello.build.source",
+        "hello.toolchain.tree -> hello.build.toolchain",
+        "hello.toolchain.rustc.unpacked.tree -> hello.toolchain.rustc",
         "hello.root.rootfs -> hello.build.root",
         "a::tar.archive -> host.a.tar",
-        "plan: 5 steps",
+        "plan: 14 steps",
         "a.tar  gaia:artifact",
     ] {
         assert!(text.contains(want), "no `{want}` in:\n{text}");
@@ -81,7 +97,7 @@ fn plan_prints_the_graph_and_runs_nothing() {
     assert!(out.status.success());
     let json: serde_json::Value = serde_json::from_slice(&out.stdout).expect("json");
     assert_eq!(json["graph"]["format"], "daedalus.graph");
-    assert_eq!(json["plan"]["units"].as_array().map(Vec::len), Some(5));
+    assert_eq!(json["plan"]["units"].as_array().map(Vec::len), Some(14));
 }
 
 #[test]
@@ -529,5 +545,23 @@ fn store_verify_names_an_edited_object_and_fix_removes_it() {
         verify(&[]).status.code(),
         Some(0),
         "the store is clean again"
+    );
+}
+
+/// A Rust toolchain from the build machine is not taken: `--tool toolchain`
+/// is refused, and says where the toolchain comes from instead.
+#[test]
+fn a_toolchain_tool_is_refused() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    product(dir.path());
+    let out = gaia(
+        dir.path(),
+        &["plan", "product.toml", "--tool", "toolchain=/opt/rust"],
+    );
+    assert_eq!(out.status.code(), Some(2));
+    let err = String::from_utf8_lossy(&out.stderr);
+    assert!(
+        err.contains("--tool toolchain: a Rust build takes its toolchain from its component's `[sources.toolchain]`"),
+        "{err}"
     );
 }

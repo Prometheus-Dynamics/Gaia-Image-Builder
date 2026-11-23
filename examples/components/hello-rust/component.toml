@@ -5,13 +5,22 @@
 #   the same way (`git = "...", ref = "..."`).
 # - `root` is the image the build runs in, sandboxed and offline. It is for
 #   the build host, not the board, and is pinned by the lock.
-# - Nothing names a target: the triple and CPU are the board's (static musl).
+# - `toolchain` is the Rust release the build uses: rustc, cargo and the
+#   standard library of each target in `targets`, the official files pinned
+#   by the lock. The build machine's Rust is never used, and a board whose
+#   triple is not in `targets` is refused before anything builds.
+# - Nothing else names a target: the triple and CPU are the board's (static
+#   musl).
 # - Nothing names the crates: they are fetched from what Cargo.lock records.
 version = 1
 name = "hello-rust"
 
 [sources.src]
 path = "src"
+
+[sources.toolchain]
+rust = "1.99.0"
+targets = ["aarch64-unknown-linux-musl"]
 
 [sources.root]
 image = "docker.io/library/debian:trixie-slim"

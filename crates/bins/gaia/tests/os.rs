@@ -64,8 +64,6 @@ fn plan_product_env(dir: &Path, product: &str, extra: &[&str], env: &[(&str, &st
         "--tool",
         "bwrap=/usr/bin/bwrap",
         "--tool",
-        "toolchain=/opt/rust",
-        "--tool",
         "mke2fs=/usr/sbin/mke2fs",
         "--tool",
         "debugfs=/usr/sbin/debugfs",
@@ -93,6 +91,18 @@ fn edit(path: &Path, from: &str, to: &str) {
     let text = std::fs::read_to_string(path).expect("read");
     assert!(text.contains(from), "{} has no {from:?}", path.display());
     std::fs::write(path, text.replace(from, to)).expect("write");
+}
+
+/// `text` with each run of spaces as one: a plan pads its label column to
+/// its longest label, which says nothing about the line.
+fn squeezed(text: &str) -> String {
+    let mut out = String::with_capacity(text.len());
+    for c in text.chars() {
+        if !(c == ' ' && out.ends_with(' ')) {
+            out.push(c);
+        }
+    }
+    out
 }
 
 #[test]
@@ -172,7 +182,10 @@ fn the_plan_lists_the_config_the_board_gives() {
         "BR2_TARGET_GENERIC_HOSTNAME=\"zero3e\"",
         "/etc/init.d/S41usb0 /etc/udhcpd.usb0.conf",
     ] {
-        assert!(text.contains(line), "the plan has no line {line:?}");
+        assert!(
+            squeezed(&text).contains(&squeezed(line)),
+            "the plan has no line {line:?}"
+        );
     }
 }
 
@@ -301,7 +314,10 @@ fn a_boards_patches_are_applied_to_the_source_the_build_overrides_with() {
         "-> zero-3e-demo.os.zero-3e.tf-a.patched.patches0",
         "zero-3e-demo.os.zero-3e.tf-a.patched.tree -> zero-3e-demo.bootloader.inputs",
     ] {
-        assert!(text.contains(line), "the plan has no line {line:?}\n{text}");
+        assert!(
+            squeezed(&text).contains(&squeezed(line)),
+            "the plan has no line {line:?}\n{text}"
+        );
     }
     // U-Boot has none: its source goes in as it is.
     assert!(!text.contains("u-boot.patched"), "{text}");
@@ -643,7 +659,10 @@ fn a_components_kernel_contract_is_checked_in_the_kernels_build() {
         "hello-rust.src.tree -> zero-3e-demo.os.contract.hello-rust.tree",
         "zero-3e-demo.os.contract.hello-rust.tree -> zero-3e-demo.kernel.inputs",
     ] {
-        assert!(text.contains(line), "the plan has no line {line:?}\n{text}");
+        assert!(
+            squeezed(&text).contains(&squeezed(line)),
+            "the plan has no line {line:?}\n{text}"
+        );
     }
     // Only the kernel's build has it.
     assert!(!text.contains("zero-3e-demo.os.contract.hello-rust.tree -> zero-3e-demo.os.inputs"));
@@ -756,7 +775,10 @@ fn a_component_installs_the_boards_description_by_name() {
         "zero-3e-demo.usb-gadget-network.description.daemon.tree -> zero-3e-demo.usb-gadget-network.place1.from",
         "/etc/daemon/board.toml",
     ] {
-        assert!(text.contains(line), "the plan has no line {line:?}\n{text}");
+        assert!(
+            squeezed(&text).contains(&squeezed(line)),
+            "the plan has no line {line:?}\n{text}"
+        );
     }
 
     // A description is named by a component, not by the board itself.
@@ -838,7 +860,10 @@ fn a_component_generates_from_the_boards_description() {
         "zero-3e-demo.hello-rust.generate.tree -> zero-3e-demo.hello-rust.place",
         "/etc/modprobe.d/board.conf",
     ] {
-        assert!(text.contains(line), "the plan has no line {line:?}\n{text}");
+        assert!(
+            squeezed(&text).contains(&squeezed(line)),
+            "the plan has no line {line:?}\n{text}"
+        );
     }
     let json = plan(dir.path(), &["--json"]);
     let both: serde_json::Value = serde_json::from_slice(&json.stdout).expect("json");
@@ -1167,7 +1192,10 @@ sets = ["bundle.key_id"]
         "hello-rust.tool.tree -> zero-3e-demo::data.tool",
         "zero-3e-demo::data.tree -> host.zero-3e-demo.data",
     ] {
-        assert!(text.contains(line), "the plan has no line {line:?}\n{text}");
+        assert!(
+            squeezed(&text).contains(&squeezed(line)),
+            "the plan has no line {line:?}\n{text}"
+        );
     }
     let json = plan(dir.path(), &["--json"]);
     let both: serde_json::Value = serde_json::from_slice(&json.stdout).expect("json");
@@ -1282,7 +1310,7 @@ fn a_board_states_its_kernel_toolchain_once() {
     let out = plan(dir.path(), &[]);
     assert!(out.status.success());
     let text = String::from_utf8_lossy(&out.stdout);
-    assert!(text.contains(line), "{text}");
+    assert!(squeezed(&text).contains(&squeezed(line)), "{text}");
 
     // The board says gcc: its word replaces the family's.
     edit(&board, "[kernel]\n", "[kernel]\ntoolchain = \"gcc\"\n");
@@ -1416,7 +1444,10 @@ fn a_ramdisk_boot_takes_the_kernel_the_tree_and_the_named_device_trees() {
         "tool mformat = /opt/tools/mformat",
         "tool mcopy = /opt/tools/mcopy",
     ] {
-        assert!(text.contains(line), "the plan has no line {line:?}\n{text}");
+        assert!(
+            squeezed(&text).contains(&squeezed(line)),
+            "the plan has no line {line:?}\n{text}"
+        );
     }
     // With no --tool, mtools are looked up on PATH, as mke2fs is.
     let bin = dir.path().join("bin");
@@ -1577,7 +1608,10 @@ fn a_recipe_takes_the_generators_files_by_role() {
         "zero-3e-demo.hello-rust.description.daemon.tree -> zero-3e-demo::boot.description",
         "zero-3e-demo::boot.image -> host.zero-3e-demo.boot",
     ] {
-        assert!(text.contains(line), "the plan has no line {line:?}\n{text}");
+        assert!(
+            squeezed(&text).contains(&squeezed(line)),
+            "the plan has no line {line:?}\n{text}"
+        );
     }
     assert!(
         !text.contains("zero-3e-demo.extlinux-zero-3e.place0.layer -> zero-3e-demo.rootfs"),
@@ -1933,8 +1967,6 @@ fn a_product_named_with_no_directory_has_its_fragments_directory() {
             "--tool",
             "bwrap=/usr/bin/bwrap",
             "--tool",
-            "toolchain=/opt/rust",
-            "--tool",
             "mke2fs=/usr/sbin/mke2fs",
             "--tool",
             "debugfs=/usr/sbin/debugfs",
@@ -2098,7 +2130,10 @@ fn a_first_flash_disk_fills_the_boards_partitions() {
         "zero-3e-demo::flash.file -> host.zero-3e-demo.flash",
         "zero-3e-demo::disk.image -> host.zero-3e-demo.disk",
     ] {
-        assert!(text.contains(line), "the plan has no line {line:?}\n{text}");
+        assert!(
+            squeezed(&text).contains(&squeezed(line)),
+            "the plan has no line {line:?}\n{text}"
+        );
     }
     let json = plan(dir.path(), &["--json"]);
     let both: serde_json::Value = serde_json::from_slice(&json.stdout).expect("json");
@@ -2305,7 +2340,7 @@ fn a_kernel_module_is_built_against_the_image_kernel() {
         "host.buildroot-host -> hello-module.build.host",
         "hello-module.build.modules -> zero-3e-demo.kernel.modules.from",
     ] {
-        assert!(text.contains(line), "{line}\n{text}");
+        assert!(squeezed(&text).contains(&squeezed(line)), "{line}\n{text}");
     }
     // The kernel's own set no longer goes straight to /lib/modules, and the
     // module's build is no layer of its own.
@@ -2356,6 +2391,13 @@ fn a_kernel_module_is_built_against_the_image_kernel() {
         "\"hello-rust\", \"hello-module\"]",
     );
     // On a board with no kernel build.
+    // On a board with no kernel build (and no Rust component, whose
+    // toolchain pins no std for that board).
+    edit(
+        &product,
+        "\"hello-rust\", \"hello-module\"]",
+        "\"hello-module\"]",
+    );
     edit(
         &product,
         "boards/zero-3e/board.toml",
@@ -2394,7 +2436,10 @@ fn a_components_users_and_services_are_in_the_tree_that_ships() {
         "zero-3e-demo.accounts.layer -> zero-3e-demo.system.layers",
         "zero-3e-demo.system.tree -> zero-3e-demo::erofs.tree",
     ] {
-        assert!(text.contains(line), "the plan has no line {line:?}");
+        assert!(
+            squeezed(&text).contains(&squeezed(line)),
+            "the plan has no line {line:?}"
+        );
     }
     // What each node is given: the enabled units by component, and the
     // users and groups with the component that states them.
@@ -2452,7 +2497,10 @@ fn the_k230_wrapped_areas_go_through_firmware_k230() {
         "k230d-ai-cam.wrap.spl  ",
         "k230d-ai-cam.wrap.uboot-opensbi  ",
     ] {
-        assert!(text.contains(line), "missing node {line:?}\n{text}");
+        assert!(
+            squeezed(&text).contains(&squeezed(line)),
+            "missing node {line:?}\n{text}"
+        );
     }
     for edge in [
         "k230d-ai-cam.bootloader.bootloader -> k230d-ai-cam.wrap.spl.from",
@@ -2714,7 +2762,10 @@ fn a_generated_ramdisk_boot_takes_the_generators_overlay_and_fragment() {
         "zero-3e-demo.hello-rust.fragment0.layer -> zero-3e-demo.assembled0.parts0",
         "zero-3e-demo.rootfs.tree -> zero-3e-demo::initramfs.tree",
     ] {
-        assert!(text.contains(line), "the plan has no line {line:?}\n{text}");
+        assert!(
+            squeezed(&text).contains(&squeezed(line)),
+            "the plan has no line {line:?}\n{text}"
+        );
     }
     assert!(
         !text.contains("zero-3e-demo::device_trees.tree -> zero-3e-demo::config.tree"),

@@ -15,10 +15,26 @@ const IMAGE: &str = "docker.io/library/debian:trixie-slim";
 const IMAGE_DIGEST: &str =
     "sha256:a72b4433de1cf7d6bae0c4cee74d0547f58601a643b3375f070c51600d63b6b2";
 
+/// The lock entries of test-tree's toolchain (Rust 1.99.0, for its
+/// x86_64 musl target): each release file, with a digest of its own.
+fn toolchain_lock() -> String {
+    gaia_describe::rust_pieces("1.99.0", &["x86_64-unknown-linux-musl".to_string()])
+        .into_iter()
+        .enumerate()
+        .map(|(n, piece)| {
+            format!(
+                "[source.\"test-tree.toolchain.{}\"]\nkind = \"download\"\nurl = \"{}\"\ndigest = \"sha256:{:064x}\"\n",
+                piece.suffix,
+                piece.url,
+                n + 1
+            )
+        })
+        .collect()
+}
+
 /// The tools the recipes' stages name, pinned to paths that need not exist:
 /// planning never runs them.
 const TOOLS: &[(&str, &str)] = &[
-    ("toolchain", "/opt/toolchain"),
     ("mkfs_erofs", "/opt/tools/mkfs.erofs"),
     ("mke2fs", "/opt/tools/mke2fs"),
     ("debugfs", "/opt/tools/debugfs"),
@@ -63,7 +79,8 @@ fn product(dir: &Path, examples: &Path, name: &str, recipe: &gaia_recipe::Recipe
     std::fs::write(
         dir.join("gaia.lock"),
         format!(
-            "version = 1\n\n[source.\"test-tree.src\"]\nkind = \"git\"\nurl = \"{URL}\"\nref = \"master\"\ncommit = \"{COMMIT}\"\n[source.\"test-tree.root\"]\nkind = \"image\"\nreference = \"{IMAGE}\"\ndigest = \"{IMAGE_DIGEST}\"\n"
+            "version = 1\n\n[source.\"test-tree.src\"]\nkind = \"git\"\nurl = \"{URL}\"\nref = \"master\"\ncommit = \"{COMMIT}\"\n[source.\"test-tree.root\"]\nkind = \"image\"\nreference = \"{IMAGE}\"\ndigest = \"{IMAGE_DIGEST}\"\n{}",
+            toolchain_lock()
         ),
     )
     .expect("lock");

@@ -33,7 +33,10 @@ pub use board::{
     Board, Boot, Bootloader, Disk, Firmware, Flash, KERNEL_IMAGES, KERNEL_TOOLCHAINS, Kernel,
     Medium, PartitionNeed, Scheme, TrustedFirmware, WRAP_KINDS,
 };
-pub use common::{FileRef, ImagePlatform, Mode, RelPath, SizeText, Source, Subdir};
+pub use common::{
+    FileRef, ImagePlatform, Mode, RUST_DIST, RelPath, RustPiece, SizeText, Source, Subdir,
+    rust_host_triple, rust_pieces,
+};
 pub use component::{
     Build, Component, Fragment, Generate, GenerateImage, GenerateTool, Group, InSource, Install,
     InstallFrom, Package, Requires, Service, User,

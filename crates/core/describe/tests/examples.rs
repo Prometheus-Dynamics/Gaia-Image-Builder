@@ -117,18 +117,32 @@ fn the_demo_product_loads_its_board_and_component() {
     assert_eq!(component.install[0].mode.map(|m| m.0), Some(0o755));
     let wants: Vec<_> = loaded.wants().into_iter().map(|(name, _)| name).collect();
     println!("lock names: {wants:?}");
-    assert_eq!(
-        wants,
+    // The toolchain's release files: rustc, cargo, the build machine's std
+    // and the board's.
+    let host_std = format!(
+        "hello-rust.toolchain.std.{}",
+        gaia_describe::rust_host_triple()
+    );
+    let mut want = vec![
+        "hello-rust.toolchain.cargo",
+        "hello-rust.toolchain.rustc",
+        "hello-rust.toolchain.std.aarch64-unknown-linux-musl",
+        &host_std,
+    ];
+    want.sort_unstable();
+    want.dedup();
+    let (before, after) = (
+        ["hello-rust.root", "hello-rust.src"],
         [
-            "hello-rust.root",
-            "hello-rust.src",
             "zero-3e-demo.buildroot",
             "zero-3e.linux",
             "zero-3e.rkbin",
             "zero-3e.tf-a",
-            "zero-3e.u-boot"
-        ]
+            "zero-3e.u-boot",
+        ],
     );
+    let want: Vec<&str> = before.into_iter().chain(want).chain(after).collect();
+    assert_eq!(wants, want);
 }
 
 /// The gadget network's Ethernet addresses are the same on every boot: its

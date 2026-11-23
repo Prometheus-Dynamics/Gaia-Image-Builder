@@ -7,9 +7,11 @@
 //!   the source at `/src` and the vendored crates at `/vendor` (all
 //!   read-only), and the step's directory at `/build`, the only writable
 //!   path (cargo's home, its target directory and `out`). The network is off.
-//! - **Pinned toolchain:** the sysroot given, bound read-only. `rustc -vV`
-//!   and `cargo -V`, run in the same sandbox, are in the key. Nothing from
-//!   the host's `PATH` or `~/.cargo` is used.
+//! - **Pinned toolchain:** a stored sysroot (`gaia.build.rust.toolchain`,
+//!   made from a Rust release's official files that the lock pins), bound
+//!   read-only. Its digest is in the key, and `rustc -vV` and `cargo -V`, run
+//!   in the same sandbox, with it. Nothing of the build machine's Rust
+//!   (`rustup`, `~/.cargo`, `PATH`) is used.
 //! - **Offline:** `--locked --offline`, with crates.io dependencies taken
 //!   from the vendored tree (what `cargo vendor` writes, checked against
 //!   `Cargo.lock`). Nothing is fetched.
@@ -27,8 +29,10 @@
 
 mod group;
 mod split;
+mod toolchain;
 mod vendor;
 
+pub use toolchain::lay_out;
 pub use vendor::vendor;
 
 use daedalus::prelude::*;
@@ -44,7 +48,8 @@ const NAME: &str = "gaia.build.rust";
 const PROBE: &str = "gaia.build.rust.version";
 /// Changes when how the build is run changes.
 /// 3: a profile, and the target's own flags added to the source's.
-const RECIPE_VERSION: u32 = 3;
+/// 4: the toolchain a stored sysroot, its digest in the key.
+const RECIPE_VERSION: u32 = 4;
 
 /// Where the sandbox binds each input and the writable step directory.
 const TOOLCHAIN: &str = "/toolchain";
@@ -59,8 +64,8 @@ const PATH_WITH_TOOLS: &str = "/toolchain/bin:/tools/bin:/tools:/usr/bin:/bin";
 /// Builds `package` from `source` for `triple` (tuned for `cpu`, when not
 /// empty), with `features` (names separated by spaces or commas, as cargo
 /// takes them; text, since a graph sets it as a constant), in the image
-/// `root` (a stored root filesystem tree), with the toolchain at `toolchain`
-/// (a sysroot directory on this host, bound read-only) and the crates in
+/// `root` (a stored root filesystem tree), with the toolchain `toolchain`
+/// (a stored sysroot, bound read-only) and the crates in
 /// `vendor`. `bwrap` is the bubblewrap program that runs every tool.
 ///
 /// `cc` and `env` are for a crate that compiles C: the image `root` carries
@@ -88,7 +93,7 @@ pub fn build_rust(
     store: &str,
     bwrap: &str,
     root: Tree,
-    toolchain: &str,
+    toolchain: Tree,
     source: Tree,
     vendor: Tree,
     package: &str,
@@ -137,6 +142,7 @@ pub fn build_rust(
         component_env.push((name.to_string(), value.to_string()));
     }
     let (root_digest, root_dir) = dir_of(&root, "image")?;
+    let (toolchain_digest, toolchain_dir) = dir_of(&toolchain, "toolchain")?;
     let (source_digest, source_dir) = dir_of(&source, "source")?;
     let (vendor_digest, vendor_dir) = dir_of(&vendor, "vendored crates tree")?;
     if !source_dir.join("Cargo.lock").is_file() {
@@ -147,7 +153,7 @@ pub fn build_rust(
     // What every tool of this build sees: the image, the toolchain and the
     // inputs. The writable step directory is added for the build itself.
     let base = Sandbox::new(bwrap, root_dir.clone())
-        .input(PathBuf::from(toolchain), TOOLCHAIN)
+        .input(toolchain_dir, TOOLCHAIN)
         .input(source_dir.clone(), SOURCE)
         .input(vendor_dir.clone(), VENDOR);
     // A tool's version, read by a step of its own in the sandbox.
@@ -271,6 +277,7 @@ pub fn build_rust(
         .config("triple", triple)
         .config("cpu", cpu)
         .input("image", root_digest)
+        .input("toolchain", toolchain_digest)
         .input("source", source_digest)
         .input("vendor", vendor_digest);
     if let Some((digest, _)) = &tools {
@@ -531,10 +538,11 @@ fn collect(profile: &Path, out: &Path) -> Result<(), StepError> {
 }
 
 /// The node, for a registry.
-pub const NODES: [&NodeRecord; 3] = [
+pub const NODES: [&NodeRecord; 4] = [
     &BUILD_RUST_NODE,
     &vendor::VENDOR_NODE,
     &split::BUILD_RUST_PART_NODE,
+    &toolchain::BUILD_RUST_TOOLCHAIN_NODE,
 ];
 
 #[cfg(test)]

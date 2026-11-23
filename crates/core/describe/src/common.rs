@@ -170,10 +170,18 @@ impl Subdir {
 ///
 /// Written as exactly one of `git` (with `ref`, and an optional `subdir`
 /// naming a directory of the checkout to use instead of its root),
-/// `download`, `image` (with an optional `platform`) or `path`. The lock pins
+/// `download`, `image` (with an optional `platform`), `path` or `rust` (with
+/// `targets`). The lock pins
 /// the repository's commit; `subdir` is not in the lock. An `image` may name
 /// its digest as `reference@sha256:<64 hex>`, which the lock then records
 /// without asking the registry.
+///
+/// A `rust` source is a Rust toolchain release, `rust = "1.99.0"`, with the
+/// target triples whose standard library a build needs, `targets =
+/// ["aarch64-unknown-linux-musl"]`: the official release files (see
+/// [`RustPiece`]), each pinned in the lock by its digest. A Rust build takes
+/// its toolchain from the component's source named `toolchain`, never from
+/// the build machine.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(try_from = "SourceText")]
 pub enum Source {
@@ -192,6 +200,84 @@ pub enum Source {
     Path {
         path: RelPath,
     },
+    Rust {
+        version: String,
+        /// Sorted, no repeats.
+        targets: Vec<String>,
+    },
+}
+
+/// Where the official Rust releases are.
+pub const RUST_DIST: &str = "https://static.rust-lang.org/dist";
+
+/// One file of a Rust toolchain release: what it holds and where it is.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RustPiece {
+    /// The lock name's last part: `rustc`, `cargo` or `std.<triple>`.
+    pub suffix: String,
+    pub url: String,
+}
+
+/// The triple of the machine running the build, as Rust names it: the host
+/// rustc, cargo and std are for it.
+pub fn rust_host_triple() -> String {
+    format!("{}-unknown-linux-gnu", std::env::consts::ARCH)
+}
+
+/// The files of Rust `version` for this machine with the std of each of
+/// `targets` (and of the host, which build scripts and proc macros need),
+/// in the order: rustc, cargo, then the stds by triple.
+pub fn rust_pieces(version: &str, targets: &[String]) -> Vec<RustPiece> {
+    let host = rust_host_triple();
+    let piece = |suffix: String, name: &str, triple: &str| RustPiece {
+        suffix,
+        url: format!("{RUST_DIST}/{name}-{version}-{triple}.tar.xz"),
+    };
+    let mut triples: Vec<&str> = targets.iter().map(String::as_str).collect();
+    triples.push(&host);
+    triples.sort_unstable();
+    triples.dedup();
+    let mut pieces = vec![
+        piece("rustc".into(), "rustc", &host),
+        piece("cargo".into(), "cargo", &host),
+    ];
+    for triple in triples {
+        pieces.push(piece(format!("std.{triple}"), "rust-std", triple));
+    }
+    pieces
+}
+
+/// A Rust version as the releases name it: three numbers, `1.99.0`.
+fn rust_version(text: &str) -> Result<(), String> {
+    let parts: Vec<&str> = text.split('.').collect();
+    let numbers = parts.len() == 3
+        && parts
+            .iter()
+            .all(|p| !p.is_empty() && p.bytes().all(|b| b.is_ascii_digit()));
+    if numbers {
+        Ok(())
+    } else {
+        Err(format!(
+            "`{text}` is not a Rust release: write its three numbers, `1.99.0`"
+        ))
+    }
+}
+
+/// A target triple: lowercase letters, digits, `_` and `.`, in parts
+/// joined by `-`.
+fn rust_triple(text: &str) -> Result<(), String> {
+    let good = text.split('-').count() >= 2
+        && text.split('-').all(|part| {
+            !part.is_empty()
+                && part
+                    .bytes()
+                    .all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'_' || b == b'.')
+        });
+    if good {
+        Ok(())
+    } else {
+        Err(format!("`{text}` is not a target triple"))
+    }
 }
 
 /// Which machine an image source is pulled for.
@@ -217,6 +303,8 @@ struct SourceText {
     platform: Option<ImagePlatform>,
     path: Option<RelPath>,
     subdir: Option<Subdir>,
+    rust: Option<String>,
+    targets: Option<Vec<String>>,
 }
 
 /// An image written as `reference`, or `reference@sha256:<64 lowercase hex>`
@@ -248,6 +336,32 @@ impl TryFrom<SourceText> for Source {
         let has_ref = text.reference.is_some();
         let has_platform = text.platform.is_some();
         let has_subdir = text.subdir.is_some();
+        let has_targets = text.targets.is_some();
+        if let Some(version) = text.rust {
+            if text.git.is_some()
+                || text.download.is_some()
+                || text.image.is_some()
+                || text.path.is_some()
+            {
+                return Err("only one of `git`, `download`, `image`, `path` and `rust`".into());
+            }
+            if has_ref || has_platform || has_subdir {
+                return Err("a rust source has only `rust` and `targets`".into());
+            }
+            rust_version(&version)?;
+            let mut targets = text.targets.ok_or(
+                "a rust source needs `targets`: the target triples its builds are for, `[\"aarch64-unknown-linux-musl\"]`",
+            )?;
+            for target in &targets {
+                rust_triple(target)?;
+            }
+            targets.sort();
+            targets.dedup();
+            return Ok(Self::Rust { version, targets });
+        }
+        if has_targets {
+            return Err("only a rust source has `targets`".into());
+        }
         let source = match (text.git, text.download, text.image, text.path) {
             (Some(url), None, None, None) => Self::Git {
                 url,
@@ -263,7 +377,9 @@ impl TryFrom<SourceText> for Source {
             },
             (None, None, None, Some(path)) => Self::Path { path },
             (None, None, None, None) => {
-                return Err("say where it comes from: `git`, `download`, `image` or `path`".into());
+                return Err(
+                    "say where it comes from: `git`, `download`, `image`, `path` or `rust`".into(),
+                );
             }
             _ => return Err("only one of `git`, `download`, `image` and `path`".into()),
         };
@@ -281,8 +397,27 @@ impl TryFrom<SourceText> for Source {
 }
 
 impl Source {
-    /// What the lock must hold for it.
-    pub fn want(&self) -> Want {
+    /// What the lock must hold for it, under `name` (`<file's name>.<source>`):
+    /// one entry, or for a `rust` source one per release file, named
+    /// `<name>.<piece>` (`orion.toolchain.std.aarch64-unknown-linux-musl`).
+    pub fn wants(&self, name: &str) -> Vec<(String, Want)> {
+        match self {
+            Self::Rust { version, targets } => rust_pieces(version, targets)
+                .into_iter()
+                .map(|piece| {
+                    (
+                        format!("{name}.{}", piece.suffix),
+                        Want::Download { url: piece.url },
+                    )
+                })
+                .collect(),
+            other => vec![(name.to_string(), other.want())],
+        }
+    }
+
+    /// What the lock must hold for a source that is one entry. A `rust`
+    /// source is several: see [`Source::wants`].
+    fn want(&self) -> Want {
         match self {
             Self::Git { url, reference, .. } => Want::Git {
                 url: url.clone(),
@@ -295,6 +430,7 @@ impl Source {
             Self::Path { path } => Want::Tree {
                 path: path.0.display().to_string(),
             },
+            Self::Rust { .. } => unreachable!("a rust source's wants are its pieces"),
         }
     }
 
@@ -441,6 +577,26 @@ pub(crate) fn check_source<'a>(
         None => message.push_str(&format!("; the sources are {}", known.join(", "))),
     }
     Err(Error::new(file, key, message))
+}
+
+/// Checks that the only `rust` source in `sources` is a component's
+/// `toolchain` (`component` true): a Rust build's toolchain, which nothing
+/// else takes.
+pub(crate) fn check_rust_sources(
+    file: &Path,
+    sources: &BTreeMap<String, Source>,
+    component: bool,
+) -> Result<(), Error> {
+    for (name, source) in sources {
+        if matches!(source, Source::Rust { .. }) && !(component && name == "toolchain") {
+            return Err(Error::new(
+                file,
+                format!("sources.{name}"),
+                "a rust source is a Rust build's toolchain: a component's, named `toolchain`; nothing else takes one",
+            ));
+        }
+    }
+    Ok(())
 }
 
 /// Checks that `local`, written at `key` in `file`, is there.

@@ -3,11 +3,14 @@
 //! The workspace has a binary, a library it uses by path, and a crates.io
 //! dependency taken from a vendored tree, so the build is offline. The image
 //! is `debian:trixie-slim`, pinned by its index digest and pulled by the OCI
-//! source node (this needs the network). The toolchain is this host's
-//! sysroot, bound read-only. Where bubblewrap or user namespaces are missing
-//! the tests say SKIPPED, unless `GAIA_REQUIRE_SANDBOX=1`, when they fail.
-//! Where the pull or the toolchain's std for the target is missing they say
-//! SKIPPED, unless `GAIA_REQUIRE_TOOLS=1`, when they fail.
+//! source node (this needs the network). The toolchain is a pinned Rust
+//! release: its official files, fetched once into the test target's scratch
+//! directory, checked by digest and laid into a sysroot with `lay_out`, as
+//! the toolchain step does; the host's own Rust is not used. Where
+//! bubblewrap or user namespaces are missing the tests say SKIPPED, unless
+//! `GAIA_REQUIRE_SANDBOX=1`, when they fail. Where the pull or the release's
+//! files are missing they say SKIPPED, unless `GAIA_REQUIRE_TOOLS=1`, when
+//! they fail.
 
 use gaia_build_rust::build_rust;
 use gaia_source_oci::source;
@@ -98,16 +101,93 @@ fn vendored(dir: &Path) {
     );
 }
 
-fn toolchain() -> PathBuf {
-    let out = std::process::Command::new("rustc")
-        .args(["--print", "sysroot"])
-        .output()
-        .expect("rustc");
-    PathBuf::from(String::from_utf8(out.stdout).expect("utf8").trim())
+/// The release the tests build with, and its files for an x86_64 host and
+/// the target, with the digests static.rust-lang.org publishes for them.
+const RELEASE: &str = "1.99.0";
+const PIECES: &[(&str, &str)] = &[
+    (
+        "rustc-1.99.0-x86_64-unknown-linux-gnu",
+        "77171ba2a0345fdf2abc4fedda55d6de078dae7a68527c28be8c77dcc9604bd5",
+    ),
+    (
+        "cargo-1.99.0-x86_64-unknown-linux-gnu",
+        "d7674918d28093097614cd9728b6ca60db9ea3038f640f0bd1e9a4188c7568ce",
+    ),
+    (
+        "rust-std-1.99.0-x86_64-unknown-linux-gnu",
+        "3e58dff2d0b72196b5ea4e90536e174d400de88564a52694686b81e091169933",
+    ),
+    (
+        "rust-std-1.99.0-aarch64-unknown-linux-musl",
+        "ea8fd309578a09c9e12401621a470e6d6b1047f25933207fb8a39d66647d4561",
+    ),
+];
+
+/// The release's sysroot, made once per target directory (the tests run as
+/// separate processes, so one holds a lock while it makes it). Not on an
+/// x86_64 host, or missing the network, a skip unless required.
+fn sysroot() -> Option<PathBuf> {
+    let skip = |why: String| {
+        assert!(
+            !required("GAIA_REQUIRE_TOOLS"),
+            "GAIA_REQUIRE_TOOLS is set, and the Rust {RELEASE} release is missing: {why}"
+        );
+        println!("SKIPPED: the Rust {RELEASE} release is missing: {why}");
+        None
+    };
+    if std::env::consts::ARCH != "x86_64" {
+        return skip("its files here are for an x86_64 host".into());
+    }
+    let dir = Path::new(env!("CARGO_TARGET_TMPDIR")).join(format!("rust-{RELEASE}"));
+    let sysroot = dir.join("sysroot");
+    std::fs::create_dir_all(&dir).expect("mkdir");
+    let held = std::fs::File::create(dir.join("lock")).expect("lock file");
+    held.lock().expect("lock");
+    if sysroot.is_dir() {
+        return Some(sysroot);
+    }
+    let making = dir.join("sysroot.new");
+    let _ = std::fs::remove_dir_all(&making);
+    std::fs::create_dir(&making).expect("mkdir");
+    for (name, sha) in PIECES {
+        let file = dir.join(format!("{name}.tar.xz"));
+        if !file.is_file() {
+            let part = dir.join(format!("{name}.tar.xz.part"));
+            let got = std::process::Command::new(CURL)
+                .args(["-fsSL", "-o"])
+                .arg(&part)
+                .arg(format!("https://static.rust-lang.org/dist/{name}.tar.xz"))
+                .status();
+            if !matches!(got, Ok(status) if status.success()) {
+                return skip(format!("{name} did not download"));
+            }
+            std::fs::rename(&part, &file).expect("rename");
+        }
+        let digest = file_digest(&file).expect("digest").to_string();
+        assert_eq!(digest, format!("sha256:{sha}"), "{name}");
+        let unpacked = dir.join(name);
+        let _ = std::fs::remove_dir_all(&unpacked);
+        std::fs::create_dir(&unpacked).expect("mkdir");
+        let status = std::process::Command::new("tar")
+            .args(["-xJf"])
+            .arg(&file)
+            .arg("-C")
+            .arg(&unpacked)
+            .arg("--strip-components=1")
+            .status()
+            .expect("tar");
+        assert!(status.success(), "{name} did not unpack");
+        gaia_build_rust::lay_out(&unpacked, &making).expect("laid out");
+        std::fs::remove_dir_all(&unpacked).expect("rm");
+    }
+    std::fs::rename(&making, &sysroot).expect("rename");
+    Some(sysroot)
 }
 
-fn has_target(toolchain: &Path, triple: &str) -> bool {
-    toolchain.join("lib/rustlib").join(triple).is_dir()
+/// A tree that is no toolchain, for the steps that refuse before one runs.
+fn no_toolchain(store: &Path) -> Tree {
+    let dir = tempfile::tempdir().expect("tempdir");
+    stored_tree(store, dir.path())
 }
 
 /// The image, pulled into `store` by digest. Missing the network, a skip
@@ -168,18 +248,25 @@ fn image_in(store: &Path, from: &Path, pulled: &Tree) -> Tree {
 
 /// Builds `app` with `image` in the store under `root`; gives its artifacts
 /// and their files.
-fn build(root: &Path, image: Tree, triple: &str, cpu: &str, features: &[&str]) -> Built {
+fn build(
+    root: &Path,
+    sysroot: &Path,
+    image: Tree,
+    triple: &str,
+    cpu: &str,
+    features: &[&str],
+) -> Built {
     let src = root.join("src");
     let vendor = root.join("vendor");
     workspace(&src);
     vendored(&vendor);
     let store = root.join("store");
-    let toolchain = toolchain();
+    let toolchain = stored_tree(&store, sysroot);
     let (tree, artifacts) = build_rust(
         &store.display().to_string(),
         BWRAP,
         image,
-        &toolchain.display().to_string(),
+        toolchain,
         stored_tree(&store, &src),
         stored_tree(&store, &vendor),
         "app",
@@ -214,28 +301,14 @@ fn build(root: &Path, image: Tree, triple: &str, cpu: &str, features: &[&str]) -
     (artifacts, files)
 }
 
-/// Whether the toolchain can build `triple` here: a skip unless required.
-fn target_here(triple: &str) -> bool {
-    let toolchain = toolchain();
-    let ok = has_target(&toolchain, triple);
-    if !ok {
-        assert!(
-            !required("GAIA_REQUIRE_TOOLS"),
-            "GAIA_REQUIRE_TOOLS is set, and the toolchain has no std for {triple}"
-        );
-        println!(
-            "SKIPPED: the toolchain at {} has no std for {triple}",
-            toolchain.display()
-        );
-    }
-    ok
-}
-
 #[test]
 fn aarch64_musl_twice_gives_identical_digests() {
-    if !sandbox_here() || !target_here(TRIPLE) {
+    if !sandbox_here() {
         return;
     }
+    let Some(sysroot) = sysroot() else {
+        return;
+    };
     let (a, b, c) = (
         tempfile::tempdir().expect("tempdir"),
         tempfile::tempdir().expect("tempdir"),
@@ -252,9 +325,9 @@ fn aarch64_musl_twice_gives_identical_digests() {
     // The two builds compared, and the one with a feature, each in its own
     // store: independent, so they run at once.
     let (first, second, loud) = std::thread::scope(|s| {
-        let first = s.spawn(|| build(a.path(), image, TRIPLE, "cortex-a55", &[]));
-        let second = s.spawn(|| build(b.path(), image_b, TRIPLE, "cortex-a55", &[]));
-        let loud = s.spawn(|| build(c.path(), image_c, TRIPLE, "cortex-a55", &["loud"]));
+        let first = s.spawn(|| build(a.path(), &sysroot, image, TRIPLE, "cortex-a55", &[]));
+        let second = s.spawn(|| build(b.path(), &sysroot, image_b, TRIPLE, "cortex-a55", &[]));
+        let loud = s.spawn(|| build(c.path(), &sysroot, image_c, TRIPLE, "cortex-a55", &["loud"]));
         (
             first.join().expect("first build"),
             second.join().expect("second build"),
@@ -345,10 +418,10 @@ fn repository(dir: &Path) {
     );
 }
 
-/// `Cargo.lock` for `dir`, written by the host's cargo. Missing the
+/// `Cargo.lock` for `dir`, written by the release's cargo. Missing the
 /// network, a skip unless required.
-fn lock(dir: &Path) -> bool {
-    let out = std::process::Command::new(toolchain().join("bin/cargo"))
+fn lock(sysroot: &Path, dir: &Path) -> bool {
+    let out = std::process::Command::new(sysroot.join("bin/cargo"))
         .args(["generate-lockfile", "--manifest-path"])
         .arg(dir.join("Cargo.toml"))
         .output()
@@ -366,13 +439,16 @@ fn lock(dir: &Path) -> bool {
 
 #[test]
 fn a_repository_is_vendored_from_its_lock_and_built_with_its_profile_and_flags() {
-    if !sandbox_here() || !target_here(TRIPLE) {
+    if !sandbox_here() {
         return;
     }
+    let Some(sysroot) = sysroot() else {
+        return;
+    };
     let dir = tempfile::tempdir().expect("tempdir");
     let src = dir.path().join("src");
     repository(&src);
-    if !lock(&src) {
+    if !lock(&sysroot, &src) {
         return;
     }
     let store = dir.path().join("store");
@@ -380,7 +456,7 @@ fn a_repository_is_vendored_from_its_lock_and_built_with_its_profile_and_flags()
         return;
     };
     let store_text = store.display().to_string();
-    let toolchain = toolchain().display().to_string();
+    let toolchain = stored_tree(&store, &sysroot);
     let source = stored_tree(&store, &src);
     // A program the image does not have, found by its name on PATH: a
     // wrapper cargo runs the compiler through, which adds a cfg the source
@@ -397,8 +473,9 @@ fn a_repository_is_vendored_from_its_lock_and_built_with_its_profile_and_flags()
     .expect("chmod");
     let tools = stored_tree(&store, &tools_dir);
 
-    let vendor = gaia_build_rust::vendor(&store_text, &toolchain, source.clone(), &Ctx::new())
-        .expect("vendors");
+    let vendor =
+        gaia_build_rust::vendor(&store_text, toolchain.clone(), source.clone(), &Ctx::new())
+            .expect("vendors");
     let opened = Store::open(&store).expect("store");
     let vendor_dir = vendor.object.path_in(&opened).expect("in store");
     let mut crates: Vec<String> = std::fs::read_dir(&vendor_dir)
@@ -414,8 +491,9 @@ fn a_repository_is_vendored_from_its_lock_and_built_with_its_profile_and_flags()
     assert!(config.contains("directory = \"@vendor@\""), "{config}");
 
     // The same lock is found again: nothing is fetched twice.
-    let again = gaia_build_rust::vendor(&store_text, &toolchain, source.clone(), &Ctx::new())
-        .expect("again");
+    let again =
+        gaia_build_rust::vendor(&store_text, toolchain.clone(), source.clone(), &Ctx::new())
+            .expect("again");
     assert_eq!(again.object, vendor.object);
 
     // Offline, with the source's profile, and the source's flags kept.
@@ -423,7 +501,7 @@ fn a_repository_is_vendored_from_its_lock_and_built_with_its_profile_and_flags()
         &store_text,
         BWRAP,
         image,
-        &toolchain,
+        toolchain,
         source,
         vendor,
         "svc",
@@ -465,12 +543,13 @@ fn a_bad_env_line_or_a_reserved_name_is_refused() {
     write(&src.join("Cargo.lock"), "version = 4\n");
     let store = dir.path().join("store");
     let tree = stored_tree(&store, &src);
+    let toolchain = no_toolchain(&store);
     let run = |env: &str| {
         build_rust(
             &store.display().to_string(),
             BWRAP,
             tree.clone(),
-            &toolchain().display().to_string(),
+            toolchain.clone(),
             tree.clone(),
             tree.clone(),
             "svc",
@@ -506,7 +585,7 @@ fn a_source_without_a_lock_is_refused_by_the_vendor_step() {
     let source = stored_tree(&store, &src);
     let error = gaia_build_rust::vendor(
         &store.display().to_string(),
-        &toolchain().display().to_string(),
+        no_toolchain(&store),
         source,
         &Ctx::new(),
     )

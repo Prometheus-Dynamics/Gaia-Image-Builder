@@ -575,6 +575,13 @@ fn rust_shape(
     let root = named("root")?;
     let vendor = named("vendor")?;
     let tools = named("tools")?;
+    // The toolchain is a release and its stds, not one lock entry.
+    let toolchain = match component.sources.get("toolchain") {
+        Some(gaia_describe::Source::Rust { version, targets }) => {
+            format!("{version} {}", targets.join(","))
+        }
+        _ => return None,
+    };
     let triple = if build.settings.contains_key("triple") {
         text("triple")
     } else {
@@ -613,6 +620,7 @@ fn rust_shape(
         cc: text("cc"),
         env: text("env"),
         tools,
+        toolchain,
     })
 }
 
@@ -735,8 +743,12 @@ fn component_build(
     }
     // The source it builds, then any input named like another source.
     let mut wanted = vec![(build.source.clone(), "source".to_string())];
-    for name in component.sources.keys() {
-        if *name != build.source && g.has_input(node, name) && !build.settings.contains_key(name) {
+    for (name, source) in &component.sources {
+        if *name != build.source
+            && g.has_input(node, name)
+            && !build.settings.contains_key(name)
+            && !matches!(source, Source::Rust { .. })
+        {
             wanted.push((name.clone(), name.clone()));
         }
     }
@@ -807,6 +819,18 @@ fn component_build(
         let cpu = cpu.rsplit('.').next().unwrap_or(cpu);
         g.set(node, "cpu", Lit::Str(cpu.to_string()));
     }
+    // The toolchain, from the component's `toolchain` source: never the
+    // build machine's.
+    let mut toolchain = None;
+    if id == RUST_BUILD {
+        let triple = match build.settings.get("triple").and_then(toml::Value::as_str) {
+            Some(triple) => triple.to_string(),
+            None => target_triple(&board.target).unwrap_or_default().to_string(),
+        };
+        let made = rust_toolchain(g, component, &triple, lock, board, &step)?;
+        g.edge((made, "tree"), (node, "toolchain"));
+        toolchain = Some(made);
+    }
     // The dependencies, fetched by the builder's own vendor step from what
     // the source's lock file names, when the component gives no `vendor`.
     let vendor = format!("{id}.vendor");
@@ -817,10 +841,92 @@ fn component_build(
     {
         let fetch = g.add(&vendor, step("vendor"), file, &format!("{word}.builder"))?;
         g.edge((from, out), (fetch, "source"));
+        if let Some(made) = toolchain {
+            g.edge((made, "tree"), (fetch, "toolchain"));
+        }
         let fetched = g.first_output(fetch).unwrap_or("vendor");
         g.edge((fetch, fetched), (node, "vendor"));
     }
     Ok(node)
+}
+
+/// The node a Rust build is: it takes its toolchain from the component.
+const RUST_BUILD: &str = "gaia.build.rust";
+
+/// The sysroot a Rust build for `triple` takes: the component's `toolchain`
+/// source's release files (rustc, cargo, the host's std and the target's),
+/// each pinned by the lock, unpacked and laid into one tree. A component with
+/// no such source, or one whose `targets` lack `triple`, is refused by name:
+/// the build machine's Rust is never used.
+fn rust_toolchain(
+    g: &mut Graph<'_>,
+    component: &Component,
+    triple: &str,
+    lock: &Lock,
+    board: &gaia_describe::Board,
+    step: &dyn Fn(&str) -> String,
+) -> Result<u32, Error> {
+    let file = &component.file;
+    let Some(Source::Rust { version, targets }) = component.sources.get("toolchain") else {
+        return Err(Error::at(
+            file,
+            "sources.toolchain",
+            format!(
+                "{}'s Rust build takes its toolchain from a source: `[sources.toolchain]` with `rust = \"<release>\"` and `targets = [\"{triple}\"]`; the build machine's Rust is not used",
+                component.name
+            ),
+        ));
+    };
+    let host = gaia_describe::rust_host_triple();
+    if triple != host && !targets.iter().any(|t| t == triple) {
+        return Err(Error::at(
+            file,
+            "sources.toolchain.targets",
+            format!(
+                "{}'s build is for {triple}, and its toolchain (Rust {version}) pins no std for it: add \"{triple}\" to `targets`, then run `gaia lock`",
+                component.name
+            ),
+        ));
+    }
+    let pieces = gaia_describe::rust_pieces(version, targets);
+    let piece = |suffix: &str| {
+        pieces
+            .iter()
+            .find(|p| p.suffix == suffix)
+            .cloned()
+            .expect("rust_pieces gives rustc, cargo and each std")
+    };
+    let mut ports = vec![
+        ("rustc", piece("rustc")),
+        ("cargo", piece("cargo")),
+        ("std_host", piece(&format!("std.{host}"))),
+    ];
+    if triple != host {
+        ports.push(("std_target", piece(&format!("std.{triple}"))));
+    }
+    let made = g.add(
+        "gaia.build.rust.toolchain",
+        step("toolchain"),
+        file,
+        "sources.toolchain",
+    )?;
+    for (port, piece) in ports {
+        let lock_name = format!("{}.toolchain.{}", component.name, piece.suffix);
+        let download = Source::Download { url: piece.url };
+        let from = source_node(g, file, "toolchain", &lock_name, &download, lock, board)?;
+        let unpack = g.add(
+            "gaia.source.archive",
+            step(&format!("toolchain.{}.unpacked", piece.suffix)),
+            file,
+            "sources.toolchain",
+        )?;
+        let out = g.first_output(from).unwrap_or("file");
+        g.edge((from, out), (unpack, "archive"));
+        g.set(unpack, "strip", Lit::Int(1));
+        let unpacked = g.first_output(unpack).unwrap_or("tree");
+        g.edge((unpack, unpacked), (made, port));
+    }
+    Ok(made)
 }
 
 /// The Rust target triple for a board's Linux target: static musl, so a
@@ -953,6 +1059,13 @@ fn source_node(
             let node = g.add("gaia.source.path", label, file, &key)?;
             g.set(node, "path", s(&path.path().display().to_string()));
             node
+        }
+        Source::Rust { .. } => {
+            return Err(Error::at(
+                file,
+                key,
+                "a rust source is a Rust build's toolchain, named `toolchain`; nothing else takes one",
+            ));
         }
     };
     Ok(node)

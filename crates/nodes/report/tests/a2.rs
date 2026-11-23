@@ -3,9 +3,14 @@
 //! toolchain, so it is ignored by default:
 //!
 //! ```text
-//! GAIA_TOOLCHAIN=$(rustc --print sysroot) \
+//! GAIA_TOOLCHAIN=<sysroot> \
 //!   cargo test -p gaia-report --test a2 -- --ignored --nocapture
 //! ```
+//!
+//! `GAIA_TOOLCHAIN` is a Rust sysroot with the std of both targets
+//! (x86_64 and aarch64 musl), such as one the toolchain step laid out from a
+//! pinned release; it is put into the store, and the build takes it from
+//! there.
 //!
 //! `GAIA_E14_STORE` names the store (a temporary one when not set).
 //!
@@ -36,7 +41,7 @@ const IMAGE_DIGEST: &str =
 fn component(
     store: &str,
     scratch: &Path,
-    toolchain: &str,
+    toolchain: &Tree,
     name: &str,
     triple: &str,
     cpu: &str,
@@ -68,7 +73,7 @@ fn component(
         store,
         "/usr/bin/bwrap",
         root,
-        toolchain,
+        toolchain.clone(),
         src,
         vendor,
         "hello-world",
@@ -156,19 +161,19 @@ fn read(store: &str, artifact: &Artifact) -> Report {
 #[test]
 #[ignore = "clones hello.service and builds it: run with --ignored"]
 fn the_a2_product_report_and_a_changed_runs_delta() {
-    let toolchain = std::env::var("GAIA_TOOLCHAIN").unwrap_or_else(|_| {
-        let out = std::process::Command::new("rustc")
-            .args(["--print", "sysroot"])
-            .output()
-            .expect("rustc");
-        String::from_utf8(out.stdout)
-            .expect("utf-8")
-            .trim()
-            .to_string()
-    });
+    let sysroot = std::env::var("GAIA_TOOLCHAIN")
+        .expect("GAIA_TOOLCHAIN: a Rust sysroot with the std of both targets");
     let dir = tempfile::tempdir().expect("tempdir");
     let store = std::env::var("GAIA_E14_STORE")
         .unwrap_or_else(|_| dir.path().join("store").display().to_string());
+    let toolchain = Tree {
+        object: Store::open(&store)
+            .expect("store")
+            .put_tree(Path::new(&sysroot))
+            .expect("the toolchain into the store")
+            .into(),
+        entries: Vec::new(),
+    };
     let scratch = dir.path();
     let ctx = Ctx::new();
 

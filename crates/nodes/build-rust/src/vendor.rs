@@ -27,15 +27,21 @@ pub(crate) const CONFIG: &str = ".cargo-config.toml";
 /// What the directory's place is written as before it is known.
 const PLACE: &str = "@vendor@";
 
-/// The crates `source`'s `Cargo.lock` names, fetched by `toolchain`'s cargo.
+/// The crates `source`'s `Cargo.lock` names, fetched by the cargo of
+/// `toolchain` (a stored sysroot: `gaia.build.rust.toolchain`'s).
 #[node(
     id = "gaia.build.rust.vendor",
     inputs(store, toolchain, source),
     outputs(vendor)
 )]
-pub fn vendor(store: &str, toolchain: &str, source: Tree, cx: &Ctx) -> Result<Tree, StepError> {
+pub fn vendor(store: &str, toolchain: Tree, source: Tree, cx: &Ctx) -> Result<Tree, StepError> {
     let store = Store::open(store).map_err(StepError::store(NAME))?;
     let fail = |message: String| StepError::body(NAME, message);
+    let toolchain = toolchain
+        .object
+        .object_ref()
+        .map(|object| store.path(&object))
+        .ok_or_else(|| fail("the toolchain is not in the store".into()))?;
     let object = source
         .object
         .object_ref()
@@ -48,7 +54,7 @@ pub fn vendor(store: &str, toolchain: &str, source: Tree, cx: &Ctx) -> Result<Tr
                 .into(),
         ));
     }
-    let cargo = Path::new(toolchain).join("bin/cargo");
+    let cargo = toolchain.join("bin/cargo");
     if !cargo.is_file() {
         return Err(fail(format!("no cargo at {}", cargo.display())));
     }
@@ -77,10 +83,7 @@ pub fn vendor(store: &str, toolchain: &str, source: Tree, cx: &Ctx) -> Result<Tr
                 .arg(&out)
                 .env("CARGO_HOME", home.display().to_string())
                 .env("HOME", dir.display().to_string())
-                .env(
-                    "PATH",
-                    format!("{}/bin:/usr/bin:/bin", Path::new(toolchain).display()),
-                )
+                .env("PATH", format!("{}/bin:/usr/bin:/bin", toolchain.display()))
                 .env("CARGO_TERM_COLOR", "never")
                 .env("CARGO_NET_GIT_FETCH_WITH_CLI", "false")
                 .on_line(move |stream, line| {

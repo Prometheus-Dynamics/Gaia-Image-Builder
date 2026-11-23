@@ -1,7 +1,7 @@
 //! The product file: which components go on which boards, the OS each
 //! image is built on, which recipe lays out each image, and the size budget.
 
-use crate::common::{RelPath, SizeText, Source, check_source, resolve_sources};
+use crate::common::{RelPath, SizeText, Source, check_rust_sources, check_source, resolve_sources};
 use crate::{Board, Component, Error, read};
 use gaia_lock::Want;
 use serde::{Deserialize, Serialize};
@@ -136,6 +136,7 @@ impl Product {
         product.file = path.to_path_buf();
         let dir = path.parent().unwrap_or(Path::new(""));
         resolve_sources(&mut product.sources, dir);
+        check_rust_sources(path, &product.sources, false)?;
         for component in product.components.values_mut() {
             component.resolve(dir);
         }
@@ -373,7 +374,7 @@ impl Product {
     pub fn wants(&self) -> Vec<(String, Want)> {
         self.sources
             .iter()
-            .map(|(name, source)| (format!("{}.{name}", self.name), source.want()))
+            .flat_map(|(name, source)| source.wants(&format!("{}.{name}", self.name)))
             .collect()
     }
 }

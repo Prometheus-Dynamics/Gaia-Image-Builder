@@ -422,7 +422,7 @@ impl Board {
     pub fn wants(&self) -> Vec<(String, Want)> {
         self.sources
             .iter()
-            .map(|(name, source)| (format!("{}.{name}", self.name), source.want()))
+            .flat_map(|(name, source)| source.wants(&format!("{}.{name}", self.name)))
             .collect()
     }
 }
@@ -570,6 +570,7 @@ fn check_refs(
     file: &BoardFile,
     sources: &BTreeMap<String, Source>,
 ) -> Result<(), Error> {
+    crate::common::check_rust_sources(path, &file.sources, false)?;
     let check = |key: &str, name: &str| check_source(path, key, name, sources.keys());
     let check_ref = |key: String, file_ref: &FileRef| match file_ref {
         FileRef::Input { .. } => Err(Error::new(

@@ -78,8 +78,6 @@ fn gaia(dir: &Path, command: &str, extra: &[&str]) -> Output {
         "--tool",
         "bwrap=/usr/bin/bwrap",
         "--tool",
-        "toolchain=/opt/rust",
-        "--tool",
         "mke2fs=/usr/sbin/mke2fs",
         "--tool",
         "debugfs=/usr/sbin/debugfs",

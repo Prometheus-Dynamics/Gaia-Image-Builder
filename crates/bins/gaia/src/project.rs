@@ -51,6 +51,11 @@ impl Project {
         };
         apply_settings(&mut loaded.product, product, &recipes, &options.settings)?;
         let store = absolute(&store_dir(options.store.as_deref())?);
+        if options.tools.contains_key("toolchain") {
+            return Err(Stop::usage(
+                "--tool toolchain: a Rust build takes its toolchain from its component's `[sources.toolchain]` (`rust` and `targets`), pinned by the lock; the build machine's Rust is not used",
+            ));
+        }
         let tools = tools(&options.tools);
         let setup = Setup {
             buildroot: buildroot_host(&store, &tools, options.jobs).map(|mut host| {
@@ -473,8 +478,9 @@ fn inputs(given: &BTreeMap<String, PathBuf>) -> Result<BTreeMap<String, PathBuf>
         .collect()
 }
 
-/// The `--tool` paths, then known tools found on PATH, then rustc's
-/// sysroot as `toolchain`.
+/// The `--tool` paths, then known tools found on PATH. No Rust toolchain is
+/// looked for: a Rust build takes its own from the component's `toolchain`
+/// source.
 fn tools(given: &BTreeMap<String, String>) -> BTreeMap<String, String> {
     let mut tools = given.clone();
     for (name, program) in PATH_TOOLS {
@@ -482,17 +488,6 @@ fn tools(given: &BTreeMap<String, String>) -> BTreeMap<String, String> {
             && let Some(path) = on_path(program)
         {
             tools.insert(name.to_string(), path.display().to_string());
-        }
-    }
-    if !tools.contains_key("toolchain")
-        && let Ok(out) = std::process::Command::new("rustc")
-            .args(["--print", "sysroot"])
-            .output()
-        && out.status.success()
-    {
-        let sysroot = String::from_utf8_lossy(&out.stdout).trim().to_string();
-        if !sysroot.is_empty() {
-            tools.insert("toolchain".into(), sysroot);
         }
     }
     tools

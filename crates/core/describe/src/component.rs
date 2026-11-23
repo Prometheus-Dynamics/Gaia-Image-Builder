@@ -1,6 +1,9 @@
 //! The component file: one piece of software and what it installs.
 
-use crate::common::{FileRef, Mode, RelPath, Source, check_source, is_input_name, resolve_sources};
+use crate::common::{
+    FileRef, Mode, RelPath, Source, check_rust_sources, check_source, is_input_name,
+    resolve_sources,
+};
 use crate::{Error, read};
 use gaia_lock::Want;
 use serde::de::{self, Deserializer};
@@ -360,6 +363,7 @@ impl Component {
         component.file = path.to_path_buf();
         let dir = path.parent().unwrap_or(Path::new(""));
         resolve_sources(&mut component.sources, dir);
+        check_rust_sources(path, &component.sources, true)?;
         if let Some(build) = &component.build {
             check_source(
                 path,
@@ -625,7 +629,7 @@ impl Component {
     pub fn wants(&self) -> Vec<(String, Want)> {
         self.sources
             .iter()
-            .map(|(name, source)| (format!("{}.{name}", self.name), source.want()))
+            .flat_map(|(name, source)| source.wants(&format!("{}.{name}", self.name)))
             .collect()
     }
 }
