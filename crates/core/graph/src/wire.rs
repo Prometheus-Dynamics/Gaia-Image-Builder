@@ -1127,6 +1127,24 @@ fn image_recipe(
         )?;
         stages.insert(stage.clone(), node);
     }
+    // The runtime libraries are removed from an OS's root; with no OS there
+    // is no such root, and a list would name nothing.
+    if at.os.is_none() {
+        for (list, named) in [
+            ("keep_runtime_libs", &image.keep_runtime_libs),
+            ("prune_libs", &image.prune_libs),
+        ] {
+            if !named.is_empty() {
+                return Err(Error::at(
+                    product_file,
+                    format!("images[{i}].{list}"),
+                    format!(
+                        "this image has no `os`, so it has no root a toolchain's libraries are removed from: remove {list}"
+                    ),
+                ));
+            }
+        }
+    }
     // The paths that keep their setuid and setgid bits, to every EROFS the
     // recipe makes; listed for a recipe with none, they would keep nothing.
     if !image.keep_setid.is_empty() {
@@ -2477,6 +2495,32 @@ fn image_os(
     } else {
         merge
     };
+    // The root without the toolchain runtime libraries nothing in it links,
+    // and the libraries the product names under the same rule: what the
+    // recipe is given as `build` and `system`.
+    let (extra, keep) = runtime_lists(at.image, file, i)?;
+    let pruned = |g: &mut Graph<'_>, from: u32, name: &str| -> Result<u32, Error> {
+        let node = g.add(
+            "gaia.strip.runtime-libs",
+            format!("{}.{name}.runtime-libs", at.image.name),
+            file,
+            &key,
+        )?;
+        g.edge((from, "tree"), (node, "tree"));
+        if let Some(extra) = &extra {
+            g.set(node, "extra", Lit::Str(extra.clone()));
+        }
+        if let Some(keep) = &keep {
+            g.set(node, "keep", Lit::Str(keep.clone()));
+        }
+        Ok(node)
+    };
+    let (merge, system) = if system == merge {
+        let node = pruned(g, merge, "rootfs")?;
+        (node, node)
+    } else {
+        (pruned(g, merge, "rootfs")?, pruned(g, system, "system")?)
+    };
     // The initramfs: its components' installs, merged, apart from the root.
     let initramfs = if at.initramfs.is_empty() {
         None
@@ -2518,6 +2562,48 @@ fn image_os(
         system,
         initramfs,
     })
+}
+
+/// An image's `prune_libs` and `keep_runtime_libs` as the prune step takes
+/// them (JSON, `None` for an empty list), checked against the step's own
+/// rules so a wrong name fails here, by its key, before anything is built.
+fn runtime_lists(
+    image: &ImageSpec,
+    file: &Path,
+    i: usize,
+) -> Result<(Option<String>, Option<String>), Error> {
+    for (at, named) in image.keep_runtime_libs.iter().enumerate() {
+        if !gaia_strip::runtime::RUNTIME.contains(&named.lib.as_str()) {
+            return Err(Error::at(
+                file,
+                format!("images[{i}].keep_runtime_libs[{at}]"),
+                format!(
+                    "`{}` is not a toolchain runtime library the build removes (those are {}), so there is nothing to keep",
+                    named.lib,
+                    gaia_strip::runtime::RUNTIME.join(", ")
+                ),
+            ));
+        }
+    }
+    for (at, named) in image.prune_libs.iter().enumerate() {
+        if let Some(why) = gaia_strip::runtime::refused(&named.lib) {
+            return Err(Error::at(
+                file,
+                format!("images[{i}].prune_libs[{at}]"),
+                why,
+            ));
+        }
+    }
+    let json = |list: &[gaia_describe::NamedLib]| {
+        (!list.is_empty()).then(|| {
+            let items: Vec<serde_json::Value> = list
+                .iter()
+                .map(|n| serde_json::json!({ "lib": n.lib, "reason": n.reason }))
+                .collect();
+            serde_json::Value::Array(items).to_string()
+        })
+    };
+    Ok((json(&image.prune_libs), json(&image.keep_runtime_libs)))
 }
 
 /// Whether the component's build is an out-of-tree kernel module.

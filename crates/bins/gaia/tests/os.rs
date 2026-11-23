@@ -140,10 +140,14 @@ fn the_plan_lists_the_config_the_board_gives() {
         "zero-3e-demo.os.layer.layer -> zero-3e-demo.rootfs.layers0",
         "zero-3e-demo.kernel.modules.layer -> zero-3e-demo.rootfs.layers1",
         "zero-3e-demo.usb-gadget-network.place0.layer -> zero-3e-demo.rootfs.layers2",
-        "zero-3e-demo.rootfs.tree -> zero-3e-demo::root.tree",
+        // The recipe takes each root without the toolchain runtime
+        // libraries nothing in it links.
+        "zero-3e-demo.rootfs.tree -> zero-3e-demo.rootfs.runtime-libs.tree",
+        "zero-3e-demo.rootfs.runtime-libs.tree -> zero-3e-demo::root.tree",
         // The slot's tree is the same without the kernel's boot files.
         "zero-3e-demo.kernel.modules.layer -> zero-3e-demo.system.layers1",
-        "zero-3e-demo.system.tree -> zero-3e-demo::erofs.tree",
+        "zero-3e-demo.system.tree -> zero-3e-demo.system.runtime-libs.tree",
+        "zero-3e-demo.system.runtime-libs.tree -> zero-3e-demo::erofs.tree",
         // The board's raw area, from the bootloader build's output.
         "zero-3e-demo.bootloader.bootloader -> zero-3e-demo.blob.u-boot.from",
         "zero-3e-demo.blob.u-boot.blob -> zero-3e-demo.blobs.blobs0",
@@ -621,6 +625,122 @@ fn a_recipe_that_takes_os_needs_an_image_with_one() {
     let err = String::from_utf8_lossy(&out.stderr);
     assert!(
         err.contains("boot files as `kernel`; this image has no `os`"),
+        "{err}"
+    );
+}
+
+/// An image's root goes through the runtime-library step, and the image's
+/// two lists reach it (the slot's tree too): the libraries it removes
+/// besides the toolchain's, and the toolchain's it keeps, each with its
+/// reason. A name the step would refuse is refused in the plan, by its key.
+#[test]
+fn an_images_library_lists_reach_the_runtime_library_step() {
+    let dir = project();
+    let product = dir
+        .path()
+        .join("examples/products/zero-3e-demo/product.toml");
+    let text = std::fs::read_to_string(&product).expect("read");
+    let with = |lists: &str| {
+        std::fs::write(
+            &product,
+            text.replace("budget = \"1G\"\n", &format!("budget = \"1G\"\n{lists}\n")),
+        )
+        .expect("write");
+    };
+    let constant = |json: &serde_json::Value, label: &str, input: &str| {
+        let nodes = json["graph"]["graph"]["nodes"].as_array().expect("nodes");
+        let node = nodes
+            .iter()
+            .find(|node| node["label"] == label)
+            .unwrap_or_else(|| panic!("no node {label}"));
+        node["consts"][input]["value"].clone()
+    };
+    // No list: the step is there, with neither.
+    let out = plan(dir.path(), &["--json"]);
+    assert!(out.status.success());
+    let json: serde_json::Value = serde_json::from_slice(&out.stdout).expect("json");
+    for label in [
+        "zero-3e-demo.rootfs.runtime-libs",
+        "zero-3e-demo.system.runtime-libs",
+    ] {
+        assert!(constant(&json, label, "extra").is_null());
+        assert!(constant(&json, label, "keep").is_null());
+    }
+    with(
+        "prune_libs = [{ lib = \"libgpiodcxx\", reason = \"built whenever the toolchain has C++\" }]\nkeep_runtime_libs = [{ lib = \"libgomp\", reason = \"loaded by name\" }]",
+    );
+    let out = plan(dir.path(), &["--json"]);
+    assert!(
+        out.status.success(),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let json: serde_json::Value = serde_json::from_slice(&out.stdout).expect("json");
+    for label in [
+        "zero-3e-demo.rootfs.runtime-libs",
+        "zero-3e-demo.system.runtime-libs",
+    ] {
+        assert_eq!(
+            constant(&json, label, "extra"),
+            "[{\"lib\":\"libgpiodcxx\",\"reason\":\"built whenever the toolchain has C++\"}]"
+        );
+        assert_eq!(
+            constant(&json, label, "keep"),
+            "[{\"lib\":\"libgomp\",\"reason\":\"loaded by name\"}]"
+        );
+    }
+    for (lists, says) in [
+        (
+            "keep_runtime_libs = [{ lib = \"libgpiod\", reason = \"x\" }]",
+            "images[0].keep_runtime_libs[0]: `libgpiod` is not a toolchain runtime library the build removes (those are libatomic, libgdruntime, libgfortran, libgomp, libgphobos, libquadmath, libssp, libstdc++), so there is nothing to keep",
+        ),
+        (
+            "prune_libs = [{ lib = \"libgcc_s\", reason = \"x\" }]",
+            "images[0].prune_libs[0]: libgcc_s is loaded by name at run time",
+        ),
+        (
+            "prune_libs = [{ lib = \"libstdc++\", reason = \"x\" }]",
+            "images[0].prune_libs[0]: libstdc++ is a toolchain runtime library, removed already when nothing links it",
+        ),
+        (
+            "prune_libs = [{ lib = \"libgpiodcxx.so.2\", reason = \"x\" }]",
+            "images[0].prune_libs[0]: `libgpiodcxx.so.2` is not a library's name",
+        ),
+        (
+            "prune_libs = [{ lib = \"gpiodcxx\", reason = \"x\" }]",
+            "images[0].prune_libs[0]: `gpiodcxx` is not a library's name",
+        ),
+        (
+            "keep_runtime_libs = [{ lib = \"libgomp\", reason = \" \" }]",
+            "images[0].keep_runtime_libs[0]: `libgomp` has no reason",
+        ),
+        (
+            "prune_libs = [{ lib = \"libx\", reason = \"x\" }, { lib = \"libx\", reason = \"y\" }]",
+            "images[0].prune_libs[1]: `libx` is listed twice",
+        ),
+        (
+            "prune_libs = [{ lib = \"libx\" }]",
+            "missing field `reason`",
+        ),
+    ] {
+        with(lists);
+        let out = plan(dir.path(), &[]);
+        assert_eq!(out.status.code(), Some(2), "{lists}");
+        let err = String::from_utf8_lossy(&out.stderr);
+        assert!(err.contains(says), "{lists}: {err}");
+    }
+    // An image with no OS has no such root: a list there names nothing.
+    with("prune_libs = [{ lib = \"libx\", reason = \"x\" }]");
+    edit(
+        &product,
+        "os = { provider = \"buildroot\", source = \"buildroot\", fragments = [\"os.fragment\"] }\n",
+        "",
+    );
+    let out = plan(dir.path(), &[]);
+    assert_eq!(out.status.code(), Some(2));
+    let err = String::from_utf8_lossy(&out.stderr);
+    assert!(
+        err.contains("prune_libs") && (err.contains("this image has no `os`")),
         "{err}"
     );
 }
@@ -1427,7 +1547,7 @@ fn a_ramdisk_boot_takes_the_kernel_the_tree_and_the_named_device_trees() {
         .collect::<Vec<_>>()
         .join(" ");
     for line in [
-        "zero-3e-demo.rootfs.tree -> zero-3e-demo::initramfs.tree",
+        "zero-3e-demo.rootfs.runtime-libs.tree -> zero-3e-demo::initramfs.tree",
         "zero-3e-demo.kernel.kernel -> zero-3e-demo::kernel.from",
         "zero-3e-demo::kernel.tree -> zero-3e-demo::cpio.tree",
         "zero-3e-demo::initramfs.archive -> zero-3e-demo::cpio.from",
@@ -2434,7 +2554,7 @@ fn a_components_users_and_services_are_in_the_tree_that_ships() {
         "zero-3e-demo.accounts.layer -> zero-3e-demo.rootfs.layers",
         "zero-3e-demo.services.layer -> zero-3e-demo.system.layers",
         "zero-3e-demo.accounts.layer -> zero-3e-demo.system.layers",
-        "zero-3e-demo.system.tree -> zero-3e-demo::erofs.tree",
+        "zero-3e-demo.system.runtime-libs.tree -> zero-3e-demo::erofs.tree",
     ] {
         assert!(
             squeezed(&text).contains(&squeezed(line)),
@@ -2760,7 +2880,7 @@ fn a_generated_ramdisk_boot_takes_the_generators_overlay_and_fragment() {
         // The same generator's mdev.conf, a fragment of the built tree's.
         "zero-3e-demo.hello-rust.generate.tree -> zero-3e-demo.hello-rust.fragment0.from",
         "zero-3e-demo.hello-rust.fragment0.layer -> zero-3e-demo.assembled0.parts0",
-        "zero-3e-demo.rootfs.tree -> zero-3e-demo::initramfs.tree",
+        "zero-3e-demo.rootfs.runtime-libs.tree -> zero-3e-demo::initramfs.tree",
     ] {
         assert!(
             squeezed(&text).contains(&squeezed(line)),

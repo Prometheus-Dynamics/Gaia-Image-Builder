@@ -257,6 +257,21 @@ fn build_one(options: &args::Project) -> Result<Run, Stop> {
     // On stderr, so the port lines on stdout stay as they are; the last
     // line on stdout is the outcome and the record.
     eprint!("{}", timing::report(&items, &run.critical_path));
+    // What the root lost and kept of the toolchain's runtime libraries, made
+    // now or found in the store: each step's report, as it wrote it.
+    for step in &run.steps {
+        if step.step != "gaia.strip.runtime-libs" {
+            continue;
+        }
+        let Some(report) = step.outputs.get("report") else {
+            continue;
+        };
+        if let Ok(text) = std::fs::read_to_string(store.path(report)) {
+            for line in text.lines().filter(|line| !line.starts_with('#')) {
+                eprintln!("runtime libraries: {line}");
+            }
+        }
+    }
     if let Some(pool) = &pool {
         eprintln!("{pool}");
     }

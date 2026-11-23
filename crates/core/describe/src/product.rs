@@ -62,6 +62,22 @@ pub struct ImageSpec {
     /// have, or one with no such bit, fails the build.
     #[serde(default)]
     pub keep_setid: Vec<String>,
+    /// Toolchain runtime libraries (libstdc++, libgomp, ...) the root keeps
+    /// although no ELF file in it needs them: each with the reason, such as
+    /// a program that loads it by name. The others of that fixed list are
+    /// removed from an image's root when nothing in it links them, and each
+    /// one removed or kept is reported. A name that is not on the list, or
+    /// that the root does not have, fails the build.
+    #[serde(default)]
+    pub keep_runtime_libs: Vec<NamedLib>,
+    /// Other libraries removed from the root under the same rule, only when
+    /// no ELF file left in it needs them: each with the reason it is there
+    /// unasked (a binding its package always builds, say). Applied with the
+    /// runtime list in rounds, so a runtime only such a library needed goes
+    /// after it. A library loaded by name at run time cannot be listed; one
+    /// the root does not have fails the build.
+    #[serde(default)]
+    pub prune_libs: Vec<NamedLib>,
     /// Files in the root filesystem made of several owners' parts: the
     /// OS's file and components' `[[fragments]]`, concatenated in a stated
     /// order.
@@ -71,6 +87,17 @@ pub struct ImageSpec {
     /// types; planning checks them whole, with any `--setting` added.
     #[serde(default)]
     pub settings: toml::Table,
+}
+
+/// A library named in `[[images.keep_runtime_libs]]` or
+/// `[[images.prune_libs]]`, and why.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct NamedLib {
+    /// The library's name without `.so` or a version: `libgomp`.
+    pub lib: String,
+    /// Why it is kept, or why it is in the root with nothing using it.
+    pub reason: String,
 }
 
 /// One file assembled from parts (`[[images.assembled]]`).
@@ -195,6 +222,41 @@ impl Product {
                         format!("images[{index}].keep_setid[{at}]"),
                         format!("`{keep}` {fault}"),
                     ));
+                }
+            }
+            let mut libs = std::collections::BTreeSet::new();
+            for (list, named) in [
+                ("keep_runtime_libs", &image.keep_runtime_libs),
+                ("prune_libs", &image.prune_libs),
+            ] {
+                for (at, named) in named.iter().enumerate() {
+                    let lib = &named.lib;
+                    let plain = lib.len() > 3
+                        && lib.starts_with("lib")
+                        && !lib.contains(".so")
+                        && lib.bytes().all(|b| {
+                            b.is_ascii_alphanumeric() || matches!(b, b'_' | b'+' | b'-' | b'.')
+                        });
+                    let fault = if !plain {
+                        Some(format!(
+                            "`{lib}` is not a library's name: `lib` and its name, with no `.so` and no version (`libgomp`)"
+                        ))
+                    } else if named.reason.trim().is_empty() {
+                        Some(format!("`{lib}` has no reason; say why in `reason`"))
+                    } else if !libs.insert(lib.as_str()) {
+                        Some(format!(
+                            "`{lib}` is listed twice (in `keep_runtime_libs` and `prune_libs` together)"
+                        ))
+                    } else {
+                        None
+                    };
+                    if let Some(fault) = fault {
+                        return Err(Error::new(
+                            path,
+                            format!("images[{index}].{list}[{at}]"),
+                            fault,
+                        ));
+                    }
                 }
             }
             let mut assembled = std::collections::BTreeSet::new();

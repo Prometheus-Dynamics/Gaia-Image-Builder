@@ -909,6 +909,7 @@ dependencies = [
  "gaia-source-files",
  "gaia-source-git",
  "gaia-source-oci",
+ "gaia-strip",
  "gaia-types",
  "serde_json",
  "tempfile",
@@ -1291,6 +1292,8 @@ dependencies = [
  "gaia-step",
  "gaia-store",
  "gaia-types",
+ "serde",
+ "serde_json",
  "tempfile",
 ]
 
