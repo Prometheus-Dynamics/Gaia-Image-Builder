@@ -1,0 +1,66 @@
+#!/bin/sh
+# Row 40 test guest (/init of a RAM boot): an NCM gadget on the board
+# profile's UDC, a DHCP server and TCP 9200 on it; after the first
+# connection on 9200 the UDC is unbound and bound again, as a driver rebind
+# does on a board; after the second the guest powers off.
+mount -t proc proc /proc
+mount -t sysfs sysfs /sys
+mount -t devtmpfs devtmpfs /dev
+mount -t configfs configfs /sys/kernel/config
+mkdir -p /tmp /var/lib/misc
+mount -t tmpfs tmpfs /tmp
+exec > /dev/console 2>&1
+say() { echo "gaia-test: $*"; }
+udc=$(ls /sys/class/udc | head -1)
+[ -n "$udc" ] || { say "no UDC"; poweroff -f; }
+g=/sys/kernel/config/usb_gadget/relink
+mkdir -p $g/strings/0x409 $g/functions/ncm.usb0 $g/configs/c.1/strings/0x409
+echo 0x1d6b > $g/idVendor
+echo 0x0104 > $g/idProduct
+echo gaia > $g/strings/0x409/manufacturer
+echo "relink test" > $g/strings/0x409/product
+echo 0001 > $g/strings/0x409/serialnumber
+echo ncm > $g/configs/c.1/strings/0x409/configuration
+ln -s $g/functions/ncm.usb0 $g/configs/c.1/
+echo "$udc" > $g/UDC
+say "gadget bound to $udc"
+i=0
+while [ ! -e /sys/class/net/usb0 ] && [ $i -lt 30 ]; do sleep 1; i=$((i + 1)); done
+ip addr add 10.77.0.1/24 dev usb0
+ip link set usb0 up
+printf 'start 10.77.0.10\nend 10.77.0.20\ninterface usb0\nlease_file /tmp/leases\noption subnet 255.255.255.0\n' > /tmp/udhcpd.conf
+touch /tmp/leases
+udhcpd /tmp/udhcpd.conf
+cat > /tmp/serve << 'SERVE'
+#!/bin/sh
+n=$(($(cat /tmp/count 2> /dev/null || echo 0) + 1))
+echo $n > /tmp/count
+echo "relink test: connection $n"
+echo "gaia-test: served connection $n" > /dev/console
+SERVE
+chmod +x /tmp/serve
+echo '9200 stream tcp nowait root /tmp/serve serve' > /tmp/inetd.conf
+inetd /tmp/inetd.conf
+say "serving TCP 9200 on usb0"
+count() { cat /tmp/count 2> /dev/null || echo 0; }
+# Each wait for a connection is bounded: with none in 300 s the guest says so
+# and powers off, so a host that never comes (back) ends the run.
+await() {
+	i=0
+	while [ "$(count)" -lt "$1" ]; do
+		[ $i -lt 300 ] || { say "no connection $1 in 300 s: powering off"; poweroff -f; }
+		sleep 1
+		i=$((i + 1))
+	done
+}
+await 1
+sleep 1
+say "unbinding the UDC"
+echo "" > $g/UDC
+sleep 5
+say "binding the UDC $udc again"
+echo "$udc" > $g/UDC
+await $(($(count) + 1))
+sleep 1
+say "done"
+poweroff -f

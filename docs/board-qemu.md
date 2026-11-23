@@ -43,6 +43,12 @@ scripts/qemu-rpi-slots.sh --profile board --fresh --net user --max-boots 1 \
   it came.
 - With `--usb-host`, the stock host's serial log is `<work dir>/boot-N.usb-host.log`, and its `stock-host:` lines are
   printed when the boot ends. When the stock host is done, it powers off, the board guest is quit and the run ends.
+  The vsock relay's log is `<work dir>/boot-N.usb-relay.log`: one `relay N: listening` and `relay N: ended` pair for
+  each time the UDC and the stock host were joined, with socat's own lines. Keep it with the host's log: it is what
+  shows a link that went away and whether it came back.
+- A TERM or INT to the runner ends the boot's QEMU and everything it started with it (the event reader, the stock
+  host, the relay and the forward) and exits 143, saying so; nothing is left running. A caller that bounds a run
+  sends TERM at its limit.
 
 A RAM boot (the EEPROM booting `boot.img` over USB or the network, as for a flasher): the image is a directory with
 the EEPROM's `config.txt` (it must say `boot_ramdisk=1`) and `boot.img`:
@@ -74,7 +80,8 @@ scripts/qemu-rpi-slots.sh --profile board --fresh --net user --max-boots 3 \
 - `--usb-host-forward H:P` lets a real client on the PC reach the flasher. The PC's `127.0.0.1:H` goes, over vsock,
   to the stock host, which joins it to TCP P on the lease's server. With it, the stock host stays up until the boot
   ends instead of powering off. Each boot gets a new stock host, so the gadget is plugged in again after a restart, on
-  the same PC port. Its log has a `stock-host: forward N:` line for each connection.
+  the same PC port. Its log has a `stock-host: forward N:` line for each connection. The forward stays up while the
+  gadget is away (see "A gadget that goes and comes back"): a connection then finds no route, as on a PC.
 - A restart boots the eMMC as the RAM boot left it, unless the boot gave the firmware's one-shot RPIBOOT order
   (see "The firmware mailbox"); then it is the RAM boot again. This covers the guest's reboot, a tryboot reboot and
   the watchdog.
@@ -89,7 +96,8 @@ scripts/qemu-rpi-slots.sh --profile board --fresh --net user --max-boots 3 \
 - Unlike the board, and recorded in `boot-N.replaced`:
   - The eMMC is QEMU's, on PCI. It writes at the host file's speed, and its user area is a power of two, not the
     board's size.
-  - The gadget is usbip-vudc over USB/IP at high speed, not the dwc2.
+  - The gadget is usbip-vudc over USB/IP at high speed, not the dwc2. A disconnect is the USB/IP stream closing, not
+    a line state on a cable.
   - The PC reaches the gadget's network through the stock host, not through an NCM interface of its own.
   - The kernel is the virt kernel, not `kernel8.img`.
 
@@ -149,6 +157,21 @@ every fact as `same`, `differs`, `board only` or `guest only`.
   - pings the server the lease names. Nothing about the board's addresses is written into it.
 
   Its kernel log is the result.
+- **A gadget that goes and comes back.** On the board, unbinding the UDC (a driver rebind, or the gadget disabled
+  and enabled again) is a soft disconnect: the PC sees the device go, and a new enumeration when the gadget pulls up
+  again. The profile does the same. When the gadget unbinds, usbip-vudc closes its stream; the relay ends that pair
+  and listens again for the next; the stock host (with `--usb-host-forward`, while it stays up) sees `USB disconnect`,
+  attaches the device again when it links again (vhci_hcd's port 0 again; if vhci_hcd refused it, the next port, and
+  it would say so), reads its descriptors, and leases again on the new NCM interface. When the gadget pulls up, the
+  UDC links again at once and then each second until the relay takes it. A failed try is logged once per outage
+  (`no link to the host over vsock port P (error): trying again each second`), and its return with how many tries it
+  took, so a link that stays down is never silent. A gadget that does not come back within `--usb-host-wait` ends
+  the stock host: `the device did not come back`.
+  The guest's gadget is the board kernel's own: configfs, and FunctionFS for the functions a daemon serves. Only the
+  UDC under it differs. A bind that fails in the gadget core or in f_fs fails here as on the dwc2, for example a holder
+  that keeps the old FunctionFS endpoint files open. The profile then shows the stock host's disconnect and no new
+  enumeration, as a board's PC would see it. That case is the same kernel code, not yet a run of its own. Nothing in
+  the profile re-enables a gadget or hides a failed bind.
 
 A work dir's disk copy is laid out for one profile. Switching profiles needs `--fresh`.
 

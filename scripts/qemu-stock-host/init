@@ -6,7 +6,9 @@
 # the server the lease names, and with gaia.connect-port= opens a TCP
 # connection to that port on it, as a host's program would. With
 # gaia.forward=V:P it then stays up, joining each stream the PC opens on
-# vsock port V to TCP port P on that server, until the run stops it.
+# vsock port V to TCP port P on that server, until the run stops it; while
+# it is up, a disconnect of the device is seen as a host sees one, and the
+# device is attached and leased again when it links again.
 # Every result line starts "stock-host:"; the
 # kernel's own log follows "stock-host: kernel log". Then it powers off.
 #
@@ -43,54 +45,50 @@ for m in $(cat /lib/modules/order); do
 	insmod "/lib/modules/$m.ko" || echo "stock-host: insmod $m failed"
 done
 [ -n "$port" ] || { echo "stock-host: no gaia.vsock-port= on the command line"; done_; }
-/bin/vhci-attach "$port" "$wait" || done_
-
-# What the device gave the host: its descriptors as read (device, then each
-# configuration), in hex, and the interfaces and endpoints of the
-# configuration set, if one is.
-i=0
-while [ $i -lt 60 ] && [ ! -s /sys/bus/usb/devices/1-1/descriptors ]; do
-	sleep 1
-	i=$((i + 1))
-done
-sleep 2
-if [ -s /sys/bus/usb/devices/1-1/descriptors ]; then
-	echo "stock-host: descriptors $(od -An -tx1 -v /sys/bus/usb/devices/1-1/descriptors | tr -d ' \n')"
-	d=/sys/bus/usb/devices/1-1
-	echo "stock-host: device $(cat $d/idVendor):$(cat $d/idProduct) manufacturer \"$(cat $d/manufacturer 2> /dev/null)\" product \"$(cat $d/product 2> /dev/null)\" serial \"$(cat $d/serial 2> /dev/null)\""
-	echo "stock-host: configuration set: $(cat /sys/bus/usb/devices/1-1/bConfigurationValue)"
-	for f in /sys/bus/usb/devices/1-1:*; do
-		[ -d "$f" ] || continue
-		eps=""
-		for e in "$f"/ep_*; do
-			[ -d "$e" ] && eps="$eps $(cat "$e/bEndpointAddress")/$(cat "$e/type")"
+# The device on vhci port $rh (0 first; the next when vhci_hcd refuses one,
+# said so), and what it gave the host: its descriptors as read (device, then
+# each configuration), in hex, and the interfaces and endpoints of the
+# configuration set, if one is. Fails when no device links in $wait s.
+rh=0
+attach() {
+	while :; do
+		/bin/vhci-attach "$port" "$wait" "$rh"
+		case $? in
+		0) break ;;
+		4)
+			[ "$rh" -lt 7 ] || return 1
+			echo "stock-host: vhci_hcd port $rh refused the device: taking port $((rh + 1))"
+			rh=$((rh + 1))
+			;;
+		*) return 1 ;;
+		esac
+	done
+	dev=/sys/bus/usb/devices/1-$((rh + 1))
+	i=0
+	while [ $i -lt 60 ] && [ ! -s $dev/descriptors ]; do
+		sleep 1
+		i=$((i + 1))
+	done
+	sleep 2
+	if [ -s $dev/descriptors ]; then
+		echo "stock-host: descriptors $(od -An -tx1 -v $dev/descriptors | tr -d ' \n')"
+		echo "stock-host: device $(cat $dev/idVendor):$(cat $dev/idProduct) manufacturer \"$(cat $dev/manufacturer 2> /dev/null)\" product \"$(cat $dev/product 2> /dev/null)\" serial \"$(cat $dev/serial 2> /dev/null)\""
+		echo "stock-host: configuration set: $(cat $dev/bConfigurationValue)"
+		for f in $dev:*; do
+			[ -d "$f" ] || continue
+			eps=""
+			for e in "$f"/ep_*; do
+				[ -d "$e" ] && eps="$eps $(cat "$e/bEndpointAddress")/$(cat "$e/type")"
+			done
+			echo "stock-host: interface $(basename "$f") class $(cat "$f/bInterfaceClass") driver $(basename "$(readlink "$f/driver" 2> /dev/null)" 2> /dev/null) endpoints$eps"
 		done
-		echo "stock-host: interface $(basename "$f") class $(cat "$f/bInterfaceClass") driver $(basename "$(readlink "$f/driver" 2> /dev/null)" 2> /dev/null) endpoints$eps"
-	done
-else
-	echo "stock-host: no device enumerated"
-fi
-
-# The gadget's network interface: the one cdc_ncm drives.
-iface=""
-i=0
-while [ $i -lt "$wait" ]; do
-	for n in /sys/class/net/*; do
-		[ "$(basename "$(readlink "$n/device/driver" 2> /dev/null)")" = cdc_ncm ] && iface=$(basename "$n")
-	done
-	[ -n "$iface" ] && break
-	sleep 1
-	i=$((i + 1))
-done
-if [ -z "$iface" ]; then
-	echo "stock-host: no CDC NCM interface after $wait s"
-	done_
-fi
-echo "stock-host: CDC NCM interface $iface after $i s"
-ip link set "$iface" up
+	else
+		echo "stock-host: no device enumerated"
+	fi
+}
 
 # A plain DHCP client, as a host's network manager would be.
-cat > /tmp/lease.sh << 'EOF'
+cat > /tmp/lease.sh << 'LEASE'
 #!/bin/sh
 [ "$1" = bound ] || exit 0
 ip addr add "$ip/${mask:-24}" dev "$interface"
@@ -106,33 +104,59 @@ ip addr add "$ip/${mask:-24}" dev "$interface"
 	echo "wpad=$wpad"
 	echo "staticroutes=$staticroutes"
 } > /tmp/lease
-EOF
+LEASE
 chmod +x /tmp/lease.sh
-if ! udhcpc -i "$iface" -n -q -t 30 -T 2 -s /tmp/lease.sh -O staticroutes -O wpad > /tmp/udhcpc.log 2>&1 || [ ! -s /tmp/lease ]; then
-	sed 's/^/stock-host: udhcpc: /' /tmp/udhcpc.log
-	echo "stock-host: no lease on $iface"
-	done_
-fi
-. /tmp/lease
-echo "stock-host: lease $ip/$mask from $serverid"
-# The board's lease gives an address and nothing else: no route, no name
-# server, no domain, nothing that would change how the host reaches others.
-host=""
-for k in router dns domain hostname ntpsrv wpad staticroutes; do
-	eval v=\$$k
-	[ -z "$v" ] || host="$host $k=$v"
-done
-if [ -z "$host" ]; then
-	echo "stock-host: the lease carries no host configuration"
-else
-	echo "stock-host: the lease carries host configuration:$host"
-fi
-if ping -c 3 -W 3 "$serverid" > /tmp/ping.log 2>&1; then
-	echo "stock-host: ping $serverid (the lease's server): ok"
-else
-	sed 's/^/stock-host: ping: /' /tmp/ping.log
-	echo "stock-host: ping $serverid (the lease's server): failed"
-fi
+
+# The gadget's network interface (the one cdc_ncm drives), up, and a lease
+# on it; then whether the lease carries host configuration, and a ping of
+# its server. Fails with no interface in $wait s or no lease.
+lease() {
+	iface=""
+	i=0
+	while [ $i -lt "$wait" ]; do
+		for n in /sys/class/net/*; do
+			[ "$(basename "$(readlink "$n/device/driver" 2> /dev/null)")" = cdc_ncm ] && iface=$(basename "$n")
+		done
+		[ -n "$iface" ] && break
+		sleep 1
+		i=$((i + 1))
+	done
+	if [ -z "$iface" ]; then
+		echo "stock-host: no CDC NCM interface after $wait s"
+		return 1
+	fi
+	echo "stock-host: CDC NCM interface $iface after $i s"
+	ip link set "$iface" up
+	rm -f /tmp/lease
+	if ! udhcpc -i "$iface" -n -q -t 30 -T 2 -s /tmp/lease.sh -O staticroutes -O wpad > /tmp/udhcpc.log 2>&1 || [ ! -s /tmp/lease ]; then
+		sed 's/^/stock-host: udhcpc: /' /tmp/udhcpc.log
+		echo "stock-host: no lease on $iface"
+		return 1
+	fi
+	. /tmp/lease
+	echo "stock-host: lease $ip/$mask from $serverid"
+	# The board's lease gives an address and nothing else: no route, no name
+	# server, no domain, nothing that would change how the host reaches others.
+	host=""
+	for k in router dns domain hostname ntpsrv wpad staticroutes; do
+		eval v=\$$k
+		[ -z "$v" ] || host="$host $k=$v"
+	done
+	if [ -z "$host" ]; then
+		echo "stock-host: the lease carries no host configuration"
+	else
+		echo "stock-host: the lease carries host configuration:$host"
+	fi
+	if ping -c 3 -W 3 "$serverid" > /tmp/ping.log 2>&1; then
+		echo "stock-host: ping $serverid (the lease's server): ok"
+	else
+		sed 's/^/stock-host: ping: /' /tmp/ping.log
+		echo "stock-host: ping $serverid (the lease's server): failed"
+	fi
+}
+
+attach || done_
+lease || done_
 if [ -n "$connect" ]; then
 	# Connect, send nothing, keep what the server sends in 5 s.
 	if nc -w 5 "$serverid" "$connect" < /dev/null > /tmp/connect.out 2> /tmp/connect.log; then
@@ -144,8 +168,31 @@ if [ -n "$connect" ]; then
 	fi
 fi
 if [ -n "$forward" ]; then
-	# Serves until the run ends this host; ending sooner is a failure.
-	/bin/vsock-forward "${forward%%:*}" "$serverid" "${forward#*:}"
+	# Serves until the run ends this host; ending sooner is a failure. The
+	# forward stays up while the device is away (a stream then finds no
+	# route, as on a PC). When the device goes, the host says so, attaches it
+	# again when it links again, and leases again; a device that does not
+	# come back in $wait s ends the host, saying so.
+	/bin/vsock-forward "${forward%%:*}" "$serverid" "${forward#*:}" &
+	fpid=$!
+	server=$serverid
+	while kill -0 $fpid 2> /dev/null; do
+		if [ ! -e "$dev" ]; then
+			echo "stock-host: USB disconnect: the device on vhci_hcd port $rh is gone"
+			attach || { echo "stock-host: the device did not come back"; kill $fpid; done_; }
+			lease || { echo "stock-host: the device came back without a lease"; kill $fpid; done_; }
+			if [ "$serverid" != "$server" ]; then
+				# The lease names another server: the forward goes there now.
+				echo "stock-host: the lease's server is $serverid, not $server: the forward follows it"
+				kill $fpid
+				wait $fpid 2> /dev/null
+				/bin/vsock-forward "${forward%%:*}" "$serverid" "${forward#*:}" &
+				fpid=$!
+				server=$serverid
+			fi
+		fi
+		sleep 1
+	done
 	echo "stock-host: forward ended"
 fi
 done_

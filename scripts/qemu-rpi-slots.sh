@@ -1338,8 +1338,27 @@ QMP
 	events_pid=$!
 	usb_pids=()
 	if [[ -n $usb_host ]]; then
-		# The relay takes the UDC's connection first, then the stock host's.
-		socat "VSOCK-LISTEN:$usb_port_device" "VSOCK-LISTEN:$usb_port_host" 2> "$state/boot-$boots.usb-relay.log" &
+		# The relay takes the UDC's connection first, then the stock host's,
+		# and joins them. When either side closes (the gadget unbound, or the
+		# host gone), it takes the next pair, for as long as the boot runs:
+		# the UDC links again when the gadget pulls up, and the stock host
+		# attaches again, as a board's host sees a disconnect and a new
+		# enumeration. Each pair's start and end are in the relay's log.
+		(
+			trap '[[ -z ${pair:-} ]] || kill "$pair" 2> /dev/null; exit 0' TERM
+			n=0
+			while :; do
+				n=$((n + 1))
+				echo "relay $n: listening $(date -u +%T) (the UDC on vsock port $usb_port_device, then the stock host on $usb_port_host)"
+				socat -d -d "VSOCK-LISTEN:$usb_port_device" "VSOCK-LISTEN:$usb_port_host" &
+				pair=$!
+				rc=0
+				wait "$pair" || rc=$?
+				echo "relay $n: ended $(date -u +%T), socat exit $rc"
+				pair=""
+				sleep 0.2
+			done
+		) > "$state/boot-$boots.usb-relay.log" 2>&1 &
 		usb_pids+=($!)
 		accel=tcg
 		[[ ! -r /dev/kvm || ! -w /dev/kvm ]] || accel=kvm
@@ -1372,11 +1391,19 @@ QUIT
 			usb_pids+=($!)
 			echo "== the PC's 127.0.0.1:${usb_host_forward%%:*} is forwarded to TCP ${usb_host_forward#*:} on the board's lease server" >&2
 		fi
-		echo "== the stock host is plugged in; its log $state/boot-$boots.usb-host.log" >&2
+		echo "== the stock host is plugged in; its log $state/boot-$boots.usb-host.log, the relay's $state/boot-$boots.usb-relay.log" >&2
 	fi
 	rm -f "$state/usb-host-done"
 	status=0
-	"$qemu" "${args[@]}" -qmp "unix:$state/qmp-events.sock,server=on,wait=on" -dtb "$state/virt.dtb" "${qemu_extra[@]}" || status=$?
+	# QEMU runs as a job the runner waits on, so a TERM or INT to the runner
+	# ends this boot's QEMU, its event reader, the stock host, the relay and
+	# the forward with it, not the runner alone (the console stays on the
+	# runner's stdin and stdout).
+	"$qemu" "${args[@]}" -qmp "unix:$state/qmp-events.sock,server=on,wait=on" -dtb "$state/virt.dtb" "${qemu_extra[@]}" <&0 &
+	qemu_pid=$!
+	trap 'kill "$qemu_pid" "$events_pid" ${usb_pids[@]+"${usb_pids[@]}"} 2> /dev/null; wait 2> /dev/null; echo "== stopped by a signal: QEMU and its helpers ended" >&2; exit 143' TERM INT
+	wait "$qemu_pid" || status=$?
+	trap - TERM INT
 	wait "$events_pid" || true
 	if [[ ${#usb_pids[@]} -gt 0 ]]; then
 		kill "${usb_pids[@]}" 2> /dev/null || true

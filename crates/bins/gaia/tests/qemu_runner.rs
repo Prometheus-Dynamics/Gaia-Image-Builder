@@ -1916,3 +1916,295 @@ fn the_firmware_rpiboot_order_serves_the_ram_boot_again() {
     );
     assert!(!record.join("state/boot-2.replaced").exists(), "{out}");
 }
+
+/// How long a_rebound_udc_is_seen_again_by_the_stock_host's run may take,
+/// both guests' boots included, before the test stops it and fails
+/// (GAIA_RELINK_BOUND, in seconds, sets another).
+const RUN_BOUND: u64 = 900;
+
+/// The live re-enumeration, end to end: a RAM boot of a board-profile virt
+/// kernel whose /init (tests/relink-guest-init) makes an NCM gadget on the
+/// UDC, serves DHCP and TCP 9200 on it, and after the first connection on
+/// 9200 unbinds the UDC and binds it again, as a driver rebind does on a
+/// board. The stock host must see what a board's host sees: the disconnect,
+/// a new enumeration, a new lease, and the PC's forward carrying a
+/// connection again; the relay must take the second pair. The stock host is
+/// built from this tree's scripts/qemu-stock-host.sh for the run. It boots
+/// real kernels, so it is ignored by default:
+///
+/// ```text
+/// GAIA_RELINK_KERNEL=<virt kernel Image, scripts/qemu-virt-kernel.sh> \
+/// GAIA_RELINK_ROOT=<an aarch64 root with BusyBox sh, ip, udhcpd and inetd> \
+/// GAIA_RELINK_BUSYBOX=<a static x86_64 BusyBox, for the stock host> \
+///   cargo test -p gaia --test qemu_runner -- --ignored --nocapture a_rebound_udc
+/// ```
+#[test]
+#[ignore = "boots the virt kernel and the stock host: run with --ignored and GAIA_RELINK_*"]
+fn a_rebound_udc_is_seen_again_by_the_stock_host() {
+    use std::io::Read;
+    let var = |name: &str| {
+        PathBuf::from(std::env::var(name).unwrap_or_else(|_| panic!("{name} is not set")))
+    };
+    let (kernel, root, busybox) = (
+        var("GAIA_RELINK_KERNEL"),
+        var("GAIA_RELINK_ROOT"),
+        var("GAIA_RELINK_BUSYBOX"),
+    );
+    let dir = tempfile::tempdir().expect("tempdir");
+    let d = dir.path();
+    let host = d.join("stock-host");
+    run(
+        repo()
+            .join("scripts/qemu-stock-host.sh")
+            .to_str()
+            .expect("utf-8"),
+        &[
+            "--busybox",
+            busybox.to_str().expect("utf-8"),
+            host.to_str().expect("utf-8"),
+        ],
+    );
+    // The guest's root: the given one with the test's /init, owned by root.
+    let ramfs = d.join("ramfs");
+    run(
+        "cp",
+        &[
+            "-a",
+            &format!("{}/.", root.display()),
+            ramfs.to_str().expect("utf-8"),
+        ],
+    );
+    let init = ramfs.join("init");
+    let _ = std::fs::remove_file(&init);
+    std::fs::write(
+        &init,
+        std::fs::read(repo().join("crates/bins/gaia/tests/relink-guest-init")).expect("init"),
+    )
+    .expect("init");
+    run("chmod", &["755", init.to_str().expect("utf-8")]);
+    let cpio = d.join("initramfs.cpio");
+    let status = Command::new("sh")
+        .arg("-c")
+        .arg(format!(
+            "cd '{}' && find . | LC_ALL=C sort | cpio -o -H newc -R 0:0 --quiet > '{}'",
+            ramfs.display(),
+            cpio.display()
+        ))
+        .status()
+        .expect("cpio");
+    assert!(status.success());
+    // The RAM-boot set: the EEPROM's config, and boot.img with the kernel,
+    // the initramfs and a tree whose dwc2 is a device.
+    let set = d.join("set");
+    std::fs::create_dir(&set).expect("mkdir");
+    std::fs::write(set.join("config.txt"), "boot_ramdisk=1\n").expect("write");
+    let dts = d.join("board.dts");
+    std::fs::write(
+        &dts,
+        "/dts-v1/;\n/ { #address-cells = <2>; #size-cells = <2>;\n soc@107c000000 { compatible = \"simple-bus\"; #address-cells = <1>; #size-cells = <1>; ranges = <0x0 0x10 0x0 0x80000000>; watchdog@7d200000 { compatible = \"brcm,bcm2712-pm\"; reg = <0x7d200000 0x308>; }; };\n axi { compatible = \"simple-bus\"; #address-cells = <2>; #size-cells = <2>; ranges; usb@480000 { compatible = \"brcm,bcm2835-usb\"; reg = <0x10 0x480000 0x0 0x10000>; status = \"okay\"; dr_mode = \"peripheral\"; }; };\n};\n",
+    )
+    .expect("write");
+    let dtb = d.join("board.dtb");
+    run(
+        "dtc",
+        &[
+            "-q",
+            "-I",
+            "dts",
+            "-O",
+            "dtb",
+            "-o",
+            dtb.to_str().expect("utf-8"),
+            dts.to_str().expect("utf-8"),
+        ],
+    );
+    let fat = set.join("boot.img");
+    let fat_arg = fat.to_str().expect("utf-8");
+    run(
+        "mformat",
+        &[
+            "-C", "-i", fat_arg, "-T", "262144", "-h", "2", "-s", "32", "::",
+        ],
+    );
+    std::fs::write(
+        d.join("config.txt"),
+        "kernel=kernel8.img\ninitramfs initramfs.cpio followkernel\n",
+    )
+    .expect("write");
+    std::fs::write(
+        d.join("cmdline.txt"),
+        "console=ttyAMA0 rdinit=/init panic=5\n",
+    )
+    .expect("write");
+    for (from, name) in [
+        (d.join("config.txt"), "config.txt"),
+        (d.join("cmdline.txt"), "cmdline.txt"),
+        (cpio.clone(), "initramfs.cpio"),
+        (dtb.clone(), "board.dtb"),
+        (kernel.clone(), "kernel8.img"),
+    ] {
+        run(
+            "mcopy",
+            &[
+                "-o",
+                "-i",
+                fat_arg,
+                from.to_str().expect("utf-8"),
+                &format!("::{name}"),
+            ],
+        );
+    }
+    // A free port on the PC for the forward.
+    let pc_port = std::net::TcpListener::bind("127.0.0.1:0")
+        .expect("a port")
+        .local_addr()
+        .expect("addr")
+        .port();
+    let state = d.join("state");
+    let mut child = Command::new(repo().join("scripts/qemu-rpi-slots.sh"))
+        .arg("--state")
+        .arg(&state)
+        .args([
+            "--net",
+            "user",
+            "--profile",
+            "board",
+            "--fresh",
+            "--no-watchdog",
+            "--disk-size",
+            "16M",
+            "--emmc-at",
+            "/soc@107c000000/mmc@fff000",
+            "--usb-host-wait",
+            "120",
+            "--max-boots",
+            "1",
+        ])
+        .arg("--kernel")
+        .arg(&kernel)
+        .arg("--usb-host")
+        .arg(&host)
+        .arg("--usb-host-forward")
+        .arg(format!("{pc_port}:9200"))
+        .arg(&set)
+        .stdout(std::fs::File::create(d.join("runner.log")).expect("runner.log"))
+        .stderr(std::process::Stdio::from(
+            std::fs::File::options()
+                .append(true)
+                .open(d.join("runner.log"))
+                .expect("runner.log"),
+        ))
+        .spawn()
+        .expect("the runner runs");
+    // The whole run is bounded: a guest that waits forever (a second
+    // connection that never comes) must fail the test, not hang it.
+    let bound = std::env::var("GAIA_RELINK_BOUND")
+        .map(|v| v.parse().expect("GAIA_RELINK_BOUND is seconds"))
+        .unwrap_or(RUN_BOUND);
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(bound);
+    let left = || std::time::Instant::now() < deadline;
+    let host_log = state.join("boot-1.usb-host.log");
+    let read = |path: &Path| {
+        String::from_utf8_lossy(&std::fs::read(path).unwrap_or_default()).into_owned()
+    };
+    // What the PC gets through the forward, tried each second for 300 s,
+    // while the runner runs.
+    let pc = |child: &mut std::process::Child| -> String {
+        for _ in 0..300 {
+            if child.try_wait().expect("wait").is_some() || !left() {
+                break;
+            }
+            if let Ok(mut stream) = std::net::TcpStream::connect(("127.0.0.1", pc_port)) {
+                let _ = stream.set_read_timeout(Some(std::time::Duration::from_secs(5)));
+                let mut reply = String::new();
+                let _ = stream.read_to_string(&mut reply);
+                if !reply.is_empty() {
+                    return reply;
+                }
+            }
+            std::thread::sleep(std::time::Duration::from_secs(1));
+        }
+        String::new()
+    };
+    let first = pc(&mut child);
+    // The second only once the host has leased again: a board's host has no
+    // network on the gadget while it is away.
+    for _ in 0..300 {
+        if read(&host_log).matches("stock-host: lease ").count() >= 2
+            || child.try_wait().expect("wait").is_some()
+            || !left()
+        {
+            break;
+        }
+        std::thread::sleep(std::time::Duration::from_secs(1));
+    }
+    let second = pc(&mut child);
+    // The guest powers off after the second; the run then ends.
+    while left() && child.try_wait().expect("wait").is_none() {
+        std::thread::sleep(std::time::Duration::from_secs(1));
+    }
+    let timed_out = child.try_wait().expect("wait").is_none();
+    if timed_out {
+        // TERM: the runner stops its QEMUs, relay and forward; KILL if it
+        // has not ended 30 s later.
+        let _ = Command::new("kill")
+            .args(["-TERM", &child.id().to_string()])
+            .status();
+        for _ in 0..30 {
+            if child.try_wait().expect("wait").is_some() {
+                break;
+            }
+            std::thread::sleep(std::time::Duration::from_secs(1));
+        }
+        let _ = child.kill();
+    }
+    let _ = child.wait();
+    let guest = read(&state.join("boot-1.log"));
+    let usb = read(&host_log);
+    let relay = read(&state.join("boot-1.usb-relay.log"));
+    println!(
+        "{}\n--- guest\n{guest}\n--- stock host\n{usb}\n--- relay\n{relay}",
+        read(&d.join("runner.log"))
+    );
+    assert!(
+        !timed_out,
+        "timed out: the run did not end within {bound} s"
+    );
+    assert_eq!(first.trim(), "relink test: connection 1");
+    assert_eq!(second.trim(), "relink test: connection 2");
+    for line in [
+        "gaia-test: unbinding the UDC",
+        "gaia-test: binding the UDC 1000480000.usb again",
+        "gaia-test: done",
+    ] {
+        assert!(guest.contains(line), "the guest has no {line:?}");
+    }
+    assert_eq!(
+        guest.matches("linked to the host over vsock port").count(),
+        2,
+        "{guest}"
+    );
+    // What a board's host sees: the disconnect, then a new device, a new
+    // NCM interface and a new lease; vhci_hcd's port 0 taken again.
+    assert!(usb.contains("stock-host: USB disconnect: the device on vhci_hcd port 0 is gone"));
+    assert_eq!(
+        usb.matches("stock-host: attached to vhci_hcd port 0, high speed")
+            .count(),
+        2,
+        "{usb}"
+    );
+    assert!(!usb.contains("refused the device"), "{usb}");
+    assert!(usb.contains("new high-speed USB device number 2 using vhci_hcd"));
+    assert!(usb.contains("new high-speed USB device number 3 using vhci_hcd"));
+    assert_eq!(
+        usb.matches("stock-host: CDC NCM interface ").count(),
+        2,
+        "{usb}"
+    );
+    assert_eq!(usb.matches("stock-host: lease ").count(), 2, "{usb}");
+    assert!(usb.contains("stock-host: forward 2: open to"), "{usb}");
+    // The relay took the second pair.
+    assert!(relay.contains("relay 1: ended"), "{relay}");
+    assert!(relay.contains("relay 2: listening"), "{relay}");
+    assert_eq!(relay.matches("accepting connection").count(), 4, "{relay}");
+}

@@ -2,10 +2,12 @@
 //! connects a vsock stream to the host (CID 2) on PORT, retrying each second
 //! until the relay takes it (at most WAIT seconds, when given: no device
 //! linked by then exits 3), and gives it to vhci_hcd as a high-speed device
-//! on port 0. There is no usbipd handshake: the far end is a usbip-vudc
-//! that starts USB/IP on the stream as it is.
+//! on vhci port RHPORT (default 0; the device is then 1-<RHPORT + 1>). An
+//! attach vhci_hcd refuses exits 4, so the caller can take another port.
+//! There is no usbipd handshake: the far end is a usbip-vudc that starts
+//! USB/IP on the stream as it is.
 //!
-//!   vhci-attach PORT [WAIT]
+//!   vhci-attach PORT [WAIT [RHPORT]]
 //!
 //! Built with rustc alone (no crates) for a static musl binary.
 
@@ -41,11 +43,15 @@ fn main() {
     let port: c_uint = match std::env::args().nth(1).and_then(|p| p.parse().ok()) {
         Some(p) => p,
         None => {
-            eprintln!("usage: vhci-attach PORT [WAIT]");
+            eprintln!("usage: vhci-attach PORT [WAIT [RHPORT]]");
             std::process::exit(2);
         }
     };
     let wait: Option<u32> = std::env::args().nth(2).and_then(|w| w.parse().ok());
+    let rhport: u32 = std::env::args()
+        .nth(3)
+        .and_then(|p| p.parse().ok())
+        .unwrap_or(0);
     let addr = SockaddrVm {
         svm_family: AF_VSOCK as c_ushort,
         svm_reserved1: 0,
@@ -83,16 +89,18 @@ fn main() {
         std::thread::sleep(std::time::Duration::from_secs(1));
     };
     println!("stock-host: linked on vsock port {port} after {tries} retries");
-    let line = format!("0 {fd} {DEVID} {SPEED_HIGH}");
+    let line = format!("{rhport} {fd} {DEVID} {SPEED_HIGH}");
     match std::fs::OpenOptions::new()
         .write(true)
         .open(VHCI_ATTACH)
         .and_then(|mut f| f.write_all(line.as_bytes()))
     {
-        Ok(()) => println!("stock-host: attached to vhci_hcd port 0, high speed"),
+        Ok(()) => println!("stock-host: attached to vhci_hcd port {rhport}, high speed"),
         Err(e) => {
-            println!("stock-host: vhci_hcd attach failed: {e}");
-            std::process::exit(1);
+            println!("stock-host: vhci_hcd attach on port {rhport} failed: {e}");
+            // SAFETY: the socket vhci_hcd did not take.
+            unsafe { close(fd) };
+            std::process::exit(4);
         }
     }
     // vhci_hcd holds its own reference to the socket.
