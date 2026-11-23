@@ -37,7 +37,17 @@ tests() {
     # Both run and both statuses count: the step fails if either fails,
     # whether or not errexit applies where the step is called.
     local cases=0 docs=0
-    cargo nextest run --locked --workspace --all-features || cases=$?
+    # Each case runs through scripts/test-bound.py (cargo's runner for the
+    # host's own target): a case that hangs is stopped at its bound and
+    # fails by name, and the bound counts the time the case could use, not
+    # the time it waited for a CPU on a busy machine (see the script).
+    # Only here: under plain cargo test a process is a whole binary, and
+    # the bound is one case's.
+    local host runner
+    host=$(rustc -vV | sed -n 's/^host: //p')
+    runner="CARGO_TARGET_$(printf '%s' "$host" | tr 'a-z-' 'A-Z_')_RUNNER"
+    env "$runner=$PWD/scripts/test-bound.py" \
+      cargo nextest run --locked --workspace --all-features || cases=$?
     cargo test --locked --workspace --all-features --doc || docs=$?
     if [ "$cases" -ne 0 ] || [ "$docs" -ne 0 ]; then
       echo "tests failed: nextest exit $cases, doc tests exit $docs" >&2
