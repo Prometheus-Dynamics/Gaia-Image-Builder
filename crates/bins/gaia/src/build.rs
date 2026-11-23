@@ -204,10 +204,19 @@ fn build_one(options: &args::Project) -> Result<Run, Stop> {
                         .failed_log(step, reason, &taken)
                 });
                 taken.extend(log.clone());
-                let shown = if cut {
-                    format!("{reason}\n(reason cut; the whole message is in the run log)")
-                } else {
-                    reason.to_string()
+                // A cut reason is shown whole when this process still has it
+                // (a step that refused before it ran anything has no run
+                // log); otherwise it says where the rest is, or that it is
+                // nowhere.
+                let shown = match (cut, gaia_step::whole_reason(reason), &log) {
+                    (false, _, _) => reason.to_string(),
+                    (true, Some(whole), _) => whole,
+                    (true, None, Some(_)) => {
+                        format!("{reason}\n(reason cut; the whole message is in the run log)")
+                    }
+                    (true, None, None) => {
+                        format!("{reason}\n(reason cut, and the step kept no run log of it)")
+                    }
                 };
                 message.push_str(&gaia_progress::failure(&at, &shown, log.as_deref()));
             }

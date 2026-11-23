@@ -50,7 +50,7 @@ mod tool;
 mod version;
 
 pub use daedalus_cpu_author::Ctx;
-pub use error::{ErrorKind, StepError, code};
+pub use error::{ErrorKind, StepError, code, whole_reason};
 pub use gaia_store::{Check, Digest, ObjectRef, StepKey, Store};
 pub use key::KeyBuilder;
 pub use log::{
