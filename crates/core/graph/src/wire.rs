@@ -1984,7 +1984,13 @@ fn image_os(
     let file = &product.file;
     let i = at.index;
     let key = format!("images[{i}].os");
-    let plan = os::plan(at.board, i, at.spec, file, at.lock)?;
+    let mut plan = os::plan(at.board, i, at.spec, file, at.lock)?;
+    plan.config.removed_accounts = at
+        .image
+        .removed_accounts
+        .iter()
+        .map(|account| account.name.clone())
+        .collect();
     let mut parts = os::split(&plan, at.board);
     // A component's kernel contract is checked in the kernel's build, with
     // the board's storage drivers and the kind of image the board takes.

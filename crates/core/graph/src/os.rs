@@ -1071,6 +1071,12 @@ pub(crate) fn split(plan: &OsPlan, board: &Board) -> Parts {
                 overrides,
                 externals: Vec::new(),
                 kernel_contracts: Vec::new(),
+                // The root's alone: only its build has the users.
+                removed_accounts: if which == Part::Rootfs {
+                    plan.config.removed_accounts.clone()
+                } else {
+                    Vec::new()
+                },
             },
             inputs,
         }

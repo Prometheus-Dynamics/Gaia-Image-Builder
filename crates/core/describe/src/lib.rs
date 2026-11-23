@@ -42,6 +42,8 @@ pub use component::{
     InstallFrom, Package, Requires, Service, User,
 };
 pub use error::Error;
-pub use product::{Assembled, ImageSpec, Loaded, NamedLib, OsProvider, OsSpec, Product};
+pub use product::{
+    Assembled, ImageSpec, Loaded, NamedLib, OsProvider, OsSpec, Product, RemovedAccount,
+};
 pub use read::VERSION;
 pub use validate::{Kind, kind_of, validate};

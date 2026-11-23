@@ -629,6 +629,73 @@ fn a_recipe_that_takes_os_needs_an_image_with_one() {
     );
 }
 
+/// The users and groups an image declares removed from the OS's users table
+/// reach the root's build, by name, and no other part's (the kernel's and
+/// the bootloader's have no users, and keep their keys). A bad entry is
+/// refused by its key.
+#[test]
+fn an_images_removed_accounts_reach_the_roots_build() {
+    let dir = project();
+    let product = dir
+        .path()
+        .join("examples/products/zero-3e-demo/product.toml");
+    let text = std::fs::read_to_string(&product).expect("read");
+    let with = |lists: &str| {
+        std::fs::write(
+            &product,
+            text.replace("budget = \"1G\"\n", &format!("budget = \"1G\"\n{lists}\n")),
+        )
+        .expect("write");
+    };
+    let removed = |part: &str| {
+        let out = plan(dir.path(), &["--json"]);
+        assert!(
+            out.status.success(),
+            "{}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+        let both: serde_json::Value = serde_json::from_slice(&out.stdout).expect("json");
+        let inputs = both["host_inputs"].as_array().expect("host inputs");
+        let os = inputs
+            .iter()
+            .find(|i| i["port"] == format!("zero-3e-demo.os{part}"))
+            .unwrap_or_else(|| panic!("no config for {part:?}"));
+        os["value"]["removed_accounts"].clone()
+    };
+    // None listed: the field is not there at all, so no config changes.
+    assert!(removed("").is_null());
+    with(
+        "removed_accounts = [{ name = \"dbus\", reason = \"post-fakeroot trim\" }, { name = \"sshd\", reason = \"no ssh in this image\" }]",
+    );
+    assert_eq!(removed(""), serde_json::json!(["dbus", "sshd"]));
+    assert!(removed(".kernel").is_null());
+    assert!(removed(".bootloader").is_null());
+    for (lists, says) in [
+        (
+            "removed_accounts = [{ name = \"dbus\", reason = \" \" }]",
+            "images[0].removed_accounts[0]: `dbus` has no reason",
+        ),
+        (
+            "removed_accounts = [{ name = \"d bus\", reason = \"x\" }]",
+            "images[0].removed_accounts[0]: `d bus` is not a user's or group's name",
+        ),
+        (
+            "removed_accounts = [{ name = \"dbus\", reason = \"x\" }, { name = \"dbus\", reason = \"y\" }]",
+            "images[0].removed_accounts[1]: `dbus` is listed twice",
+        ),
+        (
+            "removed_accounts = [{ name = \"dbus\" }]",
+            "missing field `reason`",
+        ),
+    ] {
+        with(lists);
+        let out = plan(dir.path(), &[]);
+        assert_eq!(out.status.code(), Some(2), "{lists}");
+        let err = String::from_utf8_lossy(&out.stderr);
+        assert!(err.contains(says), "{lists}: {err}");
+    }
+}
+
 /// An image's root goes through the runtime-library step, and the image's
 /// two lists reach it (the slot's tree too): the libraries it removes
 /// besides the toolchain's, and the toolchain's it keeps, each with its

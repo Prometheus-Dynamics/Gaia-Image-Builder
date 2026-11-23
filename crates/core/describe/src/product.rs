@@ -62,6 +62,15 @@ pub struct ImageSpec {
     /// have, or one with no such bit, fails the build.
     #[serde(default)]
     pub keep_setid: Vec<String>,
+    /// Users and groups of the OS's own users table (Buildroot's, made from
+    /// its packages) that the image takes out of the root afterwards, in a
+    /// post-fakeroot script say: each by name, with the reason. The build
+    /// holds every other declared user and group to the root's `etc/passwd`
+    /// and `etc/group`, and fails when one is missing; a name listed here
+    /// must be declared by the table and must be gone from the root, so the
+    /// list cannot go stale.
+    #[serde(default)]
+    pub removed_accounts: Vec<RemovedAccount>,
     /// Toolchain runtime libraries (libstdc++, libgomp, ...) the root keeps
     /// although no ELF file in it needs them: each with the reason, such as
     /// a program that loads it by name. The others of that fixed list are
@@ -87,6 +96,17 @@ pub struct ImageSpec {
     /// types; planning checks them whole, with any `--setting` added.
     #[serde(default)]
     pub settings: toml::Table,
+}
+
+/// A user or group named in `[[images.removed_accounts]]`, and why.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct RemovedAccount {
+    /// The user's or group's name, as the users table has it: `dbus`. A
+    /// user and a group of one name are both meant.
+    pub name: String,
+    /// Why the image removes it.
+    pub reason: String,
 }
 
 /// A library named in `[[images.keep_runtime_libs]]` or
@@ -221,6 +241,35 @@ impl Product {
                         path,
                         format!("images[{index}].keep_setid[{at}]"),
                         format!("`{keep}` {fault}"),
+                    ));
+                }
+            }
+            let mut accounts = std::collections::BTreeSet::new();
+            for (at, account) in image.removed_accounts.iter().enumerate() {
+                let name = &account.name;
+                let plain = !name.is_empty()
+                    && name
+                        .bytes()
+                        .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'_' | b'-' | b'.'))
+                    && name != "-";
+                let fault = if !plain {
+                    Some(format!("`{name}` is not a user's or group's name"))
+                } else if account.reason.trim().is_empty() {
+                    Some(format!("`{name}` has no reason; say why in `reason`"))
+                } else if image.os.is_none() {
+                    Some(format!(
+                        "this image has no `os`, so no users table declares `{name}`: remove removed_accounts"
+                    ))
+                } else if !accounts.insert(name.as_str()) {
+                    Some(format!("`{name}` is listed twice"))
+                } else {
+                    None
+                };
+                if let Some(fault) = fault {
+                    return Err(Error::new(
+                        path,
+                        format!("images[{index}].removed_accounts[{at}]"),
+                        fault,
                     ));
                 }
             }

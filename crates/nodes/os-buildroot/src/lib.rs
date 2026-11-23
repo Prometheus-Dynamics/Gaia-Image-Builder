@@ -77,6 +77,7 @@
 //! print, but the step kit reports progress only between tool runs, so the
 //! count reaches Daedalus after `make` ends. See the PR for that gap.
 
+mod check;
 mod config;
 mod contract;
 mod dev;
@@ -229,6 +230,9 @@ pub(crate) struct Prepared {
     /// The contracts the kernel's final config must meet, each with the
     /// path of its file in the store.
     pub contracts: Vec<(gaia_types::KernelContract, PathBuf)>,
+    /// The users and groups of Buildroot's table that the image removes
+    /// afterwards (see `check`).
+    pub removed_accounts: Vec<String>,
     /// The value of the key entry the Gaia patches add, when the choice is
     /// not the default (see [`patches`]). `None` for the default.
     pub patch_key: Option<String>,
@@ -269,6 +273,10 @@ impl Prepared {
             key = key.config(&format!("override.{}", o.package), &o.input);
         }
         key = key.config("externals", config.externals.join("\n"));
+        // Only when there is one: a build that removes none keeps its key.
+        if !config.removed_accounts.is_empty() {
+            key = key.config("removed-accounts", config.removed_accounts.join("\n"));
+        }
         // Only when there is one: a build without a contract keeps its key.
         for contract in &config.kernel_contracts {
             key = key.config(
@@ -499,6 +507,7 @@ fn assemble(
         fragments,
         defaults,
         contracts,
+        removed_accounts: config.removed_accounts.clone(),
         patch_key: None,
     })
 }
@@ -990,6 +999,15 @@ fn build_steps(
                 outside.join("\n  ")
             )));
         }
+        // The root is what the fakeroot stage made: it must have the users
+        // Buildroot's own table declares and the enable links its presets
+        // call for, or the image boots without them (see `check`).
+        check::root(
+            &rootfs,
+            &out.join("build/buildroot-fs/full_users_table.txt"),
+            &prepared.removed_accounts,
+        )
+        .map_err(fail)?;
         entries
     } else {
         take(&out.join("target"), &rootfs, warm.is_some()).map_err(io_fail("the target tree"))?;
@@ -1414,6 +1432,7 @@ fn prepared_for_test(fragments: Vec<ConfigFragment>, defaults: Vec<ConfigFragmen
         fragments,
         defaults,
         contracts: Vec::new(),
+        removed_accounts: Vec::new(),
         patch_key: None,
     }
 }
@@ -1643,6 +1662,7 @@ mod bound_tests {
             fragments: vec![fragment("BR2_CCACHE=y\n")],
             defaults: Vec::new(),
             contracts: Vec::new(),
+            removed_accounts: Vec::new(),
             patch_key: None,
         };
         let on = OsConfig {

@@ -130,6 +130,11 @@ pub struct OsConfig {
     /// Contracts the kernel's final configuration must meet.
     #[serde(default)]
     pub kernel_contracts: Vec<KernelContract>,
+    /// Users and groups of Buildroot's users table that the image removes
+    /// from the root afterwards, by name: the root is not held to have
+    /// them, and must not. Left out when empty.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub removed_accounts: Vec<String>,
 }
 
 /// The prefixes of the config symbols that belong to a package, the kernel,
@@ -310,6 +315,7 @@ mod tests {
             }],
             externals: vec!["files".into()],
             kernel_contracts: Vec::new(),
+            removed_accounts: Vec::new(),
         }
     }
 

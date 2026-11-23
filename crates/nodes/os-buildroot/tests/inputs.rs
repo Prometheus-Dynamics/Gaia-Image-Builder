@@ -123,6 +123,7 @@ fn config(text: &str) -> OsConfig {
         }],
         externals: Vec::new(),
         kernel_contracts: Vec::new(),
+        removed_accounts: Vec::new(),
     }
 }
 
