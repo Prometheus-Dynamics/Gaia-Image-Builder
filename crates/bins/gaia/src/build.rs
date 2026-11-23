@@ -258,20 +258,18 @@ fn build_one(options: &args::Project) -> Result<Run, Stop> {
     // line on stdout is the outcome and the record.
     eprint!("{}", timing::report(&items, &run.critical_path));
     // What the root lost and kept of the toolchain's runtime libraries, made
-    // now or found in the store: each step's report, as it wrote it.
-    for step in &run.steps {
-        if step.step != "gaia.strip.runtime-libs" {
-            continue;
-        }
-        let Some(report) = step.outputs.get("report") else {
-            continue;
-        };
-        if let Ok(text) = std::fs::read_to_string(store.path(report)) {
-            for line in text.lines().filter(|line| !line.starts_with('#')) {
-                eprintln!("runtime libraries: {line}");
-            }
-        }
-    }
+    // now or found in the store: each step's report, as it wrote it. An
+    // image with a slot prunes two trees (the root, and the same without
+    // /boot's kernel files), and their reports are the same lines: said
+    // once, with how many trees it is for.
+    let reports: Vec<String> = run
+        .steps
+        .iter()
+        .filter(|step| step.step == "gaia.strip.runtime-libs")
+        .filter_map(|step| step.outputs.get("report"))
+        .filter_map(|report| std::fs::read_to_string(store.path(report)).ok())
+        .collect();
+    eprint!("{}", runtime_reports(&reports));
     if let Some(pool) = &pool {
         eprintln!("{pool}");
     }
@@ -380,4 +378,55 @@ fn upstream(project: &Project, port: &str) -> Vec<Origin> {
             file: project.built.origins[node].file.clone(),
         })
         .collect()
+}
+
+/// The runtime-library reports of a build as its last lines say them: each
+/// different report once, in the order first seen, its lines prefixed, and
+/// when several of the build's trees gave the same one, how many.
+fn runtime_reports(reports: &[String]) -> String {
+    let mut seen: Vec<(&str, usize)> = Vec::new();
+    for report in reports {
+        match seen.iter_mut().find(|(text, _)| *text == report.as_str()) {
+            Some((_, count)) => *count += 1,
+            None => seen.push((report, 1)),
+        }
+    }
+    let mut out = String::new();
+    for (text, count) in seen {
+        for line in text.lines().filter(|line| !line.starts_with('#')) {
+            out.push_str(&format!("runtime libraries: {line}\n"));
+        }
+        if count > 1 {
+            out.push_str(&format!(
+                "runtime libraries: the same for {count} trees of this build\n"
+            ));
+        }
+    }
+    out
+}
+
+#[cfg(test)]
+mod runtime_report_tests {
+    use super::runtime_reports;
+
+    /// Two trees with the same report say it once and say so; a different
+    /// one is said as well; comment lines are left out; none says nothing.
+    #[test]
+    fn the_same_report_is_said_once() {
+        let a = "# header\nremoved libgomp: x\nsaved   5 B in 1 file\n".to_string();
+        let b = "kept    libstdc++: needed by usr/bin/app\nsaved   0 B in 0 files\n".to_string();
+        assert_eq!(
+            runtime_reports(&[a.clone(), a.clone(), b]),
+            "runtime libraries: removed libgomp: x\n\
+             runtime libraries: saved   5 B in 1 file\n\
+             runtime libraries: the same for 2 trees of this build\n\
+             runtime libraries: kept    libstdc++: needed by usr/bin/app\n\
+             runtime libraries: saved   0 B in 0 files\n"
+        );
+        assert_eq!(
+            runtime_reports(&[a]),
+            "runtime libraries: removed libgomp: x\nruntime libraries: saved   5 B in 1 file\n"
+        );
+        assert_eq!(runtime_reports(&[]), "");
+    }
 }
