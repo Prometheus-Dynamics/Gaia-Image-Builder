@@ -31,7 +31,8 @@ lock() {
 
 # The tests: every test binary's cases at once under cargo-nextest (each case
 # its own process), then the doc tests, which nextest does not run. Without
-# nextest, cargo test runs the same cases, one binary after another.
+# nextest the gate fails, saying so, unless GAIA_GATE_UNBOUNDED=1: cargo test
+# would run the same cases with no bound on any of them.
 tests() {
   if cargo nextest --version > /dev/null 2>&1; then
     # Both run and both statuses count: the step fails if either fails,
@@ -53,9 +54,15 @@ tests() {
       echo "tests failed: nextest exit $cases, doc tests exit $docs" >&2
       return 1
     fi
-  else
-    echo "cargo-nextest not installed: cargo test runs the binaries one at a time"
+  elif [ "${GAIA_GATE_UNBOUNDED:-}" = 1 ]; then
+    # Asked for by name: without nextest a process is a whole test binary,
+    # so no case has a bound and a hung one holds this run.
+    echo "cargo-nextest is not installed, and GAIA_GATE_UNBOUNDED=1: the tests run under plain cargo test, WITH NO BOUND on any test" >&2
     cargo test --locked --workspace --all-features
+  else
+    echo "cargo-nextest is not installed: the gate's tests run under it, each case bounded (scripts/test-bound.py)." >&2
+    echo "Install it (cargo install cargo-nextest --locked), or set GAIA_GATE_UNBOUNDED=1 to run the tests with no bound on any of them." >&2
+    return 1
   fi
 }
 
