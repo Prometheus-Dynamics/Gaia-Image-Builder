@@ -867,17 +867,26 @@ fn rust_toolchain(
     step: &dyn Fn(&str) -> String,
 ) -> Result<u32, Error> {
     let file = &component.file;
+    let host = gaia_describe::rust_host_triple();
     let Some(Source::Rust { version, targets }) = component.sources.get("toolchain") else {
+        // A build for the build machine (a generator's tool) needs no
+        // target's std: the machine's own is always pinned, and naming its
+        // triple would tie the description to one kind of build machine.
+        let wanted = if triple == host {
+            "`targets = []` (it is built for the build machine, whose std is always pinned)"
+                .to_string()
+        } else {
+            format!("`targets = [\"{triple}\"]`")
+        };
         return Err(Error::at(
             file,
             "sources.toolchain",
             format!(
-                "{}'s Rust build takes its toolchain from a source: `[sources.toolchain]` with `rust = \"<release>\"` and `targets = [\"{triple}\"]`; the build machine's Rust is not used",
+                "{}'s Rust build takes its toolchain from a source: `[sources.toolchain]` with `rust = \"<release>\"` and {wanted}; the build machine's Rust is not used",
                 component.name
             ),
         ));
     };
-    let host = gaia_describe::rust_host_triple();
     if triple != host && !targets.iter().any(|t| t == triple) {
         return Err(Error::at(
             file,

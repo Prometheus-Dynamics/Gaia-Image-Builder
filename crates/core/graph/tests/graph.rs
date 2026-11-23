@@ -477,6 +477,23 @@ fn errors_name_the_description() {
         "{e}"
     );
 
+    // The same for a build for the build machine itself (a generator's
+    // tool): the description is not asked to name the machine's triple.
+    let host = gaia_describe::rust_host_triple();
+    let e = try_with(
+        &base.replace(&toolchain, "").replace(
+            "triple = \"aarch64-unknown-linux-musl\"",
+            &format!("triple = \"{host}\""),
+        ),
+        lock(),
+    );
+    println!("{}", shown(&e));
+    assert!(
+        e.contains("`rust = \"<release>\"` and `targets = []` (it is built for the build machine, whose std is always pinned); the build machine's Rust is not used"),
+        "{e}"
+    );
+    assert!(!e.contains(&host), "{e}");
+
     // A toolchain with no std for the build's target, refused by name when
     // the graph is laid out, before anything runs.
     let other = toolchain.replace("aarch64-unknown-linux-musl", "riscv64gc-unknown-linux-musl");
