@@ -4,6 +4,10 @@ set -euo pipefail
 cd "$(dirname "${BASH_SOURCE[0]}")/.."
 export CARGO_INCREMENTAL="${CARGO_INCREMENTAL:-0}"
 
+# One target directory, one worktree: refused before cargo runs (see the
+# script for why).
+scripts/gate-target.sh
+
 step() {
   local label="$1" start
   shift
