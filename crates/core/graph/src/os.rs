@@ -210,6 +210,7 @@ pub(crate) fn plan(
         inputs: Vec::new(),
     };
     let mut fragments = defaults();
+    let mut uboot: Vec<UbootWant> = Vec::new();
     fragments.push(ConfigFragment {
         name: "board.target".into(),
         text: target(board)?,
@@ -487,6 +488,8 @@ pub(crate) fn plan(
             }
             lines.push("BR2_TARGET_UBOOT_NEEDS_ATF_BL31=y".into());
         }
+        uboot = uboot_files(board);
+        lines.extend(uboot.iter().map(|want| want.line()));
         fragments.push(ConfigFragment {
             name: "board.bootloader".into(),
             text: text(&lines),
@@ -515,6 +518,29 @@ pub(crate) fn plan(
             .file_name()
             .unwrap_or_default()
             .to_string_lossy();
+        // The board's areas say which files U-Boot's build must install; an
+        // image's line for one of those options may repeat that, not undo it.
+        for line in body.lines() {
+            let Some(symbol) = symbol_of(line) else {
+                continue;
+            };
+            if let Some(want) = uboot.iter().find(|want| want.symbol == symbol)
+                && !want.met_by(line)
+            {
+                return Err(Error::at(
+                    product_file,
+                    key.clone(),
+                    format!(
+                        "`{}` in {shown} disagrees with the board {}: its area '{}' is written from U-Boot's `{}`, which the build installs with `{}` (set from the board already); remove the line",
+                        line.trim(),
+                        board.name,
+                        want.area,
+                        want.file,
+                        want.line()
+                    ),
+                ));
+            }
+        }
         fragments.push(ConfigFragment {
             name: format!("image.{j}.{shown}"),
             text: body,
@@ -525,6 +551,111 @@ pub(crate) fn plan(
         .check()
         .map_err(|e| Error::at(product_file, format!("images[{index}].os"), e))?;
     Ok(plan)
+}
+
+/// One option the U-Boot build needs so that it installs a file a board's
+/// area is written from.
+struct UbootWant {
+    symbol: &'static str,
+    /// `y`, or for a list of names the names this board needs in it.
+    names: Option<Vec<String>>,
+    /// The area and its file, for an error.
+    area: String,
+    file: String,
+}
+
+impl UbootWant {
+    fn line(&self) -> String {
+        match &self.names {
+            None => format!("{}=y", self.symbol),
+            Some(names) => format!("{}={}", self.symbol, quoted(&names.join(" "))),
+        }
+    }
+
+    /// Whether an image's line for this option keeps what the board needs:
+    /// `=y` for a switch, and for a list every name the board needs (more
+    /// names are the image's own).
+    fn met_by(&self, line: &str) -> bool {
+        let line = line.trim();
+        let Some(value) = line
+            .strip_prefix(self.symbol)
+            .and_then(|rest| rest.strip_prefix('='))
+        else {
+            return false;
+        };
+        match &self.names {
+            None => value == "y",
+            Some(names) => {
+                let given: Vec<&str> = value.trim_matches('"').split_whitespace().collect();
+                names.iter().all(|name| given.contains(&name.as_str()))
+            }
+        }
+    }
+}
+
+/// The U-Boot options the board's areas outside the table ask for: each
+/// area written from a file of U-Boot's own (a `content` whose name starts
+/// with `u-boot`) needs the build to install that file. One of Buildroot's
+/// formats when the name is one (`u-boot.bin`), the SPL when it is the SPL's
+/// (`u-boot-spl.bin`), a custom name otherwise (`u-boot-rockchip.bin`). So
+/// no image repeats what the board says, and none can leave it out. A file
+/// from another build (TF-A's `bl31.bin`, OpenSBI's `fw_jump.bin`) is not
+/// U-Boot's, and nothing is set for it.
+fn uboot_files(board: &Board) -> Vec<UbootWant> {
+    const SPL: &str = "u-boot-spl.bin";
+    let mut wants: Vec<UbootWant> = Vec::new();
+    let mut custom: Vec<String> = Vec::new();
+    let mut custom_for = None;
+    for need in &board.partitions {
+        let (false, Some(file)) = (need.in_table, &need.content) else {
+            continue;
+        };
+        if !file.starts_with("u-boot") {
+            continue;
+        }
+        let mut switch = |symbol: &'static str, names: Option<Vec<String>>| {
+            if !wants.iter().any(|want| want.symbol == symbol) {
+                wants.push(UbootWant {
+                    symbol,
+                    names,
+                    area: need.name.clone(),
+                    file: file.clone(),
+                });
+            }
+        };
+        if let Some((symbol, _)) = gaia_types::UBOOT_FORMATS
+            .iter()
+            .find(|(_, made)| made == file)
+        {
+            switch(symbol, None);
+        } else if file == SPL {
+            switch("BR2_TARGET_UBOOT_SPL", None);
+            switch(
+                "BR2_TARGET_UBOOT_SPL_NAME",
+                Some(vec![format!("spl/{SPL}")]),
+            );
+        } else {
+            if !custom.contains(file) {
+                custom.push(file.clone());
+            }
+            custom_for.get_or_insert((need.name.clone(), file.clone()));
+        }
+    }
+    if let Some((area, file)) = custom_for {
+        wants.push(UbootWant {
+            symbol: "BR2_TARGET_UBOOT_FORMAT_CUSTOM",
+            names: None,
+            area: area.clone(),
+            file: file.clone(),
+        });
+        wants.push(UbootWant {
+            symbol: "BR2_TARGET_UBOOT_FORMAT_CUSTOM_NAME",
+            names: Some(custom),
+            area,
+            file,
+        });
+    }
+    wants
 }
 
 /// The default that makes Buildroot build with per-package directories, so

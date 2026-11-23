@@ -24,11 +24,8 @@ BR2_TARGET_UBOOT_NEEDS_OPENSSL=y
 # which the environment's bootcmd loads (ext4load mmc 1:1 /boot/Image).
 BR2_LINUX_KERNEL_INSTALL_TARGET=y
 
-# The bootloader's binaries into images/ for the family's wrapped areas (SPL, U-Boot,
-# OpenSBI fw_jump.bin), as the AI-CAM's fragment has them.
-BR2_TARGET_UBOOT_SPL=y
-BR2_TARGET_UBOOT_SPL_NAME="spl/u-boot-spl.bin"
-BR2_TARGET_UBOOT_FORMAT_BIN=y
+# OpenSBI's fw_jump.bin into images/ for the family's wrapped area, as the AI-CAM's
+# fragment has it. U-Boot's files there come from the board's areas.
 BR2_TARGET_OPENSBI_INSTALL_JUMP_IMG=y
 
 # The config starts from Buildroot's allnoconfig, so the console login is named

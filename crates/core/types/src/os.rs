@@ -17,6 +17,19 @@ pub struct ConfigFragment {
     pub text: String,
 }
 
+/// The file each of Buildroot's own U-Boot output formats installs, by its
+/// option. A U-Boot file under another name is a custom format
+/// (`BR2_TARGET_UBOOT_FORMAT_CUSTOM_NAME`); the SPL's is
+/// `BR2_TARGET_UBOOT_SPL_NAME`.
+pub const UBOOT_FORMATS: [(&str, &str); 6] = [
+    ("BR2_TARGET_UBOOT_FORMAT_BIN", "u-boot.bin"),
+    ("BR2_TARGET_UBOOT_FORMAT_DTB", "u-boot.dtb"),
+    ("BR2_TARGET_UBOOT_FORMAT_DTB_BIN", "u-boot-dtb.bin"),
+    ("BR2_TARGET_UBOOT_FORMAT_DTB_IMG", "u-boot-dtb.img"),
+    ("BR2_TARGET_UBOOT_FORMAT_IMG", "u-boot.img"),
+    ("BR2_TARGET_UBOOT_FORMAT_ITB", "u-boot.itb"),
+];
+
 /// The host side of a Buildroot run: make, an optional CPU pin, the job
 /// count, the download cache, the compiler cache's directory and a mirror.
 #[derive(Clone, Debug, PartialEq, Eq, Type, Serialize, Deserialize)]

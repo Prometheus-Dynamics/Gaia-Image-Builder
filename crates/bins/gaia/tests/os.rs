@@ -745,6 +745,111 @@ fn an_images_library_lists_reach_the_runtime_library_step() {
     );
 }
 
+/// The board's areas name the U-Boot files they are written from, and the
+/// bootloader's build installs them from that: a custom name for a file of
+/// U-Boot's own, a format for one of Buildroot's, the SPL for the SPL's.
+/// Nothing is set for a file that is not U-Boot's. An image's line may
+/// repeat or add to what the board needs; one that undoes it is refused.
+#[test]
+fn the_boards_areas_set_the_u_boot_files_the_build_installs() {
+    let dir = project();
+    let bootloader = |product: &str, image: &str| {
+        let out = plan_product(dir.path(), product, &["--json"]);
+        assert!(
+            out.status.success(),
+            "{}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+        let both: serde_json::Value = serde_json::from_slice(&out.stdout).expect("json");
+        let inputs = both["host_inputs"].as_array().expect("host inputs");
+        let os = inputs
+            .iter()
+            .find(|i| i["port"] == format!("{image}.os.bootloader"))
+            .expect("the bootloader's config");
+        let fragments = os["value"]["fragments"].as_array().expect("fragments");
+        let board = fragments
+            .iter()
+            .find(|f| f["name"] == "board.bootloader")
+            .expect("the board's fragment");
+        let all: String = fragments
+            .iter()
+            .map(|f| f["text"].as_str().expect("text").to_string())
+            .collect();
+        (board["text"].as_str().expect("text").to_string(), all)
+    };
+    // A file of U-Boot's own under its own name, from the board alone: the
+    // image's fragment has no line for it.
+    let fragment = dir
+        .path()
+        .join("examples/products/zero-3e-demo/os.fragment");
+    assert!(
+        !std::fs::read_to_string(&fragment)
+            .expect("read")
+            .contains("BR2_TARGET_UBOOT_FORMAT")
+    );
+    let (board, all) = bootloader(
+        "examples/products/zero-3e-demo/product.toml",
+        "zero-3e-demo",
+    );
+    assert!(
+        board.ends_with(
+            "BR2_TARGET_UBOOT_FORMAT_CUSTOM=y\nBR2_TARGET_UBOOT_FORMAT_CUSTOM_NAME=\"u-boot-rockchip.bin\"\n"
+        ),
+        "{board}"
+    );
+    assert_eq!(
+        all.matches("BR2_TARGET_UBOOT_FORMAT_CUSTOM_NAME").count(),
+        1
+    );
+    // The SPL's file and one of Buildroot's formats; OpenSBI's fw_jump.bin is
+    // not U-Boot's, and no U-Boot line is made for it.
+    let (board, _) = bootloader("examples/products/k230d-zero/product.toml", "k230d-zero");
+    assert!(
+        board.ends_with(
+            "BR2_TARGET_UBOOT_SPL=y\nBR2_TARGET_UBOOT_SPL_NAME=\"spl/u-boot-spl.bin\"\nBR2_TARGET_UBOOT_FORMAT_BIN=y\n"
+        ),
+        "{board}"
+    );
+    assert!(
+        !board.contains("FORMAT_CUSTOM") && !board.contains("fw_jump"),
+        "{board}"
+    );
+
+    // An image that says the same, or names more files, keeps working.
+    let text = std::fs::read_to_string(&fragment).expect("read");
+    let with = |line: &str| std::fs::write(&fragment, format!("{text}{line}\n")).expect("write");
+    for line in [
+        "BR2_TARGET_UBOOT_FORMAT_CUSTOM=y\nBR2_TARGET_UBOOT_FORMAT_CUSTOM_NAME=\"u-boot-rockchip.bin\"",
+        "BR2_TARGET_UBOOT_FORMAT_CUSTOM_NAME=\"idbloader.img u-boot-rockchip.bin\"",
+        "BR2_TARGET_UBOOT_FORMAT_IMG=y",
+    ] {
+        with(line);
+        let out = plan(dir.path(), &[]);
+        assert!(
+            out.status.success(),
+            "{line}: {}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+    }
+    // One that undoes what the board needs is refused, by its file and line.
+    for (line, says) in [
+        (
+            "BR2_TARGET_UBOOT_FORMAT_CUSTOM_NAME=\"u-boot.itb\"",
+            "images[0].os.fragments[0]: `BR2_TARGET_UBOOT_FORMAT_CUSTOM_NAME=\"u-boot.itb\"` in os.fragment disagrees with the board zero-3e: its area 'u-boot' is written from U-Boot's `u-boot-rockchip.bin`, which the build installs with `BR2_TARGET_UBOOT_FORMAT_CUSTOM_NAME=\"u-boot-rockchip.bin\"` (set from the board already); remove the line",
+        ),
+        (
+            "# BR2_TARGET_UBOOT_FORMAT_CUSTOM is not set",
+            "`# BR2_TARGET_UBOOT_FORMAT_CUSTOM is not set` in os.fragment disagrees with the board zero-3e",
+        ),
+    ] {
+        with(line);
+        let out = plan(dir.path(), &[]);
+        assert_eq!(out.status.code(), Some(2), "{line}");
+        let err = String::from_utf8_lossy(&out.stderr);
+        assert!(err.contains(says), "{line}: {err}");
+    }
+}
+
 /// A component states a kernel contract: a file in one of its sources. The
 /// kernel's build gets that file alone (not the whole source), with the
 /// board's storage drivers and the image's kind.

@@ -94,6 +94,7 @@ mod ppd;
 mod progress;
 mod times;
 mod tools;
+pub mod ubootnames;
 
 use daedalus::prelude::*;
 use daedalus_cpu_author::FanIn;
@@ -478,6 +479,13 @@ fn assemble(
     if let Some(kernel) = config.overrides.iter().find(|o| o.package == "LINUX")
         && let Some((_, tree, _)) = dirs.iter().find(|(name, _, _)| *name == kernel.input)
         && let Some(why) = dtnames::missing(&fragments, tree)
+    {
+        return Err(why);
+    }
+    // The same for the files asked of the U-Boot build by name.
+    if let Some(uboot) = config.overrides.iter().find(|o| o.package == "UBOOT")
+        && let Some((_, tree, _)) = dirs.iter().find(|(name, _, _)| *name == uboot.input)
+        && let Some(why) = ubootnames::missing(&fragments, tree)
     {
         return Err(why);
     }

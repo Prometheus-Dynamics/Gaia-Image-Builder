@@ -53,7 +53,9 @@ pub use disk::{DiskLayout, DiskPartition, DiskTable, RawBlob, TableScheme};
 pub use image::{Image, ImageKind, Partition, PartitionRole, Size};
 pub use layer::{Account, AccountGroup, Layer, Owned, Placement, Placements, owned_digest};
 pub use object::{Artifact, ArtifactKind, FileEntry, ObjectKind, StoreRef, Tree};
-pub use os::{BuildrootHost, ConfigFragment, KernelContract, OsConfig, SourceOverride};
+pub use os::{
+    BuildrootHost, ConfigFragment, KernelContract, OsConfig, SourceOverride, UBOOT_FORMATS,
+};
 pub use package::Control;
 pub use target::{Arch, Os, Target};
 

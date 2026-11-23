@@ -27,13 +27,10 @@ BR2_TARGET_UBOOT_NEEDS_OPENSSL=y
 # bootcmd loads (ext4load mmc 1:1 /boot/Image). The device tree is the board's.
 BR2_LINUX_KERNEL_INSTALL_TARGET=y
 
-# The bootloader's own binaries, installed into the bootloader output (images/)
-# for the board's areas: the SPL (u-boot-spl.bin), U-Boot (u-boot.bin) and OpenSBI's
-# fw_jump.bin. The wrapping is gaia.firmware.k230 (the board's wrap keys), not a
-# post-image script.
-BR2_TARGET_UBOOT_SPL=y
-BR2_TARGET_UBOOT_SPL_NAME="spl/u-boot-spl.bin"
-BR2_TARGET_UBOOT_FORMAT_BIN=y
+# OpenSBI's fw_jump.bin, installed into the bootloader output (images/) for the
+# board's area. U-Boot's own files there (u-boot-spl.bin, u-boot.bin) need no line
+# here: the board's areas name them, and the build installs what they name. The
+# wrapping is gaia.firmware.k230 (the board's wrap keys), not a post-image script.
 BR2_TARGET_OPENSBI_INSTALL_JUMP_IMG=y
 
 # The config starts from Buildroot's allnoconfig, so the console login is named
