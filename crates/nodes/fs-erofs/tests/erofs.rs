@@ -748,3 +748,65 @@ fn an_extended_attribute_reaches_the_image() {
         file_digest(&again.object.path_in(&store).expect("in store")).expect("digest")
     );
 }
+
+/// A file capability reaches the image, read from the image itself: an
+/// unprivileged extract cannot set `security.capability`, so the check
+/// reads EROFS's own inline record for it, which is never compressed: the
+/// name's length, the index of its `security.` prefix (6), the value's size,
+/// the rest of the name and the value's bytes. The image has it once, with
+/// the bytes the entry gave; the same tree without the attribute has none.
+#[test]
+fn a_file_capability_is_in_the_image() {
+    if !available() {
+        return;
+    }
+    // cap_net_raw+ep, as `setcap` writes it (VFS_CAP_REVISION_2, effective).
+    const CAPABILITY: &[u8] = &[
+        1, 0, 0, 2, 0, 0x20, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+    ];
+    let dir = tempfile::tempdir().expect("tempdir");
+    let src = dir.path().join("src");
+    sample(&src);
+    let store_path = dir.path().join("store");
+    let store = Store::open(&store_path).expect("store");
+    let build = |listed: Vec<FileEntry>| {
+        let tree = Tree {
+            object: store.put_tree(&src).expect("put").into(),
+            entries: listed,
+        };
+        let image = fs_erofs(
+            &store_path.display().to_string(),
+            Some(&tool("mkfs.erofs")),
+            None,
+            tree,
+            "lz4",
+            0,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            &Ctx::new(),
+        )
+        .expect("builds");
+        std::fs::read(image.object.path_in(&store).expect("in store")).expect("the image")
+    };
+    let mut record = vec!["capability".len() as u8, 6, CAPABILITY.len() as u8, 0];
+    record.extend(b"capability");
+    record.extend(CAPABILITY);
+    let count = |image: &[u8]| {
+        image
+            .windows(record.len())
+            .filter(|window| *window == record.as_slice())
+            .count()
+    };
+    let mut listed = entries(1000);
+    listed[0]
+        .xattrs
+        .insert("security.capability".into(), CAPABILITY.to_vec());
+    assert_eq!(listed[0].path, "usr/bin/tool");
+    assert_eq!(count(&build(listed)), 1, "the capability's record, once");
+    assert_eq!(count(&build(entries(1000))), 0, "no attribute, no record");
+}
