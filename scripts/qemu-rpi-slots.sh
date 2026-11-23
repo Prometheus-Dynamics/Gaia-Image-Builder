@@ -1308,11 +1308,24 @@ f = s.makefile("rw")
 f.readline()
 f.write(json.dumps({"execute": "qmp_capabilities"}) + "\n")
 f.flush()
+
+def lines():
+    # QEMU's lines until it ends. A guest that powers off ends QEMU with
+    # the socket reset, not closed: that is the end too, not an error.
+    while True:
+        try:
+            line = f.readline()
+        except (ConnectionError, ValueError):
+            return
+        if not line:
+            return
+        yield line
+
 with open(out, "w") as log:
     # QEMU starts the guest once this listener is connected.
     log.write(f"{time.time():.6f} START {{}}\n")
     log.flush()
-    for line in f:
+    for line in lines():
         msg = json.loads(line)
         if "event" in msg:
             stamp = msg.get("timestamp", {})
@@ -1323,9 +1336,12 @@ with open(out, "w") as log:
                 # mailbox page is saved, then QEMU quits.
                 for cmd in ({"execute": "pmemsave", "arguments": {"val": int(mailbox[0]), "size": 4096, "filename": mailbox[1]}},
                             {"execute": "quit"}):
-                    f.write(json.dumps(cmd) + "\n")
-                    f.flush()
-                    for reply in f:
+                    try:
+                        f.write(json.dumps(cmd) + "\n")
+                        f.flush()
+                    except (ConnectionError, ValueError):
+                        break
+                    for reply in lines():
                         got = json.loads(reply)
                         if "event" in got:
                             log.write(f"0 {got['event']} {json.dumps(got.get('data', {}))}\n")
@@ -1408,6 +1424,9 @@ QUIT
 	if [[ ${#usb_pids[@]} -gt 0 ]]; then
 		kill "${usb_pids[@]}" 2> /dev/null || true
 		wait "${usb_pids[@]}" 2> /dev/null || true
+		# The last pair ends when the guest does: socat then sees a reset
+		# and exits 1. Said in the log, so it is not read as a fault.
+		echo "relay: the boot ended here. A pair that ended just before this with a reset (socat exit 1) ended because a guest went away, as every boot's last pair does; it is not a fault." >> "$state/boot-$boots.usb-relay.log"
 		grep -a '^stock-host: ' "$state/boot-$boots.usb-host.log" | grep -v '^stock-host: kernel log' >&2 || echo "== the stock host logged nothing" >&2
 	fi
 	if [[ $status -ne 0 ]]; then

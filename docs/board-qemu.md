@@ -45,7 +45,9 @@ scripts/qemu-rpi-slots.sh --profile board --fresh --net user --max-boots 1 \
   printed when the boot ends. When the stock host is done, it powers off, the board guest is quit and the run ends.
   The vsock relay's log is `<work dir>/boot-N.usb-relay.log`: one `relay N: listening` and `relay N: ended` pair for
   each time the UDC and the stock host were joined, with socat's own lines. Keep it with the host's log: it is what
-  shows a link that went away and whether it came back.
+  shows a link that went away and whether it came back. The last pair of every boot ends with a reset and
+  `socat exit 1`, because a guest went away; the log's closing line says so. A pair that ends that way while both
+  guests are still running is the one to look at.
 - A TERM or INT to the runner ends the boot's QEMU and everything it started with it (the event reader, the stock
   host, the relay and the forward) and exits 143, saying so; nothing is left running. A caller that bounds a run
   sends TERM at its limit.

@@ -60,15 +60,21 @@ cp "$busybox" "$root/bin/busybox"
 chmod 755 "$root/bin/busybox"
 cp "$here/qemu-stock-host/init" "$root/init"
 chmod 755 "$root/init"
+# rustc is run from the repository, wherever this script is called from: with
+# rustup, the directory picks the toolchain, so the helpers are always built
+# by the repository's own (rust-toolchain.toml). That toolchain needs the
+# x86_64-unknown-linux-musl target (`rustup target add`, run in the
+# repository).
+repo_rustc() { (cd "$here/.." && rustc "$@"); }
 for helper in vhci-attach vsock-forward; do
-	rustc --edition 2021 -O --target x86_64-unknown-linux-musl -C panic=abort -C strip=symbols \
+	repo_rustc --edition 2021 -O --target x86_64-unknown-linux-musl -C panic=abort -C strip=symbols \
 		-o "$root/bin/$helper" "$here/qemu-stock-host/$helper.rs"
 done
 {
 	echo "kernel $kernel sha256 $(sha256sum < "$kernel" | cut -d' ' -f1)"
 	echo "busybox $busybox sha256 $(sha256sum < "$busybox" | cut -d' ' -f1)"
 	for helper in vhci-attach vsock-forward; do
-		echo "$helper from scripts/qemu-stock-host/$helper.rs sha256 $(sha256sum < "$here/qemu-stock-host/$helper.rs" | cut -d' ' -f1) ($(rustc --version))"
+		echo "$helper from scripts/qemu-stock-host/$helper.rs sha256 $(sha256sum < "$here/qemu-stock-host/$helper.rs" | cut -d' ' -f1) ($(repo_rustc --version))"
 	done
 	echo "init scripts/qemu-stock-host/init sha256 $(sha256sum < "$here/qemu-stock-host/init" | cut -d' ' -f1)"
 } > "$out/SOURCES"
