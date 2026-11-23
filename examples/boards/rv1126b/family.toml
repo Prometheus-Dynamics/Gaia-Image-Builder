@@ -34,22 +34,22 @@ fragments = ["assets/linux.fragment"]
 
 [bootloader]
 source = "u-boot"
-defconfig = "rv1126b-env-sdcard"
+patches = [{ file = "assets/patches/u-boot-next-dev-cmd-process.patch" }]
 fragments = ["assets/u-boot.fragment"]
 
 # Each blob is given to U-Boot's make by its name. BL31 is rkbin's closed
-# image for the SPL's FIT. ROCKCHIP_TPL is the LPDDR4X DDR init (a guess:
-# the "lp4x" 1332 MHz build; the board's DRAM part is not confirmed).
+# image for the SPL's FIT, the same for every RV1126B board; the DDR init
+# (ROCKCHIP_TPL) depends on the board's DRAM, so each board names its own.
 [bootloader.blobs]
-ROCKCHIP_TPL = { source = "rkbin", path = "bin/rv11/rv1126b_ddr_lp4x_1332MHz_tb_v1.10.bin" }
 BL31 = { source = "rkbin", path = "bin/rv11/rv1126b_bl31_v1.13.elf" }
 
 # The boot ROM reads the loader from sector 64, outside the partition table,
-# and U-Boot keeps its environment in the partition with U-Boot's
-# environment type GUID. The image's U-Boot is written with the loader, as
-# the RK35xx family's is. Whether Buildroot's U-Boot build makes this file
-# for RV1126B is not checked: its rockchip path expects binman, which this
-# U-Boot does not use for RV1126B.
+# and U-Boot keeps its environment at a fixed offset inside the partition
+# with U-Boot's environment type GUID (assets/u-boot.fragment). The image's U-Boot is written with the loader, as
+# the RK35xx family's is. This U-Boot does not make that file for RV1126B
+# (no binman; its mkimage has no rv1126b entry for the new IDB header), so
+# no loader is built yet: ../luckfox-aura/README.md says why and what a
+# from-source loader needs.
 [[partitions]]
 name = "u-boot"
 role = "bootloader"

@@ -1,7 +1,8 @@
 # Luckfox Aura bench image: mainline Linux 7.3.3 on the RV1126B family, a
 # serial console on UART0 and a root shell on it, on a microSD card. No
 # network: the Aura's Ethernet is not in the 7.3.3 driver set. Flashed by
-# hand. Untested on board.
+# hand. Untested on board. The build stops at the bootloader, by name: no
+# loader is built yet (../../boards/luckfox-aura/README.md).
 version = 1
 name = "luckfox-aura-bench"
 

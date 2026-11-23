@@ -1,13 +1,17 @@
-# The environment lives in the GPT partition with U-Boot's environment type
-# GUID (the 128K "uboot-env" partition, two copies at its end), on the
-# microSD card: mmc 1, which the vendor's SDMMC IOMUX config maps SDMMC0
-# to, with no eMMC on the board. Without that partition U-Boot keeps its
-# built-in environment and saves nowhere (the raw-offset fallback is off:
-# ENV_MMC_USE_DT, and the device tree names no offset).
+# The environment lives at the top of the 128K "uboot-env" GPT partition
+# (16 MiB from the card's start), on mmc 0. Rockchip's next-dev U-Boot is
+# older than mainline's environment options: it has no lookup of the
+# partition by its type GUID, keeps the device (CONFIG_SYS_MMC_ENV_DEV 0,
+# include/configs/evb_rv1126b.h) and the redundant copy in C headers, and
+# without an offset would put the environment at 0x3f8000, inside the
+# loader. So the offset is given: one copy, 64K, at 16 MiB + 64K. Whether
+# mmc 0 is the board's microSD is UNVERIFIED (no board run). Rockchip's
+# own environment fragment (ENVF) needs ENV_IS_NOWHERE, so it is off.
 CONFIG_ENV_SIZE=0x10000
-CONFIG_ENV_REDUNDANT=y
-CONFIG_PARTITION_TYPE_GUID=y
 # CONFIG_ENV_IS_NOWHERE is not set
 CONFIG_ENV_IS_IN_MMC=y
-CONFIG_ENV_MMC_DEVICE_INDEX=1
-CONFIG_ENV_MMC_USE_DT=y
+CONFIG_ENV_OFFSET=0x1010000
+# Rockchip's partition table in the environment (blkdevparts) goes with
+# ENVF; the card's GPT is the partition table here.
+# CONFIG_ENV_PARTITION is not set
+# CONFIG_SPL_ENV_PARTITION is not set

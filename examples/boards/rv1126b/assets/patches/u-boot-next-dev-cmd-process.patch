@@ -1,0 +1,15 @@
+include/command.h: declare cmd_process with the enum command_ret_t its
+definition in common/command.c returns. GCC 13 and later stop the build
+there (-Werror=enum-int-mismatch, with the tree's -Werror).
+
+--- a/include/command.h
++++ b/include/command.h
+@@ -140,7 +140,7 @@
+  *			number of ticks the command took to complete.
+  * @return 0 if the command succeeded, 1 if it failed
+  */
+-int cmd_process(int flag, int argc, char * const argv[],
++enum command_ret_t cmd_process(int flag, int argc, char * const argv[],
+ 			       int *repeatable, unsigned long *ticks);
+ 
+ void fixup_cmdtable(cmd_tbl_t *cmdtp, int size);

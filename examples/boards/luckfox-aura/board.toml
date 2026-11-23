@@ -15,3 +15,11 @@ device_tree = "rockchip/rv1126b-luckfox-aura"
 device_tree_dir = "assets/dts"
 storage_drivers = ["CONFIG_MMC=y", "CONFIG_MMC_BLOCK=y", "CONFIG_MMC_DW=y", "CONFIG_MMC_DW_ROCKCHIP=y"]
 cmdline = "earlycon console=ttyS0,1500000n8"
+
+[bootloader]
+defconfig = "rv1126b-env-sdcard"
+
+# ROCKCHIP_TPL is the LPDDR4X DDR init (a guess: the "lp4x" 1332 MHz build;
+# the board's DRAM part is not confirmed).
+[bootloader.blobs]
+ROCKCHIP_TPL = { source = "rkbin", path = "bin/rv11/rv1126b_ddr_lp4x_1332MHz_tb_v1.10.bin" }
