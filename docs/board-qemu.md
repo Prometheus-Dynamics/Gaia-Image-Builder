@@ -168,7 +168,9 @@ every fact as `same`, `differs`, `board only` or `guest only`.
   UDC links again at once and then each second until the relay takes it. A failed try is logged once per outage
   (`no link to the host over vsock port P (error): trying again each second`), and its return with how many tries it
   took, so a link that stays down is never silent. A gadget that does not come back within `--usb-host-wait` ends
-  the stock host: `the device did not come back`.
+  the stock host: `the device did not come back`. A gadget bound twice in a row goes again while the host is still
+  attaching or leasing, as a PC would see it. The stock host then attaches again, saying `attached, and no device
+  enumerated in 20 s: attaching again` (up to five times) or `the device went again before a lease: waiting for it`.
   The guest's gadget is the board kernel's own: configfs, and FunctionFS for the functions a daemon serves. Only the
   UDC under it differs, so what the gadget core or f_fs refuses, it refuses here as on the dwc2. Nothing in the
   profile re-enables a gadget or hides a failure. What a process that keeps FunctionFS endpoint files open does to a

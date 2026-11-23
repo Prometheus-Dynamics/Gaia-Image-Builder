@@ -49,8 +49,30 @@ done
 # said so), and what it gave the host: its descriptors as read (device, then
 # each configuration), in hex, and the interfaces and endpoints of the
 # configuration set, if one is. Fails when no device links in $wait s.
+#
+# A link that is attached and gives no device is attached again, up to five
+# times, said each time: the device let go again before the host had read it
+# (a gadget bound twice in a row), or vhci_hcd dropped a link it took while
+# it was still letting the last one go. A PC sees the device connect again
+# either way; waiting for an interface that link can never give would hide
+# whether the device came back.
 rh=0
 attach() {
+	tries=0
+	while :; do
+		attach_once
+		case $? in
+		0) return 0 ;;
+		2)
+			tries=$((tries + 1))
+			[ $tries -lt 5 ] || { echo "stock-host: no device enumerated after $tries attaches"; return 1; }
+			echo "stock-host: attached, and no device enumerated in 20 s: attaching again"
+			;;
+		*) return 1 ;;
+		esac
+	done
+}
+attach_once() {
 	while :; do
 		/bin/vhci-attach "$port" "$wait" "$rh"
 		case $? in
@@ -65,7 +87,7 @@ attach() {
 	done
 	dev=/sys/bus/usb/devices/1-$((rh + 1))
 	i=0
-	while [ $i -lt 60 ] && [ ! -s $dev/descriptors ]; do
+	while [ $i -lt 20 ] && [ ! -s $dev/descriptors ]; do
 		sleep 1
 		i=$((i + 1))
 	done
@@ -83,7 +105,7 @@ attach() {
 			echo "stock-host: interface $(basename "$f") class $(cat "$f/bInterfaceClass") driver $(basename "$(readlink "$f/driver" 2> /dev/null)" 2> /dev/null) endpoints$eps"
 		done
 	else
-		echo "stock-host: no device enumerated"
+		return 2
 	fi
 }
 
@@ -180,7 +202,17 @@ if [ -n "$forward" ]; then
 		if [ ! -e "$dev" ]; then
 			echo "stock-host: USB disconnect: the device on vhci_hcd port $rh is gone"
 			attach || { echo "stock-host: the device did not come back"; kill $fpid; done_; }
-			lease || { echo "stock-host: the device came back without a lease"; kill $fpid; done_; }
+			if ! lease; then
+				# Gone again while it was leasing (a gadget bound twice in a
+				# row): a PC waits for it to connect again, and so does this.
+				if [ ! -e "$dev" ]; then
+					echo "stock-host: the device went again before a lease: waiting for it"
+					continue
+				fi
+				echo "stock-host: the device came back without a lease"
+				kill $fpid
+				done_
+			fi
 			if [ "$serverid" != "$server" ]; then
 				# The lease names another server: the forward goes there now.
 				echo "stock-host: the lease's server is $serverid, not $server: the forward follows it"
