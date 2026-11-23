@@ -66,6 +66,10 @@ fn each_compression_is_read_back_as_made() {
         ("none", vec![], "none"),
         ("lz4", vec!["-zlz4"], "lz4"),
         ("lz4hc", vec!["-zlz4hc"], "lz4hc"),
+        // With a cluster size (big pclusters) lz4 writes compr_cfgs too: the
+        // dev build's lz4hc for a product that sets `cluster`.
+        ("lz4hc-cluster", vec!["-zlz4hc", "-C1048576"], "lz4hc"),
+        ("lz4-cluster", vec!["-zlz4", "-C65536"], "lz4"),
         ("lzma", vec!["-zlzma"], "lzma"),
         ("deflate", vec!["-zdeflate"], "deflate"),
         ("zstd", vec!["-zzstd"], "zstd"),

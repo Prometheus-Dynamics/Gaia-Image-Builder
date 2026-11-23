@@ -8,10 +8,14 @@
 //! checked against `dump.erofs -s` on images made with `mkfs.erofs`:
 //!
 //! - no compression: `u1` is 0, and neither `lz4_0padding` nor `compr_cfgs`;
-//! - lz4 and lz4hc: `lz4_0padding`, no `compr_cfgs`, `u1` the distance. The
-//!   superblock does not tell them apart;
+//! - lz4 and lz4hc: `lz4_0padding`, and with no cluster size (`-C`) no
+//!   `compr_cfgs`, `u1` the distance. With a cluster size, big pclusters:
+//!   `compr_cfgs` too, and `u1` is the bitmap 0x1 (mkfs.erofs 1.9.4,
+//!   `-zlz4hc -C1048576`: incompat 0x13, u1 0x1). The superblock does not
+//!   tell lz4 and lz4hc apart;
 //! - lzma, deflate, zstd: `compr_cfgs`, and `u1` is exactly one bit: 0x2,
-//!   0x4, 0x8 (the algorithm's index in the kernel's `Z_EROFS_COMPRESSION_*`).
+//!   0x4, 0x8 (the algorithm's index in the kernel's `Z_EROFS_COMPRESSION_*`,
+//!   lz4's being 0x1).
 //! - `fragments` is incompat 0x20 with a packed inode, whose nid is
 //!   `packed_nid`; `dedupe` shares the bit and makes no packed inode, so
 //!   `packed_nid` is what tells fragments apart.
@@ -107,11 +111,12 @@ pub fn compressor(sb: &Superblock) -> Result<Compressor, String> {
         };
     }
     match sb.u1 {
+        0x1 => Ok(Compressor::Lz4),
         0x2 => Ok(Compressor::Lzma),
         0x4 => Ok(Compressor::Deflate),
         0x8 => Ok(Compressor::Zstd),
         other => Err(format!(
-            "the algorithms are {other:#x}: not one of lzma, deflate, zstd"
+            "the algorithms are {other:#x}: not one of lz4, lzma, deflate, zstd"
         )),
     }
 }
@@ -196,6 +201,9 @@ mod tests {
     fn each_compressor_reads_as_its_bits() {
         assert_eq!(compressor(&sb(0, 0, 0)), Ok(Compressor::None));
         assert_eq!(compressor(&sb(0x1, 65535, 0)), Ok(Compressor::Lz4));
+        // lz4hc with a cluster size: big pclusters set compr_cfgs, and the
+        // bitmap is lz4's bit (mkfs.erofs 1.9.4 -zlz4hc -C1048576).
+        assert_eq!(compressor(&sb(0x13, 0x1, 0)), Ok(Compressor::Lz4));
         assert_eq!(compressor(&sb(0x3, 0x2, 0)), Ok(Compressor::Lzma));
         assert_eq!(compressor(&sb(0x3, 0x4, 0)), Ok(Compressor::Deflate));
         assert_eq!(compressor(&sb(0x3, 0x8, 0)), Ok(Compressor::Zstd));
@@ -249,6 +257,9 @@ mod tests {
         assert!(check(&lz4hc, "lz4hc", &[]).is_ok());
         assert!(check(&lz4hc, "lz4", &[]).is_ok());
         assert!(check(&lz4hc, "none", &[]).is_err());
+        let big = sb(0x3, 0x1, 0);
+        assert!(check(&big, "lz4hc", &[]).is_ok());
+        assert!(check(&big, "lzma", &[]).is_err());
     }
 
     /// Fragments are asked as the packed inode: the image has one exactly
