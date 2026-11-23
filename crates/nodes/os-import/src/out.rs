@@ -55,6 +55,7 @@ impl<'a> Sink<'a> {
                 mode,
                 uid,
                 gid,
+                xattrs: Default::default(),
             });
         }
     }

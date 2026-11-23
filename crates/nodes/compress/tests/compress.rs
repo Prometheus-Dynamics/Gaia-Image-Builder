@@ -185,12 +185,14 @@ fn a_tree_tars_to_one_digest_in_every_store() {
             mode: 0o4755,
             uid: 0,
             gid: 0,
+            xattrs: Default::default(),
         },
         FileEntry {
             path: "etc/app".into(),
             mode: 0o750,
             uid: 1000,
             gid: 1000,
+            xattrs: Default::default(),
         },
     ];
     let mut seen = Vec::new();
@@ -252,6 +254,7 @@ fn a_tree_tars_to_one_digest_in_every_store() {
             mode: 0o644,
             uid: 0,
             gid: 0,
+            xattrs: Default::default(),
         }],
     };
     let err = tar_tree(&dir.display().to_string(), tree, &Ctx::new()).expect_err("missing");

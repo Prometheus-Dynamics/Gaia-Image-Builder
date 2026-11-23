@@ -250,7 +250,8 @@ fn owners_and_modes_survive_into_the_tree_digest() {
             path: "usr/bin/tool".into(),
             mode: 0o755,
             uid: 1000,
-            gid: 1000
+            gid: 1000,
+            xattrs: Default::default()
         }
     );
     let digests = [&plain, &setuid, &owned].map(|t| owned_digest(t).expect("digest"));
@@ -818,6 +819,7 @@ fn a_file_is_added_to_a_tree_and_the_rest_is_kept() {
         mode: 0o600,
         uid: 7,
         gid: 7,
+        xattrs: Default::default(),
     }];
     let slot = image(&f, b"slot bytes");
     let out = gaia_tree::tree_file(&f.store, Some(&base), &slot, "slots/root.img", &Ctx::new())
@@ -845,13 +847,15 @@ fn a_file_is_added_to_a_tree_and_the_rest_is_kept() {
                 path: "etc/app.conf".into(),
                 mode: 0o600,
                 uid: 7,
-                gid: 7
+                gid: 7,
+                xattrs: Default::default()
             },
             FileEntry {
                 path: "slots/root.img".into(),
                 mode: 0o644,
                 uid: 0,
-                gid: 0
+                gid: 0,
+                xattrs: Default::default()
             },
         ]
     );
@@ -913,6 +917,7 @@ fn os_with_private_root(f: &Fixture) -> Layer {
         mode: 0o700,
         uid: 0,
         gid: 0,
+        xattrs: Default::default(),
     }];
     Layer {
         owner: "os".into(),
@@ -973,6 +978,7 @@ fn two_layers_that_each_choose_a_directorys_mode_still_conflict() {
         mode: 0o750,
         uid: 0,
         gid: 0,
+        xattrs: Default::default(),
     }];
     let other = Layer {
         owner: "tools".into(),

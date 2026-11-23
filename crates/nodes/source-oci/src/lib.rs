@@ -211,6 +211,7 @@ fn pull(
             mode: owner.mode,
             uid: owner.uid,
             gid: owner.gid,
+            xattrs: Default::default(),
         })
         .collect();
     let text = serde_json::to_vec_pretty(&owners).map_err(|e| StepError::body(NAME, e))?;

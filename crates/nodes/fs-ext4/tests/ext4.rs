@@ -51,6 +51,7 @@ fn entries(uid: u32) -> Vec<FileEntry> {
         mode,
         uid,
         gid,
+        xattrs: Default::default(),
     };
     vec![
         e("usr/bin/tool", 0o4755, 0, 0),
@@ -371,4 +372,59 @@ fn a_data_filesystem_setting_out_of_bounds_is_refused() {
     .expect_err("too few inodes")
     .to_string();
     assert!(why.contains("inodes; the tree needs"), "{why}");
+}
+
+/// An extended attribute the tree's entries give reaches the image's inode,
+/// with the value's bytes, read back with `debugfs`.
+#[test]
+fn an_extended_attribute_reaches_the_image() {
+    if !available() {
+        return;
+    }
+    const CAPABILITY: &[u8] = &[1, 0, 0, 2, 0, 0, 0, 0x20, 0, 0, 0, 0, 0, 0, 0, 0];
+    let dir = tempfile::tempdir().expect("tempdir");
+    let src = dir.path().join("src");
+    sample(&src);
+    let store_path = dir.path().join("store");
+    let store = Store::open(&store_path).expect("store");
+    let mut listed = entries(1000);
+    listed[0]
+        .xattrs
+        .insert("security.capability".into(), CAPABILITY.to_vec());
+    let tree = Tree {
+        object: store.put_tree(&src).expect("put").into(),
+        entries: listed,
+    };
+    let image = fs_ext4(
+        &store_path.display().to_string(),
+        &tool("mke2fs"),
+        &tool("debugfs"),
+        tree,
+        0,
+        1024 * 1024,
+        "rootfs",
+        false,
+        0,
+        "",
+        0,
+        &Ctx::new(),
+    )
+    .expect("builds");
+    let path = image.object.path_in(&store).expect("in store");
+    let out = dir.path().join("capability.bin");
+    let read = Command::new(tool("debugfs"))
+        .arg("-R")
+        .arg(format!(
+            "ea_get -f {} /usr/bin/tool security.capability",
+            out.display()
+        ))
+        .arg(&path)
+        .output()
+        .expect("debugfs");
+    assert!(
+        read.status.success(),
+        "{}",
+        String::from_utf8_lossy(&read.stderr)
+    );
+    assert_eq!(std::fs::read(&out).expect("value"), CAPABILITY);
 }

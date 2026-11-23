@@ -39,6 +39,9 @@ const S_IFLNK: u32 = 0o120000;
 #[node(id = "gaia.initramfs", inputs(store, tree), outputs(archive))]
 pub fn initramfs(store: &str, tree: Tree, cx: &Ctx) -> Result<Artifact, StepError> {
     let store = Store::open(store).map_err(StepError::store(NAME))?;
+    if let Some(why) = gaia_types::xattrs_not_kept(&tree, "a cpio (newc) archive") {
+        return Err(body(why));
+    }
     let owned = owned_digest(&tree).ok_or_else(|| body("a tree that is not in the store"))?;
     let root = tree
         .object

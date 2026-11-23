@@ -17,6 +17,8 @@ struct Claim {
     mode: u32,
     uid: u32,
     gid: u32,
+    /// The extended attributes the layer gives the path, if any.
+    xattrs: BTreeMap<String, Vec<u8>>,
     owners: Vec<String>,
     /// The layer's stored tree the path is copied from.
     from: PathBuf,
@@ -75,6 +77,7 @@ pub fn merge_layers(
                     mode: c.mode,
                     uid: c.uid,
                     gid: c.gid,
+                    xattrs: c.xattrs.clone(),
                     owners: c.owners.clone(),
                 })
                 .collect();
@@ -95,6 +98,7 @@ pub fn merge_layers(
             mode: o.mode,
             uid: o.uid,
             gid: o.gid,
+            xattrs: o.xattrs,
         })
         .collect();
     Ok((
@@ -164,9 +168,14 @@ fn claim(store: &Store, layers: &[Layer]) -> Result<BTreeMap<String, Claim>, Ste
             }
             let from = root.join(&path);
             let chosen = set.contains_key(path.as_str()) || mode != PLAIN_DIR;
-            let (mode, uid, gid) = match set.get(path.as_str()) {
-                Some(entry) => (entry.mode & 0o7777, entry.uid, entry.gid),
-                None => (mode, 0, 0),
+            let (mode, uid, gid, xattrs) = match set.get(path.as_str()) {
+                Some(entry) => (
+                    entry.mode & 0o7777,
+                    entry.uid,
+                    entry.gid,
+                    entry.xattrs.clone(),
+                ),
+                None => (mode, 0, 0, BTreeMap::new()),
             };
             let new = Claim {
                 chosen,
@@ -174,6 +183,7 @@ fn claim(store: &Store, layers: &[Layer]) -> Result<BTreeMap<String, Claim>, Ste
                 mode,
                 uid,
                 gid,
+                xattrs,
                 owners: vec![owner.clone()],
                 from,
                 replaced_by: None,
@@ -183,7 +193,8 @@ fn claim(store: &Store, layers: &[Layer]) -> Result<BTreeMap<String, Claim>, Ste
                 claims.insert(path, new);
                 continue;
             };
-            let same = (old.mode, old.uid, old.gid) == (new.mode, new.uid, new.gid);
+            let same = (old.mode, old.uid, old.gid, &old.xattrs)
+                == (new.mode, new.uid, new.gid, &new.xattrs);
             if old.node == Node::Dir && new.node == Node::Dir && same {
                 old.owners.push(owner.clone());
                 old.chosen |= new.chosen;
@@ -222,6 +233,10 @@ fn claim(store: &Store, layers: &[Layer]) -> Result<BTreeMap<String, Claim>, Ste
                     old.node.name(),
                     new.node.name()
                 )
+            } else if old.node == Node::Dir
+                && (old.mode, old.uid, old.gid) == (new.mode, new.uid, new.gid)
+            {
+                format!("different extended attributes in {theirs} and in {owner}")
             } else if old.node == Node::Dir {
                 format!(
                     "{:o} {}:{} in {theirs}, {:o} {}:{} in {owner}",

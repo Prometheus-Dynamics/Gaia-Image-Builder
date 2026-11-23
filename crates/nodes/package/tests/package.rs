@@ -66,6 +66,7 @@ fn entries() -> Vec<FileEntry> {
         mode,
         uid,
         gid,
+        xattrs: Default::default(),
     };
     vec![
         e("usr/bin/tool", 0o755, 0, 0),

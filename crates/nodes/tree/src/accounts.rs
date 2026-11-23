@@ -87,6 +87,7 @@ pub fn tree_accounts(
                     mode: *mode,
                     uid: 0,
                     gid: 0,
+                    xattrs: Default::default(),
                 })
                 .collect(),
         },

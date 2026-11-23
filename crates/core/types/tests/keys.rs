@@ -71,13 +71,13 @@ fn keys_and_structures_are_recorded() {
 const RECORDED: &str = "
     gaia:object 24b7c35dd7df2754
     gaia:artifact 19553e03b8145932
-    gaia:tree 6cf3d3a8bf4db83b
-    gaia:file-entry 85e916f315564f6c
+    gaia:tree 4e79a63821f9edb4
+    gaia:file-entry 6df860ee2140112f
     gaia:image f89d924627d97a9a
     gaia:partition 5221ef72e84bd693
     gaia:target 6193f2e1b43ec840
     gaia:size 67ebbd370daa02ba
-    gaia:layer 06bab8ddb968a9a7
+    gaia:layer 7f9aae34dd156fc9
     gaia:placement b31304eccf6cdec8
     gaia:placements effc4d640743443c
     gaia:account db1105887abe30dc

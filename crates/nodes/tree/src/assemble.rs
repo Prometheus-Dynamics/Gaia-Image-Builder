@@ -127,6 +127,7 @@ pub fn tree_assemble(
                 mode,
                 uid,
                 gid,
+                xattrs: Default::default(),
             }],
         },
         replaces: if os_has.is_some() { vec![to] } else { vec![] },

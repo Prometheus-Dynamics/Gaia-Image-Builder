@@ -15,6 +15,11 @@ const NAME: &str = "gaia.compress.tar";
 #[node(id = "gaia.compress.tar", inputs(store, tree), outputs(archive))]
 pub fn tar_tree(store: &str, tree: Tree, cx: &Ctx) -> Result<Artifact, StepError> {
     let store = Store::open(store).map_err(StepError::store(NAME))?;
+    if let Some(why) =
+        gaia_types::xattrs_not_kept(&tree, "this step's tar (it writes no PAX records)")
+    {
+        return Err(StepError::body(NAME, why));
+    }
     let object = tree
         .object
         .object_ref()

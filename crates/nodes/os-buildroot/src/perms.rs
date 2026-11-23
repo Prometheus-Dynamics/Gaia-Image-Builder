@@ -18,8 +18,10 @@
 //!
 //! Extended attributes (a file capability, `security.capability`, set by a
 //! permission table's `|xattr` line, or any other) are in the tar as PAX
-//! records. The tree and the filesystem nodes do not carry them yet, so
-//! [`unpack`] lists each one and the step fails by name rather than drop it.
+//! records. GNU tar's form (`SCHILY.xattr.<name>`, the one Buildroot's tar
+//! writes) is read: [`entries`] gives each path its attributes, and the
+//! filesystem steps write them. libarchive's form is not read, so [`unpack`]
+//! lists each such record and the step fails by name rather than drop it.
 
 use gaia_types::FileEntry;
 use std::io;
@@ -38,11 +40,16 @@ pub struct Unpacked {
     pub devices: Vec<String>,
     /// Each extended attribute a path carries, as `<path>: <name>`.
     pub xattrs: Vec<String>,
+    /// Each extended attribute in a form that is not read (libarchive's), as
+    /// `<path>: <name>`.
+    pub unread: Vec<String>,
 }
 
-/// The PAX record key prefixes tar writes an extended attribute under
-/// (GNU tar's, and libarchive's).
-const XATTR_KEYS: [&str; 2] = ["SCHILY.xattr.", "LIBARCHIVE.xattr."];
+/// The PAX record key prefix GNU tar writes an extended attribute under: the
+/// rest of the key is the attribute's name, and the value its bytes.
+const XATTR_KEY: &str = "SCHILY.xattr.";
+/// libarchive's prefix: its names and values are encoded, and not read here.
+const XATTR_KEY_UNREAD: &str = "LIBARCHIVE.xattr.";
 
 /// Why device nodes under `/dev` are left out of the root filesystem.
 pub const DEVICES_LEFT_OUT: &str = "devtmpfs is mounted over /dev at boot";
@@ -57,18 +64,19 @@ pub fn outside_dev(devices: &[String]) -> Vec<&str> {
         .collect()
 }
 
-/// Why the step stops, when the tar's paths carry extended attributes
-/// (`xattrs` as [`Unpacked`] lists them): the slot would not keep them.
-pub fn xattrs_refused(xattrs: &[String]) -> Option<String> {
-    let (n, one) = (xattrs.len(), xattrs.len() == 1);
+/// Why the step stops, when the tar's paths carry extended attributes in a
+/// form that is not read (`unread` as [`Unpacked`] lists them): the image
+/// would not have them.
+pub fn xattrs_refused(unread: &[String]) -> Option<String> {
+    let (n, one) = (unread.len(), unread.len() == 1);
     (n > 0).then(|| {
         format!(
-            "the root filesystem has {n} extended attribute{} (a file capability set by a \
-             permission table's |xattr line, or another), which the slot does not keep yet; \
-             the build stops rather than drop {}:\n  {}",
+            "the root filesystem's tar has {n} extended attribute{} written in libarchive's \
+             form (`{XATTR_KEY_UNREAD}`), which is not read (GNU tar's `{XATTR_KEY}` is); the \
+             build stops rather than drop {}:\n  {}",
             if one { "" } else { "s" },
             if one { "it" } else { "them" },
-            xattrs.join("\n  ")
+            unread.join("\n  ")
         )
     })
 }
@@ -98,8 +106,10 @@ pub fn unpack(tar: &Path, into: &Path) -> io::Result<Unpacked> {
                     .key()
                     .map_err(|e| invalid(e.to_string()))?
                     .to_string();
-                if let Some(attr) = XATTR_KEYS.iter().find_map(|k| key.strip_prefix(k)) {
+                if let Some(attr) = key.strip_prefix(XATTR_KEY) {
                     unpacked.xattrs.push(format!("/{}: {attr}", name.display()));
+                } else if let Some(attr) = key.strip_prefix(XATTR_KEY_UNREAD) {
+                    unpacked.unread.push(format!("/{}: {attr}", name.display()));
                 }
             }
         }
@@ -170,6 +180,7 @@ pub fn unpack(tar: &Path, into: &Path) -> io::Result<Unpacked> {
     }
     unpacked.devices.sort();
     unpacked.xattrs.sort();
+    unpacked.unread.sort();
     Ok(unpacked)
 }
 
@@ -189,12 +200,24 @@ fn relative(path: &Path) -> Option<std::path::PathBuf> {
 }
 
 /// An entry for each path of `tree` whose owner or mode in `tar` is not
-/// root and the mode the tree stores, sorted by path.
+/// root and the mode the tree stores, or that has an extended attribute
+/// there (each with its name and its value's bytes), sorted by path.
 pub fn entries(tar: &Path, tree: &Path) -> io::Result<Vec<FileEntry>> {
+    let invalid = |what: String| io::Error::new(io::ErrorKind::InvalidData, what);
     let mut archive = tar::Archive::new(io::BufReader::new(std::fs::File::open(tar)?));
     let mut found = Vec::new();
     for entry in archive.entries()? {
-        let entry = entry?;
+        let mut entry = entry?;
+        let mut xattrs = std::collections::BTreeMap::new();
+        if let Some(records) = entry.pax_extensions()? {
+            for record in records {
+                let record = record?;
+                let key = record.key().map_err(|e| invalid(e.to_string()))?;
+                if let Some(attr) = key.strip_prefix(XATTR_KEY) {
+                    xattrs.insert(attr.to_string(), record.value_bytes().to_vec());
+                }
+            }
+        }
         let header = entry.header();
         let kind = header.entry_type();
         if !(kind.is_file() || kind.is_dir() || kind.is_symlink() || kind.is_hard_link()) {
@@ -214,13 +237,15 @@ pub fn entries(tar: &Path, tree: &Path) -> io::Result<Vec<FileEntry>> {
         };
         let (uid, gid) = (header.uid()? as u32, header.gid()? as u32);
         if stored.file_type().is_symlink() {
-            // A link has no mode of its own; only its owner can differ.
-            if uid != 0 || gid != 0 {
+            // A link has no mode of its own; only its owner and its
+            // attributes can differ.
+            if uid != 0 || gid != 0 || !xattrs.is_empty() {
                 found.push(FileEntry {
                     path: name,
                     mode: 0o777,
                     uid,
                     gid,
+                    xattrs,
                 });
             }
             continue;
@@ -228,12 +253,13 @@ pub fn entries(tar: &Path, tree: &Path) -> io::Result<Vec<FileEntry>> {
         let mode = header.mode()? & 0o7777;
         let same = uid == 0 && gid == 0 && mode == stored.permissions().mode() & 0o7777;
         // A set-id or sticky bit is always listed: a store need not keep it.
-        if !same || mode & 0o7000 != 0 {
+        if !same || mode & 0o7000 != 0 || !xattrs.is_empty() {
             found.push(FileEntry {
                 path: name,
                 mode,
                 uid,
                 gid,
+                xattrs,
             });
         }
     }
@@ -400,10 +426,11 @@ mod tests {
 
     /// Device nodes under /dev are left out; any other is named.
     /// A file capability (and any other extended attribute) in the tar's
-    /// PAX records is listed by path and name, and stops the step by name:
-    /// the tree would drop it. A tar without any lists none.
+    /// PAX records, in GNU tar's form, is listed by path and name and is in
+    /// the path's entry with its value; one in libarchive's form is not read,
+    /// and stops the step by name. A tar without any lists none.
     #[test]
-    fn extended_attributes_are_named_not_dropped() {
+    fn extended_attributes_are_carried_or_named_not_dropped() {
         let dir = tempfile::tempdir().expect("tempdir");
         // Out of path order in the tar; listed in path order.
         let mut builder = tar::Builder::new(Vec::new());
@@ -421,25 +448,33 @@ mod tests {
         add_file(&mut builder, "./bin/ping", 0o755, "elf");
         let tar = dir.path().join("rootfs.tar");
         std::fs::write(&tar, builder.into_inner().expect("tar")).expect("write");
-        let unpacked = unpack(&tar, &dir.path().join("root")).expect("unpack");
+        let root = dir.path().join("root");
+        let unpacked = unpack(&tar, &root).expect("unpack");
         assert_eq!(
             unpacked.xattrs,
-            [
-                "/bin/ping: security.capability",
-                "/bin/ping: user.note",
-                "/etc/plain: trusted.overlay",
-            ]
+            ["/bin/ping: security.capability", "/bin/ping: user.note"]
         );
-        let refused = xattrs_refused(&unpacked.xattrs).expect("refused");
+        assert_eq!(unpacked.unread, ["/etc/plain: trusted.overlay"]);
+        // The path is listed for its attributes alone: root's, the stored mode.
+        let listed = entries(&tar, &root).expect("entries");
+        assert_eq!(listed.len(), 1, "{listed:?}");
+        assert_eq!(
+            (listed[0].path.as_str(), listed[0].mode, listed[0].uid),
+            ("bin/ping", 0o755, 0)
+        );
+        assert_eq!(
+            listed[0].xattrs,
+            std::collections::BTreeMap::from([
+                ("security.capability".to_string(), vec![1u8, 0, 0, 2]),
+                ("user.note".to_string(), b"x".to_vec()),
+            ])
+        );
+        let refused = xattrs_refused(&unpacked.unread).expect("refused");
         assert!(
-            refused.starts_with("the root filesystem has 3 extended attributes")
-                && refused.contains("drop them:\n  /bin/ping: security.capability\n"),
+            refused.starts_with(
+                "the root filesystem's tar has 1 extended attribute written in libarchive's form"
+            ) && refused.ends_with("drop it:\n  /etc/plain: trusted.overlay"),
             "{refused}"
-        );
-        let one = xattrs_refused(&unpacked.xattrs[..1]).expect("refused");
-        assert!(
-            one.contains("1 extended attribute (") && one.contains("drop it:"),
-            "{one}"
         );
         assert_eq!(xattrs_refused(&[]), None);
 
@@ -450,8 +485,11 @@ mod tests {
         add_file(&mut builder, "./bin/x", 0o755, "elf");
         let tar = dir.path().join("plain.tar");
         std::fs::write(&tar, builder.into_inner().expect("tar")).expect("write");
-        let unpacked = unpack(&tar, &dir.path().join("plain")).expect("unpack");
+        let plain = dir.path().join("plain");
+        let unpacked = unpack(&tar, &plain).expect("unpack");
         assert!(unpacked.xattrs.is_empty(), "{:?}", unpacked.xattrs);
+        assert!(unpacked.unread.is_empty(), "{:?}", unpacked.unread);
+        assert!(entries(&tar, &plain).expect("entries").is_empty());
     }
 
     #[test]

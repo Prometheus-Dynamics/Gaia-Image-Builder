@@ -4,6 +4,7 @@ use crate::kind::open_kind;
 use daedalus::prelude::Type;
 use gaia_store::{Digest, Kind, ObjectRef, Store};
 use serde::{Deserialize, Serialize};
+use std::collections::BTreeMap;
 use std::path::PathBuf;
 
 /// Whether a stored object is a file or a tree.
@@ -80,8 +81,9 @@ pub struct Artifact {
     pub object: StoreRef,
 }
 
-/// One path's mode and owner. The store keeps modes but never owners, so
-/// what an image needs (root-owned files, setuid bits) is said here.
+/// One path's mode, owner and extended attributes. The store keeps modes but
+/// never owners, so what an image needs (root-owned files, setuid bits,
+/// `security.capability`) is said here.
 #[derive(Clone, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, Type, Serialize, Deserialize)]
 #[type_key("gaia:file-entry")]
 pub struct FileEntry {
@@ -90,6 +92,11 @@ pub struct FileEntry {
     pub mode: u32,
     pub uid: u32,
     pub gid: u32,
+    /// Extended attributes: each name (`security.capability`) to its value.
+    /// Left out of the JSON when empty, so an entry without any is what it
+    /// was before this field.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub xattrs: BTreeMap<String, Vec<u8>>,
 }
 
 /// A stored tree, with the owners and modes its paths get in an image.

@@ -993,6 +993,7 @@ dependencies = [
  "daedalus-cpu-author",
  "daedalus-registry",
  "daedalus-types",
+ "gaia-fs-ext4",
  "gaia-step",
  "gaia-store",
  "gaia-types",

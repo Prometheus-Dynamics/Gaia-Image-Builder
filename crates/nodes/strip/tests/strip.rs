@@ -219,12 +219,14 @@ fn pruning_removes_the_unused_library_and_its_link_and_the_program_still_runs() 
             mode: 0o644,
             uid: 0,
             gid: 0,
+            xattrs: Default::default(),
         },
         FileEntry {
             path: "usr/bin/app".into(),
             mode: 0o755,
             uid: 0,
             gid: 0,
+            xattrs: Default::default(),
         },
     ];
     let pruned = prune_libs(&store, tree, &Ctx::new()).expect("prunes");

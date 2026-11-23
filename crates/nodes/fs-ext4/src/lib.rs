@@ -156,7 +156,9 @@ pub fn fs_ext4(
             )?;
 
             let script = work.dir().join("normalize.debugfs");
-            std::fs::write(&script, normalize_script(&paths, &tree.entries)?)
+            let values = work.dir().join("xattrs");
+            std::fs::create_dir(&values).map_err(|e| fail(e.to_string()))?;
+            std::fs::write(&script, normalize_script(&paths, &tree.entries, &values)?)
                 .map_err(|e| fail(e.to_string()))?;
             let errors = Arc::new(Mutex::new(Vec::new()));
             let sink = errors.clone();
@@ -182,7 +184,8 @@ pub fn fs_ext4(
             if !errors.is_empty() {
                 return Err(fail(format!("debugfs: {}", errors.join("; "))));
             }
-            std::fs::remove_file(&script).map_err(|e| fail(e.to_string()))
+            std::fs::remove_file(&script).map_err(|e| fail(e.to_string()))?;
+            std::fs::remove_dir_all(&values).map_err(|e| fail(e.to_string()))
         },
     )?;
     let object = made.outputs["image"];
@@ -375,10 +378,13 @@ fn uuid_of(digest: &Digest) -> String {
 }
 
 /// `set_inode_field` lines: every inode's owner and mode from the entries
-/// (root and the stored mode otherwise), every time 0.
+/// (root and the stored mode otherwise), every time 0; then an `ea_set` line
+/// for each extended attribute an entry gives, its value written to a file
+/// in `values` (debugfs reads it with `-f`).
 fn normalize_script(
     paths: &BTreeMap<String, Found>,
     entries: &[FileEntry],
+    values: &Path,
 ) -> Result<String, StepError> {
     let by_path: BTreeMap<&str, &FileEntry> =
         entries.iter().map(|e| (e.path.as_str(), e)).collect();
@@ -411,6 +417,30 @@ fn normalize_script(
         // A symlink's mode is fixed; its owner is still set.
         let mode = (found.kind != 0o120000).then_some(found.kind | perm);
         set(path, uid, gid, mode);
+    }
+    // The attributes, after the owners: the first loop's closure holds the
+    // script until its last line.
+    let mut count = 0_usize;
+    for path in paths.keys() {
+        let Some(entry) = by_path.get(path.as_str()) else {
+            continue;
+        };
+        for (name, value) in &entry.xattrs {
+            if name.is_empty() || name.contains(['"', '\\', '\n', '\r', '\0', ' ']) {
+                return Err(StepError::body(
+                    NAME,
+                    format!("{path}: the attribute {name:?} cannot be named to debugfs"),
+                ));
+            }
+            let file = values.join(count.to_string());
+            std::fs::write(&file, value)
+                .map_err(|e| StepError::body(NAME, format!("{path}: {e}")))?;
+            script.push_str(&format!(
+                "ea_set -f \"{}\" \"/{path}\" {name}\n",
+                file.display()
+            ));
+            count += 1;
+        }
     }
     Ok(script)
 }

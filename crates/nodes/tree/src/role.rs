@@ -129,6 +129,7 @@ pub fn tree_role(
         mode: MODE,
         uid: 0,
         gid: 0,
+        xattrs: Default::default(),
     });
     entries.sort();
     Ok(Tree {

@@ -92,6 +92,7 @@ pub fn tree_text(
         mode: MODE,
         uid: 0,
         gid: 0,
+        xattrs: Default::default(),
     });
     entries.sort();
     Ok(Tree {

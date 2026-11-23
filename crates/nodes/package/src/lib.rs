@@ -112,6 +112,9 @@ fn package(
     let store = Store::open(store).map_err(StepError::store(name))?;
     let err = |e: &dyn std::fmt::Display| StepError::body(name, e.to_string());
     control.check().map_err(|e| err(&e))?;
+    if let Some(why) = gaia_types::xattrs_not_kept(tree, "this package's data tar") {
+        return Err(err(&why));
+    }
     let owned = owned_digest(tree).ok_or_else(|| err(&"a tree that is not in the store"))?;
     let root = tree
         .object
@@ -195,6 +198,9 @@ pub fn oci(
     }
     if entrypoint.iter().any(|arg| arg.is_empty()) {
         return Err(err(&"an entrypoint argument is empty"));
+    }
+    if let Some(why) = gaia_types::xattrs_not_kept(&tree, "this image's layer tar") {
+        return Err(err(&why));
     }
     let owned = owned_digest(&tree).ok_or_else(|| err(&"a tree that is not in the store"))?;
     let root = tree

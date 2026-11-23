@@ -303,7 +303,8 @@ fn a_minimal_aarch64_buildroot_build_and_its_rebuilds() {
 /// and shadow, and the /dev node is listed in the step's `rootfs` detail
 /// (left out of the tree: devtmpfs covers /dev). A second build whose
 /// script also makes a node in /etc fails, naming it; a third whose script
-/// sets a file capability fails, naming the file and the attribute. The toolchain is
+/// sets a file capability has it in the file's entry, and an ext4 image of
+/// that root has it on the file. The toolchain is
 /// bootlin's aarch64 glibc stable, as a Buildroot product's download cache
 /// commonly holds it.
 #[test]
@@ -459,32 +460,79 @@ fn the_fakeroot_stages_work_reaches_the_root_filesystem() {
     );
 
     // A file capability set under fakeroot (as a permission table's
-    // `|xattr` line sets one) is in the tar; the tree would drop it, so the
-    // step stops and names the file and the attribute.
-    let error = build_os(
-        &store_path,
-        source_tree.clone(),
-        &OsConfig {
-            fragments: fragments(&script(
-                "cap.sh",
-                "python3 -c 'import os, sys; os.setxattr(sys.argv[1] + \"/etc/gaia-added\", \
-                 \"security.capability\", bytes.fromhex(\"01000002\" + \"00\" * 16))' \"$1\"\n",
-            )),
-            ..OsConfig::default()
-        },
-        &[],
-        &gaia_os_buildroot::no_seed(&store_path).expect("seed"),
+    // `|xattr` line sets one) is in the tar, and so in the file's entry,
+    // with its bytes.
+    let capability = [vec![1u8, 0, 0, 2], vec![0u8; 16]].concat();
+    let run = build(
+        &store_dir,
+        &source_tree,
+        fragments(&script(
+            "cap.sh",
+            "python3 -c 'import os, sys; os.setxattr(sys.argv[1] + \"/etc/gaia-added\", \
+             \"security.capability\", bytes.fromhex(\"01000002\" + \"00\" * 16))' \"$1\"\n",
+        )),
         &host,
+    );
+    let entry = run
+        .entries
+        .iter()
+        .find(|entry| entry.path == "etc/gaia-added")
+        .expect("the file with the capability has an entry");
+    println!("third build: {entry:?}");
+    assert_eq!(
+        entry.xattrs,
+        std::collections::BTreeMap::from([("security.capability".to_string(), capability.clone())])
+    );
+    // And from there in an image: an ext4 of the root, read with debugfs.
+    let tool = |name: &str| {
+        ["/usr/sbin", "/sbin", "/usr/bin"]
+            .iter()
+            .map(|dir| format!("{dir}/{name}"))
+            .find(|path| Path::new(path).exists())
+    };
+    let (Some(mke2fs), Some(debugfs)) = (tool("mke2fs"), tool("debugfs")) else {
+        println!("SKIPPED: e2fsprogs is not installed; the image is not read back");
+        return;
+    };
+    let store = Store::open(&store_dir).expect("store");
+    let image = gaia_fs_ext4::fs_ext4(
+        &store_path,
+        &mke2fs,
+        &debugfs,
+        Tree {
+            object: store
+                .put_tree(&run.rootfs)
+                .expect("the root, as stored")
+                .into(),
+            entries: run.entries.clone(),
+        },
+        0,
+        16 * 1024 * 1024,
+        "rootfs",
+        false,
+        0,
+        "",
+        0,
         &Ctx::new(),
     )
-    .expect_err("a file capability the slot would not keep");
-    let error = error.to_string();
-    println!("third build: {error}");
+    .expect("an ext4 of the root");
+    let read = dir.path().join("capability.bin");
+    let out = std::process::Command::new(&debugfs)
+        .arg("-R")
+        .arg(format!(
+            "ea_get -f {} /etc/gaia-added security.capability",
+            read.display()
+        ))
+        .arg(image.object.path_in(&store).expect("in store"))
+        .output()
+        .expect("debugfs");
     assert!(
-        error.contains("1 extended attribute (")
-            && error.contains("/etc/gaia-added: security.capability"),
-        "{error}"
+        out.status.success(),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
     );
+    assert_eq!(fs::read(&read).expect("the value in the image"), capability);
+    println!("third build: security.capability read back from the ext4 image");
 }
 
 /// A second store builds without fetching: the first store's build puts

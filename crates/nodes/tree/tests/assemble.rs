@@ -76,6 +76,7 @@ fn the_parts_are_put_together_in_the_stated_order_over_the_os_file() {
         mode: 0o640,
         uid: 0,
         gid: 5,
+        xattrs: Default::default(),
     }];
     let lemnos = part(root, &store, "lemnos", "/etc/mdev.conf", LEMNOS);
     let board = part(root, &store, "board", "/etc/mdev.conf", BOARD);
@@ -116,6 +117,7 @@ fn the_parts_are_put_together_in_the_stated_order_over_the_os_file() {
             mode: 0o640,
             uid: 0,
             gid: 5,
+            xattrs: Default::default(),
         }]
     );
 

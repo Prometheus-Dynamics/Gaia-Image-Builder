@@ -8,11 +8,16 @@
 //! `./`: root's, mode 0755, unless the tree lists its root (path `` or `.`).
 //! Without it mkfs.erofs gives the root inode the builder's uid and gid and
 //! mode 0777 (erofs-utils 1.9.4), and the image's `/` is world-writable. The UUID comes from the tree's [`owned_digest`], the
-//! build time is 0 and extended attributes are off, so the same tree gives
+//! build time is 0, so the same tree gives
 //! the same bytes on every host. The block size is 4096 bytes, named
 //! (`-b4096`), not the build machine's page size, which is mkfs.erofs's
 //! default: a host with 16 KiB pages would make an image a 4 KiB-page
 //! kernel cannot mount. The superblock read back must say 4096.
+//!
+//! Extended attributes are the entries' `xattrs`, written as the tar's PAX
+//! `SCHILY.xattr.` records. When no entry has one, extended attributes stay
+//! off (`-x-1`), and the command line, the key and the image are what they
+//! were; when one does, they are on, and the step's key says so.
 //!
 //! Compression is declared: `none`, or one `mkfs.erofs` was built with
 //! (`lz4`, `lz4hc`, `lzma`, `deflate`, `zstd`), with an optional level.
@@ -321,6 +326,9 @@ pub fn fs_erofs(
     }
     let owned =
         owned_digest(&tree).ok_or_else(|| fail("a tree that is not in the store".into()))?;
+    // Extended attributes are written only when some entry has one: with none,
+    // the command line and so the image are what they were.
+    let xattrs = tree.entries.iter().any(|entry| !entry.xattrs.is_empty());
     let dir = tree
         .object
         .path_in(&store)
@@ -342,6 +350,7 @@ pub fn fs_erofs(
             dictsize,
             extended: &extended,
             keep: &keep,
+            xattrs,
         },
         &owned,
     );
@@ -379,6 +388,7 @@ pub fn fs_erofs(
                     dictsize,
                     extended: &extended,
                     keep: &keep,
+                    xattrs,
                 },
                 workers.clone(),
             );
@@ -462,6 +472,8 @@ pub struct ImageOptions<'a> {
     /// `fragments`, `ztailpacking` and `dedupe` as mkfs.erofs names them.
     pub extended: &'a [&'a str],
     pub keep: &'a [String],
+    /// Whether an entry of the tree has an extended attribute.
+    pub xattrs: bool,
 }
 
 /// The step's key: the tool's `--version` output, the image's options and
@@ -496,6 +508,9 @@ pub fn image_key(version: &[u8], options: &ImageOptions<'_>, owned: &Digest) -> 
     if !options.keep.is_empty() {
         key = key.config("keep_setid", options.keep.join("\n"));
     }
+    if options.xattrs {
+        key = key.config("xattrs", "on");
+    }
     key.finish()
 }
 
@@ -508,15 +523,16 @@ pub fn mkfs_options(
     options: &ImageOptions<'_>,
     workers: Option<String>,
 ) -> Vec<String> {
-    let mut args: Vec<String> = vec![
-        "--quiet".into(),
-        "--tar=f".into(),
-        "-T0".into(),
-        "-x-1".into(),
+    let mut args: Vec<String> = vec!["--quiet".into(), "--tar=f".into(), "-T0".into()];
+    // Extended attributes are off unless an entry has one.
+    if !options.xattrs {
+        args.push("-x-1".into());
+    }
+    args.extend([
         format!("-b{}", superblock::BLOCK_SIZE),
         "-U".into(),
         uuid.into(),
-    ];
+    ]);
     if options.compression != "none" {
         let mut z = format!("-z{}", options.compression);
         if options.level > 0 {
@@ -639,6 +655,8 @@ fn write_tar(
         }
     }
     let mut report = String::new();
+    // A path the entries do not list has no extended attributes.
+    let none = BTreeMap::new();
     let mut builder = tar::Builder::new(std::io::BufWriter::new(std::fs::File::create(out)?));
     builder.mode(tar::HeaderMode::Deterministic);
     // The root directory first: mkfs.erofs takes the root inode's owner and
@@ -657,9 +675,9 @@ fn write_tar(
     builder.append_data(&mut header, "./", std::io::empty())?;
     for (path, full) in paths {
         let meta = std::fs::symlink_metadata(&full)?;
-        let (uid, gid, mut mode) = match by_path.get(path.as_str()) {
-            Some(e) => (e.uid, e.gid, e.mode & 0o7777),
-            None => (0, 0, meta.mode() & 0o7777),
+        let (uid, gid, mut mode, xattrs) = match by_path.get(path.as_str()) {
+            Some(e) => (e.uid, e.gid, e.mode & 0o7777, &e.xattrs),
+            None => (0, 0, meta.mode() & 0o7777, &none),
         };
         if mode & SETID != 0 && !meta.file_type().is_symlink() {
             if keep.iter().any(|k| k.trim_start_matches('/') == path) {
@@ -678,6 +696,20 @@ fn write_tar(
         header.set_mtime(0);
         header.set_mode(mode);
         let kind = meta.file_type();
+        // The attributes, as the PAX records GNU tar writes for them, before
+        // the entry they belong to.
+        let keys: Vec<String> = xattrs
+            .keys()
+            .map(|name| format!("SCHILY.xattr.{name}"))
+            .collect();
+        let records: Vec<(&str, &[u8])> = keys
+            .iter()
+            .zip(xattrs.values())
+            .map(|(key, value)| (key.as_str(), value.as_slice()))
+            .collect();
+        if !records.is_empty() {
+            builder.append_pax_extensions(records)?;
+        }
         if kind.is_symlink() {
             header.set_entry_type(tar::EntryType::Symlink);
             header.set_mode(0o777);
@@ -762,6 +794,7 @@ mod tests {
             mode,
             uid: 0,
             gid: 0,
+            xattrs: Default::default(),
         };
         let entries = [
             entry("bin/busybox", 0o4755),
@@ -836,6 +869,7 @@ mod tests {
             mode: 0o40750,
             uid: 5,
             gid: 6,
+            xattrs: Default::default(),
         };
         assert_eq!(
             first(&[listed]),
@@ -851,6 +885,7 @@ mod tests {
             dictsize: 0,
             extended,
             keep: &[],
+            xattrs: false,
         }
     }
 

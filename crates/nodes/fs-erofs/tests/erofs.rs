@@ -65,6 +65,7 @@ fn entries(uid: u32) -> Vec<FileEntry> {
         mode,
         uid,
         gid,
+        xattrs: Default::default(),
     };
     vec![
         e("usr/bin/tool", 0o4755, 0, 0),
@@ -672,4 +673,78 @@ fn setuid_and_setgid_bits_are_cleared_but_on_the_paths_kept() {
         let error = image_keeping(dir.path(), 1000, "none", &[keep]).expect_err("refused");
         assert!(error.contains(why), "{keep}: {error}");
     }
+}
+
+/// An extended attribute the entries give reaches the image as a PAX record
+/// and is read back with `fsck.erofs --xattrs`. `user.note` is the name: an
+/// unprivileged builder can set it on the extracted tree, where a
+/// `security.` name would need a capability (the image path is the same).
+#[test]
+fn an_extended_attribute_reaches_the_image() {
+    if !available() {
+        return;
+    }
+    const NOTE: &[u8] = b"a fixed value\x00\x01";
+    let dir = tempfile::tempdir().expect("tempdir");
+    let src = dir.path().join("src");
+    sample(&src);
+    let store_path = dir.path().join("store");
+    let store = Store::open(&store_path).expect("store");
+    let mut listed = entries(1000);
+    listed[0].xattrs.insert("user.note".into(), NOTE.to_vec());
+    let build = |listed: Vec<FileEntry>| {
+        let tree = Tree {
+            object: store.put_tree(&src).expect("put").into(),
+            entries: listed,
+        };
+        fs_erofs(
+            &store_path.display().to_string(),
+            Some(&tool("mkfs.erofs")),
+            None,
+            tree,
+            "none",
+            0,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            &Ctx::new(),
+        )
+        .expect("builds")
+    };
+    let image = build(listed.clone());
+    let path = image.object.path_in(&store).expect("in store");
+    let x = dir.path().join("x");
+    let fsck = Command::new(tool("fsck.erofs"))
+        .arg(format!("--extract={}", x.display()))
+        .arg("--preserve-perms")
+        .arg("--xattrs")
+        .arg(&path)
+        .output()
+        .expect("fsck.erofs");
+    assert!(
+        fsck.status.success(),
+        "{}",
+        String::from_utf8_lossy(&fsck.stderr)
+    );
+    let got = Command::new("getfattr")
+        .args(["--only-values", "--absolute-names", "-n", "user.note"])
+        .arg(x.join("usr/bin/tool"))
+        .output()
+        .expect("getfattr");
+    assert!(
+        got.status.success(),
+        "{}",
+        String::from_utf8_lossy(&got.stderr)
+    );
+    assert_eq!(got.stdout, NOTE, "the attribute the tree gives");
+    // The same tree, made again, has the same bytes.
+    let again = build(listed);
+    assert_eq!(
+        file_digest(&path).expect("digest"),
+        file_digest(&again.object.path_in(&store).expect("in store")).expect("digest")
+    );
 }

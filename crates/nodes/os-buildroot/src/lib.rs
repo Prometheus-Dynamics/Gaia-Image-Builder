@@ -973,10 +973,11 @@ fn build_steps(
                 "from": perms::TAR,
                 "devices": unpacked.devices,
                 "devices_left_out": perms::DEVICES_LEFT_OUT,
+                "xattrs": unpacked.xattrs,
                 "seconds": started.elapsed().as_secs_f64(),
             }),
         );
-        if let Some(refused) = perms::xattrs_refused(&unpacked.xattrs) {
+        if let Some(refused) = perms::xattrs_refused(&unpacked.unread) {
             return Err(fail(refused));
         }
         let outside = perms::outside_dev(&unpacked.devices);

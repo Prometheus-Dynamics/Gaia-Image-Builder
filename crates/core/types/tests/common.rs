@@ -20,6 +20,7 @@ pub fn entry() -> FileEntry {
         mode: 0o4755,
         uid: 0,
         gid: 0,
+        xattrs: Default::default(),
     }
 }
 

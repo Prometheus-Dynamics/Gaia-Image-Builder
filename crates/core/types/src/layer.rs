@@ -5,6 +5,7 @@ use crate::Tree;
 use daedalus::prelude::*;
 use gaia_store::Digest;
 use serde::{Deserialize, Serialize};
+use std::collections::BTreeMap;
 
 /// One owner's part of an image: a tree and who it belongs to.
 #[derive(Clone, Debug, PartialEq, Eq, Type, Serialize, Deserialize)]
@@ -73,6 +74,9 @@ pub struct Owned {
     pub mode: u32,
     pub uid: u32,
     pub gid: u32,
+    /// The extended attributes (see `FileEntry::xattrs`), left out when none.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub xattrs: BTreeMap<String, Vec<u8>>,
     /// The layers that claim it: one, or several for a shared directory.
     pub owners: Vec<String>,
 }
@@ -92,6 +96,44 @@ pub fn owned_digest(tree: &Tree) -> Option<Digest> {
             )
             .as_bytes(),
         );
+        // Each attribute, by name and value, when there are any: a tree
+        // without them has the digest it had.
+        for (name, value) in &entry.xattrs {
+            bytes.extend_from_slice(format!("\n xattr {name} {}", hex(value)).as_bytes());
+        }
     }
     Some(Digest::of_bytes(&bytes))
+}
+
+/// Why a tree cannot be written into `format`, which holds no extended
+/// attributes: each path of `tree` that has one, by path and name. None when
+/// no entry has one. A step that writes such a format fails with this
+/// before it makes anything, so an attribute (a file capability, say) is
+/// never left out without a word.
+pub fn xattrs_not_kept(tree: &Tree, format: &str) -> Option<String> {
+    let named: Vec<String> = tree
+        .entries
+        .iter()
+        .flat_map(|entry| {
+            entry
+                .xattrs
+                .keys()
+                .map(move |name| format!("/{}: {name}", entry.path.trim_matches('/')))
+        })
+        .collect();
+    let one = named.len() == 1;
+    (!named.is_empty()).then(|| {
+        format!(
+            "the tree has {} extended attribute{}, and {format} holds none; the step stops rather than drop {}:\n  {}",
+            named.len(),
+            if one { "" } else { "s" },
+            if one { "it" } else { "them" },
+            named.join("\n  ")
+        )
+    })
+}
+
+/// Lower-case hexadecimal of `bytes`.
+fn hex(bytes: &[u8]) -> String {
+    bytes.iter().map(|byte| format!("{byte:02x}")).collect()
 }

@@ -275,13 +275,15 @@ fn a_gpt_image_imports_to_a_stable_tree_with_owners() {
         path: "home/user".into(),
         mode: 0o755,
         uid: 1000,
-        gid: 1000
+        gid: 1000,
+        xattrs: Default::default()
     }));
     assert!(entries.contains(&FileEntry {
         path: "home/user/notes".into(),
         mode: 0o644,
         uid: 1000,
-        gid: 100
+        gid: 100,
+        xattrs: Default::default()
     }));
     assert_eq!(entries.len(), 2, "only non-root paths are listed");
 
@@ -383,13 +385,15 @@ fn a_rootfs_archive_imports_with_owners_and_refuses_escapes() {
                 path: "srv".into(),
                 mode: 0o750,
                 uid: 33,
-                gid: 33
+                gid: 33,
+                xattrs: Default::default()
             },
             FileEntry {
                 path: "srv/index".into(),
                 mode: 0o640,
                 uid: 33,
-                gid: 33
+                gid: 33,
+                xattrs: Default::default()
             },
         ]
     );

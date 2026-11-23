@@ -116,6 +116,7 @@ fn root(cc: &str, dir: &Path, app_needs: &[&str]) -> (String, Tree) {
         mode: 0o644,
         uid: 0,
         gid: 0,
+        xattrs: Default::default(),
     };
     let tree = Tree {
         object: store.put_tree(&dir.join("tree")).expect("put").into(),

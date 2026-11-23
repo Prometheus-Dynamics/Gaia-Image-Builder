@@ -127,7 +127,15 @@ pub(crate) fn entries_text(tree: &Tree) -> String {
     entries.sort();
     entries
         .iter()
-        .map(|e| format!("{} {:o} {} {}", e.path, e.mode, e.uid, e.gid))
+        .flat_map(|e| {
+            let mut lines = vec![format!("{} {:o} {} {}", e.path, e.mode, e.uid, e.gid)];
+            // An attribute's value, in hex, for each one the path has.
+            for (name, value) in &e.xattrs {
+                let hex: String = value.iter().map(|byte| format!("{byte:02x}")).collect();
+                lines.push(format!("{} xattr {name} {hex}", e.path));
+            }
+            lines
+        })
         .collect::<Vec<_>>()
         .join("\n")
 }

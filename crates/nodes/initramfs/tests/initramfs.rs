@@ -98,6 +98,7 @@ fn entry(path: &str, mode: u32, uid: u32, gid: u32) -> FileEntry {
         mode,
         uid,
         gid,
+        xattrs: Default::default(),
     }
 }
 
@@ -240,4 +241,54 @@ fn a_compressed_copy_is_the_same_archive() {
         .read_to_end(&mut unpacked)
         .expect("gunzip");
     assert_eq!(unpacked, archive_of(&archive, &store));
+}
+
+/// A newc archive holds no extended attributes, so a tree that has one is
+/// refused by path and name: a file capability is not left out without a
+/// word. The same tree without it makes its archive.
+#[test]
+fn a_tree_with_an_extended_attribute_is_refused_by_name() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let src = dir.path().join("src");
+    std::fs::create_dir_all(src.join("bin")).expect("mkdir");
+    std::fs::write(src.join("bin/ping"), b"elf").expect("write");
+    let store_path = dir.path().join("store");
+    let store = Store::open(&store_path).expect("store");
+    let object: gaia_types::StoreRef = store.put_tree(&src).expect("put").into();
+    let entry = |xattrs: &[(&str, &[u8])]| FileEntry {
+        path: "bin/ping".into(),
+        mode: 0o755,
+        uid: 0,
+        gid: 0,
+        xattrs: xattrs
+            .iter()
+            .map(|(name, value)| ((*name).to_string(), value.to_vec()))
+            .collect(),
+    };
+    let store_arg = store_path.display().to_string();
+    let error = initramfs(
+        &store_arg,
+        Tree {
+            object: object.clone(),
+            entries: vec![entry(&[("security.capability", &[1, 0, 0, 2])])],
+        },
+        &Ctx::new(),
+    )
+    .expect_err("an attribute a cpio cannot hold")
+    .to_string();
+    assert!(
+        error.contains(
+            "the tree has 1 extended attribute, and a cpio (newc) archive holds none; the step stops rather than drop it:\n  /bin/ping: security.capability"
+        ),
+        "{error}"
+    );
+    initramfs(
+        &store_arg,
+        Tree {
+            object,
+            entries: vec![entry(&[])],
+        },
+        &Ctx::new(),
+    )
+    .expect("no attribute: an archive");
 }

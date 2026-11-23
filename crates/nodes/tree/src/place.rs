@@ -78,16 +78,24 @@ pub fn tree_place(
     let object = made.outputs["tree"];
     let placed = store.path(&object);
     let mut entries = Vec::new();
-    for (_, to_path, p) in &checked {
+    for (from_path, to_path, p) in &checked {
         let mode = match p.mode {
             Some(mode) => mode & 0o7777,
             None => stored_mode(&placed.join(to_path)).map_err(|e| StepError::body(NAME, e))?,
         };
+        // The file's attributes are its own: they move with it.
+        let xattrs = from
+            .entries
+            .iter()
+            .find(|entry| entry.path == *from_path)
+            .map(|entry| entry.xattrs.clone())
+            .unwrap_or_default();
         entries.push(FileEntry {
             path: to_path.clone(),
             mode,
             uid: p.uid,
             gid: p.gid,
+            xattrs,
         });
     }
     entries.sort();

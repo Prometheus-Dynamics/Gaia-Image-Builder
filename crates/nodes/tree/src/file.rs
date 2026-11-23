@@ -96,6 +96,7 @@ pub fn tree_file(
         mode: MODE,
         uid: 0,
         gid: 0,
+        xattrs: Default::default(),
     });
     entries.sort();
     Ok(Tree {
