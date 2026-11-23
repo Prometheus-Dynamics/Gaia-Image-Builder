@@ -494,6 +494,7 @@ pub(crate) fn plan(
     }
     // Before the descriptions, so a description can turn a default off.
     fragments.push(parallel_defaults());
+    fragments.push(strip_defaults());
     for (j, file) in os.fragments.iter().enumerate() {
         let key = format!("images[{index}].os.fragments[{j}]");
         let body = fs::read_to_string(file.path()).map_err(|e| {
@@ -534,6 +535,22 @@ fn parallel_defaults() -> ConfigFragment {
     ConfigFragment {
         name: "gaia.parallel".into(),
         text: "BR2_PER_PACKAGE_DIRECTORIES=y\n".into(),
+    }
+}
+
+/// The default that makes Buildroot strip the root's programs and libraries
+/// (its own `BR2_STRIP_strip`, which is on in Buildroot's defaults and off
+/// in the `allnoconfig` a build here starts from). An image that keeps its
+/// symbols, for debugging on the device, says `# BR2_STRIP_strip is not set`
+/// in its fragment, which comes later and wins. Its own fragment, like
+/// `gaia.parallel`. The line is the root's alone (see [`parts_of`]): the
+/// kernel's and the bootloader's builds are not given it, so their keys do
+/// not hold it and the kernel's modules stay as its build made them, a
+/// signature on them included.
+fn strip_defaults() -> ConfigFragment {
+    ConfigFragment {
+        name: "gaia.strip".into(),
+        text: "BR2_STRIP_strip=y\n".into(),
     }
 }
 
@@ -969,6 +986,18 @@ mod tests {
             symbol_of(fragment.text.trim_end()),
             Some("BR2_PER_PACKAGE_DIRECTORIES")
         );
+    }
+
+    /// The root is stripped by default, and the default is one fragment
+    /// that a description can turn off after it.
+    #[test]
+    fn the_root_is_stripped_by_default() {
+        let fragment = strip_defaults();
+        assert_eq!(fragment.name, "gaia.strip");
+        assert_eq!(fragment.text, "BR2_STRIP_strip=y\n");
+        assert_eq!(symbol_of(fragment.text.trim_end()), Some("BR2_STRIP_strip"));
+        // The root's build alone: no kernel or bootloader key holds it.
+        assert!(parts_of("BR2_STRIP_strip", true, true) == vec![Part::Rootfs]);
     }
 
     /// The compiler cache is off unless a description turns it on: no

@@ -478,6 +478,31 @@ mod tests {
         assert!(!off.contains("BR2_CCACHE=y"));
     }
 
+    /// The root is stripped from the `gaia.strip` default over the base's
+    /// "not set", and an image's `# BR2_STRIP_strip is not set` after it
+    /// keeps the symbols; either way the line that counts is checked as
+    /// taken, and a default Buildroot dropped is named.
+    #[test]
+    fn a_description_keeps_the_symbols_after_the_strip_default() {
+        let base = "# BR2_STRIP_strip is not set\n";
+        let default = fragment("gaia.strip", "BR2_STRIP_strip=y\n");
+        let on = merge(base, std::slice::from_ref(&default)).expect("merge");
+        assert_eq!(on, "BR2_STRIP_strip=y\n");
+        assert!(not_taken(&on, std::slice::from_ref(&default)).is_empty());
+        let image = [
+            default.clone(),
+            fragment("image.0.os.fragment", "# BR2_STRIP_strip is not set\n"),
+        ];
+        let off = merge(base, &image).expect("merge");
+        assert_eq!(off, "# BR2_STRIP_strip is not set\n");
+        assert!(not_taken(&off, &image).is_empty());
+        // Resolved without it (a target with no ELF binaries): said by name.
+        assert_eq!(
+            not_taken(base, std::slice::from_ref(&default)),
+            ["gaia.strip: `BR2_STRIP_strip=y` became `# BR2_STRIP_strip is not set`"]
+        );
+    }
+
     #[test]
     fn blank_and_comment_lines_are_dropped() {
         let merged =
