@@ -238,11 +238,11 @@ fn ed25519_sign(key: &ed25519_dalek::SigningKey, message: &[u8]) -> [u8; 64] {
 /// preset, CRC64, LZMA2 only, blocks of [`BLOCK`] bytes of input, `threads`
 /// workers. The block size is fixed, so the bytes are the same at any thread
 /// count.
-fn mt_encoder(threads: u32) -> Result<xz2::stream::Stream, String> {
+fn mt_encoder(threads: u32, block: u64) -> Result<xz2::stream::Stream, String> {
     xz2::stream::MtStreamBuilder::new()
         .preset(PRESET)
         .check(xz2::stream::Check::Crc64)
-        .block_size(BLOCK)
+        .block_size(block)
         .threads(threads.max(1))
         .encoder()
         .map_err(|e| format!("the xz encoder: {e}"))
@@ -254,19 +254,25 @@ fn mt_encoder(threads: u32) -> Result<xz2::stream::Stream, String> {
 /// threads, and the all-zero block once, its bytes written for every block
 /// of zeros. A disk image is mostly holes, so most of it is never encoded.
 fn encode(input: &Path, out: &Path, threads: u32) -> Result<blocks::Made, String> {
-    blocks::write_stream(input, out, BLOCK, threads, &|| mt_encoder(1))
+    encode_in(input, out, threads, BLOCK)
+}
+
+/// [`encode`] with blocks of `block` bytes: the tests' small blocks make
+/// the same kind of stream from megabytes instead of hundreds.
+fn encode_in(input: &Path, out: &Path, threads: u32, block: u64) -> Result<blocks::Made, String> {
+    blocks::write_stream(input, out, block, threads, &|| mt_encoder(1, block))
 }
 
 /// `input` through the multithreaded encoder from start to end: the bytes
 /// [`encode`] must write, for the tests to compare.
 #[cfg(test)]
-fn encode_whole(input: &Path, out: &Path, threads: u32) -> Result<(), String> {
+fn encode_whole(input: &Path, out: &Path, threads: u32, block: u64) -> Result<(), String> {
     let reader = File::open(input).map_err(|e| format!("encode: {e}"))?;
     let writer = File::create(out).map_err(|e| format!("encode: {e}"))?;
     let mut reader = std::io::BufReader::with_capacity(1 << 20, reader);
     let mut encoder = xz2::write::XzEncoder::new_stream(
         BufWriter::with_capacity(1 << 20, writer),
-        mt_encoder(threads)?,
+        mt_encoder(threads, block)?,
     );
     std::io::copy(&mut reader, &mut encoder).map_err(|e| format!("encode: {e}"))?;
     let mut writer = encoder.finish().map_err(|e| format!("encode: {e}"))?;
@@ -388,17 +394,28 @@ pub const NODES: [&NodeRecord; 1] = [&FLASH_IMAGE_NODE];
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The tests' block: 4 MiB, so a stream of several blocks, holes and
+    /// zero blocks is megabytes, not hundreds. The block size is the
+    /// encoder's parameter, the same code at either size; the agreed sample
+    /// keeps the shipped [`BLOCK`].
+    const TEST_BLOCK: u64 = 4 * 1024 * 1024;
     use sha2::{Digest, Sha256};
 
     /// The sample the format was agreed on: 48 MiB of zeros, 64 MiB of one
     /// repeated line, 48 MiB of a SHA-256 chain's digests, each 512 times.
     fn sample() -> Vec<u8> {
-        const MIB: usize = 1024 * 1024;
-        let mut out = vec![0_u8; 48 * MIB];
+        sample_of(1024 * 1024)
+    }
+
+    /// [`sample`] in `unit`s instead of MiB: `sample_of(TEST_BLOCK / 64)`
+    /// is its shape at the tests' block size.
+    fn sample_of(unit: usize) -> Vec<u8> {
+        let mut out = vec![0_u8; 48 * unit];
         let line = b"the quick brown fox jumps over the lazy dog 0123456789\n";
-        out.extend(line.iter().cycle().take(64 * MIB));
+        out.extend(line.iter().cycle().take(64 * unit));
         let mut digest = b"seed".to_vec();
-        let end = out.len() + 48 * MIB;
+        let end = out.len() + 48 * unit;
         while out.len() < end {
             digest = Sha256::digest(&digest).to_vec();
             for _ in 0..512 {
@@ -429,7 +446,9 @@ mod tests {
         );
         std::fs::write(&image, &raw).expect("write");
         let mut made = Vec::new();
-        for threads in [1, 4, 13] {
+        // One thread against many at this block size is in
+        // `the_stream_from_its_blocks_is_the_whole_encoders`, at the tests'.
+        for threads in [4, 13] {
             let out = dir.path().join(format!("t{threads}.xz"));
             encode(&image, &out, threads).expect("encodes");
             made.push(std::fs::read(&out).expect("read"));
@@ -444,10 +463,7 @@ mod tests {
             );
             check_dictionary(&out).expect("within a board's limits");
         }
-        assert!(
-            made[0] == made[1] && made[1] == made[2],
-            "the same at 1, 4 and 13 threads"
-        );
+        assert!(made[0] == made[1], "the same at 4 and 13 threads");
         println!(
             "builder stream: {} bytes, sha256 {}",
             made[0].len(),
@@ -488,8 +504,8 @@ mod tests {
     /// A sparse image as a disk is: blocks of zeros, a data block between
     /// holes, and data in the last block, which is shorter than a block.
     fn sparse() -> Vec<u8> {
-        const MIB: usize = 1024 * 1024;
-        let block = BLOCK as usize;
+        let block = TEST_BLOCK as usize;
+        const MIB: usize = TEST_BLOCK as usize / 64;
         let mut out = vec![0_u8; block];
         let line = b"partition table, boot files and a root filesystem\n";
         out.extend(line.iter().cycle().take(block));
@@ -532,7 +548,7 @@ mod tests {
         for (name, raw) in [
             ("sparse", sparse()),
             ("holes", sparse()),
-            ("agreed", sample()),
+            ("data", sample_of(TEST_BLOCK as usize / 64)),
         ] {
             let image = dir.path().join(format!("{name}.img"));
             if name == "holes" {
@@ -543,11 +559,11 @@ mod tests {
                 std::fs::write(&image, &raw).expect("write");
             }
             let whole = dir.path().join(format!("{name}-whole.xz"));
-            encode_whole(&image, &whole, 4).expect("encodes");
+            encode_whole(&image, &whole, 4, TEST_BLOCK).expect("encodes");
             let whole = std::fs::read(&whole).expect("read");
             for threads in [1, 3] {
                 let out = dir.path().join(format!("{name}-{threads}.xz"));
-                let made = encode(&image, &out, threads).expect("encodes");
+                let made = encode_in(&image, &out, threads, TEST_BLOCK).expect("encodes");
                 let from_blocks = std::fs::read(&out).expect("read");
                 assert!(
                     from_blocks == whole,
@@ -555,9 +571,13 @@ mod tests {
                     from_blocks.len(),
                     whole.len()
                 );
-                let expect_zero = if name == "agreed" { 0 } else { 3 };
+                let expect_zero = if name == "data" { 0 } else { 3 };
                 assert_eq!(made.zero_blocks, expect_zero, "{name}");
-                assert_eq!(made.blocks, (raw.len() as u64).div_ceil(BLOCK), "{name}");
+                assert_eq!(
+                    made.blocks,
+                    (raw.len() as u64).div_ceil(TEST_BLOCK),
+                    "{name}"
+                );
                 // The encoder threads' CPU is counted: every sample has a
                 // block to encode.
                 assert!(made.worker_cpu_ns > 0, "{name}: encoder CPU not counted");
@@ -612,7 +632,7 @@ mod tests {
         }
         if mode != "blocks" {
             let started = std::time::Instant::now();
-            encode_whole(image, &whole, threads).expect("encodes");
+            encode_whole(image, &whole, threads, BLOCK).expect("encodes");
             println!(
                 "whole: {:.1} s, {threads} threads",
                 started.elapsed().as_secs_f64()
