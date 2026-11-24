@@ -34,6 +34,62 @@ fn tools_here(programs: &[&str]) -> bool {
     false
 }
 
+/// Every tool the runner script and these cases may run.
+const RUNNER_TOOLS: &[&str] = &[
+    "qemu-system-aarch64",
+    "qemu-system-x86_64",
+    "python3",
+    "socat",
+    "fdtput",
+    "fdtget",
+    "dtc",
+    "sfdisk",
+    "mformat",
+    "mcopy",
+    "mmd",
+    "mtype",
+    "mdir",
+    "gzip",
+    "cpio",
+];
+
+/// The scripts a runner case runs, and the virt kernel's files.
+const RUNNER_FILES: &[&str] = &[
+    "scripts/qemu-rpi-slots.sh",
+    "scripts/qemu-board-sysfs.py",
+    "scripts/qemu-stock-host.sh",
+    "scripts/qemu-stock-host",
+    "scripts/qemu-virt-kernel",
+    "scripts/qemu-virt-kernel.sh",
+    "scripts/qemu-virt-kernel.config",
+];
+
+/// A case with `programs` here: `None` when one is missing (skipped) or
+/// when the case passed before with the same test binary, tools (each by
+/// path and version, QEMU among them) and scripts (CI runs it every time;
+/// see gaia-verdict). The boots' kernels, device trees and disks are made
+/// by the cases themselves, from this binary.
+fn begin(case: &str, programs: &[&str]) -> Option<gaia_verdict::Pass> {
+    if !tools_here(programs) {
+        return None;
+    }
+    let tools: Vec<(&str, String)> = RUNNER_TOOLS
+        .iter()
+        .map(|tool| {
+            // socat has no --version; it prints its error with the time.
+            let flag = if *tool == "socat" { "-V" } else { "--version" };
+            (*tool, gaia_verdict::identity(Path::new(tool), &[flag]))
+        })
+        .collect();
+    gaia_verdict::Verdict::new(
+        &format!("qemu_runner::{case}"),
+        env!("CARGO_MANIFEST_DIR"),
+        &tools,
+        RUNNER_FILES,
+    )
+    .begin()
+}
+
 fn run(program: &str, args: &[&str]) {
     let out = Command::new(program).args(args).output().expect(program);
     assert!(
@@ -192,11 +248,14 @@ fn runner(dir: &Path, disk: &Path, args: &[&str]) -> (bool, String) {
 
 #[test]
 fn the_runner_boots_the_bay_its_config_names() {
-    if !tools_here(&[
-        "mformat", "mcopy", "mmd", "mtype", "sfdisk", "fdtput", "fdtget", "dtc", "python3",
-    ]) {
+    let Some(_pass) = begin(
+        "the_runner_boots_the_bay_its_config_names",
+        &[
+            "mformat", "mcopy", "mmd", "mtype", "sfdisk", "fdtput", "fdtget", "dtc", "python3",
+        ],
+    ) else {
         return;
-    }
+    };
     let dir = tempfile::tempdir().expect("tempdir");
     let disk = disk(dir.path());
 
@@ -248,11 +307,14 @@ fn the_runner_boots_the_bay_its_config_names() {
 /// can pass and a later one fail. A plain boot never takes them.
 #[test]
 fn trial_arguments_go_on_the_tryboots_asked() {
-    if !tools_here(&[
-        "mformat", "mcopy", "mmd", "mtype", "sfdisk", "fdtput", "fdtget", "dtc", "python3",
-    ]) {
+    let Some(_pass) = begin(
+        "trial_arguments_go_on_the_tryboots_asked",
+        &[
+            "mformat", "mcopy", "mmd", "mtype", "sfdisk", "fdtput", "fdtget", "dtc", "python3",
+        ],
+    ) else {
         return;
-    }
+    };
     let dir = tempfile::tempdir().expect("tempdir");
     let disk = disk(dir.path());
     let fault = "systemd.setenv=UPDATE_UNAME_R=trial-fault";
@@ -326,20 +388,23 @@ fn trial_arguments_go_on_the_tryboots_asked() {
 /// the guest gets, and checked there.
 #[test]
 fn the_disks_node_is_at_the_boot_sources_path() {
-    if !tools_here(&[
-        "mformat",
-        "mcopy",
-        "mmd",
-        "mtype",
-        "sfdisk",
-        "fdtput",
-        "fdtget",
-        "dtc",
-        "python3",
-        "qemu-system-aarch64",
-    ]) {
+    let Some(_pass) = begin(
+        "the_disks_node_is_at_the_boot_sources_path",
+        &[
+            "mformat",
+            "mcopy",
+            "mmd",
+            "mtype",
+            "sfdisk",
+            "fdtput",
+            "fdtget",
+            "dtc",
+            "python3",
+            "qemu-system-aarch64",
+        ],
+    ) else {
         return;
-    }
+    };
     let dir = tempfile::tempdir().expect("tempdir");
     let disk = disk(dir.path());
     let (ok, out) = runner(dir.path(), &disk, &["--fresh", "--dtb"]);
@@ -422,20 +487,23 @@ fn put_dtb(dir: &Path, disk: &Path, name: &str, pm: Option<u32>) {
 /// (0x1000, a power-on) and the FAT's partition number.
 #[test]
 fn the_board_profile_gives_an_emmc_and_the_firmwares_facts() {
-    if !tools_here(&[
-        "mformat",
-        "mcopy",
-        "mmd",
-        "mtype",
-        "sfdisk",
-        "fdtput",
-        "fdtget",
-        "dtc",
-        "python3",
-        "qemu-system-aarch64",
-    ]) {
+    let Some(_pass) = begin(
+        "the_board_profile_gives_an_emmc_and_the_firmwares_facts",
+        &[
+            "mformat",
+            "mcopy",
+            "mmd",
+            "mtype",
+            "sfdisk",
+            "fdtput",
+            "fdtget",
+            "dtc",
+            "python3",
+            "qemu-system-aarch64",
+        ],
+    ) else {
         return;
-    }
+    };
     let dir = tempfile::tempdir().expect("tempdir");
     let disk = disk(dir.path());
     put_dtb(dir.path(), &disk, "slots/bay0/board.dtb", Some(0x7d200000));
@@ -702,9 +770,12 @@ fn the_board_profile_gives_an_emmc_and_the_firmwares_facts() {
 /// power-on, so --boot-count N gives N + 1 on its first boot.
 #[test]
 fn boot_count_sections_compare_as_the_firmware_does() {
-    if !tools_here(&["dtc", "mformat", "mcopy", "mmd", "mtype", "sfdisk"]) {
+    let Some(_pass) = begin(
+        "boot_count_sections_compare_as_the_firmware_does",
+        &["dtc", "mformat", "mcopy", "mmd", "mtype", "sfdisk"],
+    ) else {
         return;
-    }
+    };
     let dir = tempfile::tempdir().expect("tempdir");
     let disk = disk(dir.path());
     let slot = |out: &str| {
@@ -771,20 +842,23 @@ fn boot_count_sections_compare_as_the_firmware_does() {
 /// slot-init refuses it as a board would.
 #[test]
 fn the_board_overlays_marker_is_emulated_from_the_boots_overlay() {
-    if !tools_here(&[
-        "mformat",
-        "mcopy",
-        "mmd",
-        "mtype",
-        "sfdisk",
-        "fdtput",
-        "fdtget",
-        "dtc",
-        "python3",
-        "qemu-system-aarch64",
-    ]) {
+    let Some(_pass) = begin(
+        "the_board_overlays_marker_is_emulated_from_the_boots_overlay",
+        &[
+            "mformat",
+            "mcopy",
+            "mmd",
+            "mtype",
+            "sfdisk",
+            "fdtput",
+            "fdtget",
+            "dtc",
+            "python3",
+            "qemu-system-aarch64",
+        ],
+    ) else {
         return;
-    }
+    };
     let dir = tempfile::tempdir().expect("tempdir");
     let disk = disk(dir.path());
     let get = |dtb: &str, args: &[&str]| {
@@ -889,20 +963,23 @@ fn put_tree(dir: &Path, disk: &Path, name: &str, dts: &str, symbols: bool) {
 /// it links to and a vsock device on the machine.
 #[test]
 fn the_udc_is_at_the_images_dwc2_when_the_boot_enables_it() {
-    if !tools_here(&[
-        "mformat",
-        "mcopy",
-        "mmd",
-        "mtype",
-        "sfdisk",
-        "fdtput",
-        "fdtget",
-        "dtc",
-        "python3",
-        "qemu-system-aarch64",
-    ]) {
+    let Some(_pass) = begin(
+        "the_udc_is_at_the_images_dwc2_when_the_boot_enables_it",
+        &[
+            "mformat",
+            "mcopy",
+            "mmd",
+            "mtype",
+            "sfdisk",
+            "fdtput",
+            "fdtget",
+            "dtc",
+            "python3",
+            "qemu-system-aarch64",
+        ],
+    ) else {
         return;
-    }
+    };
     let dir = tempfile::tempdir().expect("tempdir");
     let disk = disk(dir.path());
     put_tree(
@@ -1040,9 +1117,12 @@ fn the_udc_is_at_the_images_dwc2_when_the_boot_enables_it() {
 /// boot says which.
 #[test]
 fn no_watchdog_leaves_the_i6300esb_out() {
-    if !tools_here(&["mformat", "mcopy", "mmd", "mtype", "sfdisk", "dtc"]) {
+    let Some(_pass) = begin(
+        "no_watchdog_leaves_the_i6300esb_out",
+        &["mformat", "mcopy", "mmd", "mtype", "sfdisk", "dtc"],
+    ) else {
         return;
-    }
+    };
     let dir = tempfile::tempdir().expect("tempdir");
     let disk = disk(dir.path());
     let (ok, out) = runner(dir.path(), &disk, &["--fresh", "--print"]);
@@ -1084,9 +1164,12 @@ fn kernel_with(dir: &Path, name: &str, config: Option<&str>, gzipped: bool) -> P
 /// gzipped kernel is read through gzip.
 #[test]
 fn the_boot_says_whether_the_kernel_has_seccomp() {
-    if !tools_here(&["mformat", "mcopy", "mmd", "mtype", "sfdisk", "dtc", "gzip"]) {
+    let Some(_pass) = begin(
+        "the_boot_says_whether_the_kernel_has_seccomp",
+        &["mformat", "mcopy", "mmd", "mtype", "sfdisk", "dtc", "gzip"],
+    ) else {
         return;
-    }
+    };
     let dir = tempfile::tempdir().expect("tempdir");
     let disk = disk(dir.path());
     let on = "CONFIG_IKCONFIG=y\nCONFIG_SECCOMP=y\nCONFIG_SECCOMP_FILTER=y\n";
@@ -1199,19 +1282,22 @@ fn ram_boot(dir: &Path, outer: &str) -> PathBuf {
 /// config that does not say boot_ramdisk=1, no boot.img, --ssh-key.
 #[test]
 fn a_ram_boot_boots_boot_img_with_a_blank_emmc() {
-    if !tools_here(&[
-        "mformat",
-        "mcopy",
-        "mtype",
-        "mdir",
-        "fdtput",
-        "fdtget",
-        "dtc",
-        "python3",
-        "qemu-system-aarch64",
-    ]) {
+    let Some(_pass) = begin(
+        "a_ram_boot_boots_boot_img_with_a_blank_emmc",
+        &[
+            "mformat",
+            "mcopy",
+            "mtype",
+            "mdir",
+            "fdtput",
+            "fdtget",
+            "dtc",
+            "python3",
+            "qemu-system-aarch64",
+        ],
+    ) else {
         return;
-    }
+    };
     let dir = tempfile::tempdir().expect("tempdir");
     let set = ram_boot(
         dir.path(),
@@ -1383,11 +1469,14 @@ fn a_ram_boot_boots_boot_img_with_a_blank_emmc() {
 /// without --usb-host, or when not numbers.
 #[test]
 fn the_stock_hosts_wait_and_connect_are_options() {
-    if !tools_here(&[
-        "mformat", "mcopy", "mtype", "sfdisk", "fdtput", "dtc", "python3",
-    ]) {
+    let Some(_pass) = begin(
+        "the_stock_hosts_wait_and_connect_are_options",
+        &[
+            "mformat", "mcopy", "mtype", "sfdisk", "fdtput", "dtc", "python3",
+        ],
+    ) else {
         return;
-    }
+    };
     let dir = tempfile::tempdir().expect("tempdir");
     let disk = disk(dir.path());
     for (args, want) in [
@@ -1546,21 +1635,24 @@ with open(log, "w") as out:
 /// boot 2 of the run; an eMMC with no boot partition then ends the run.
 #[test]
 fn a_restart_after_a_ram_boot_boots_the_emmc() {
-    if !tools_here(&[
-        "mformat",
-        "mcopy",
-        "mmd",
-        "mtype",
-        "mdir",
-        "sfdisk",
-        "fdtput",
-        "fdtget",
-        "dtc",
-        "python3",
-        "qemu-system-aarch64",
-    ]) {
+    let Some(_pass) = begin(
+        "a_restart_after_a_ram_boot_boots_the_emmc",
+        &[
+            "mformat",
+            "mcopy",
+            "mmd",
+            "mtype",
+            "mdir",
+            "sfdisk",
+            "fdtput",
+            "fdtget",
+            "dtc",
+            "python3",
+            "qemu-system-aarch64",
+        ],
+    ) else {
         return;
-    }
+    };
     let dir = tempfile::tempdir().expect("tempdir");
     let set = ram_boot(dir.path(), "boot_ramdisk=1\n");
     // What the flasher writes: a slot disk, its device tree with the board's
@@ -1684,21 +1776,24 @@ fn mailbox_page(
 /// in every board-profile device tree, and the page is the last of RAM.
 #[test]
 fn the_firmware_rpiboot_order_serves_the_ram_boot_again() {
-    if !tools_here(&[
-        "mformat",
-        "mcopy",
-        "mmd",
-        "mtype",
-        "mdir",
-        "sfdisk",
-        "fdtput",
-        "fdtget",
-        "dtc",
-        "python3",
-        "qemu-system-aarch64",
-    ]) {
+    let Some(_pass) = begin(
+        "the_firmware_rpiboot_order_serves_the_ram_boot_again",
+        &[
+            "mformat",
+            "mcopy",
+            "mmd",
+            "mtype",
+            "mdir",
+            "sfdisk",
+            "fdtput",
+            "fdtget",
+            "dtc",
+            "python3",
+            "qemu-system-aarch64",
+        ],
+    ) else {
         return;
-    }
+    };
     let dir = tempfile::tempdir().expect("tempdir");
     let set = ram_boot(dir.path(), "boot_ramdisk=1\n");
     let flash = disk(dir.path());

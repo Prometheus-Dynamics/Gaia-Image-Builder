@@ -24,6 +24,20 @@ fn the_bound_counts_usable_time() {
     if !python() {
         return;
     }
+    // Its inputs are scripts/test-bound.py (a gate file) and Python (CI
+    // runs it every time; see gaia-verdict).
+    let Some(_pass) = gaia_verdict::Verdict::new(
+        "test_bound::usable-time",
+        env!("CARGO_MANIFEST_DIR"),
+        &[(
+            "python3",
+            gaia_verdict::identity(Path::new("python3"), &["--version"]),
+        )],
+        &[],
+    )
+    .begin() else {
+        return;
+    };
     let out = Command::new(script())
         .arg("--self-test")
         .env_remove("GAIA_TEST_BOUND")

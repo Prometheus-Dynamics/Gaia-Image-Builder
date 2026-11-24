@@ -23,6 +23,7 @@ miniz_oxide = "=0.9.1"
 tar = "=0.4.46"
 
 [dev-dependencies]
+gaia-verdict = { path = "../../test/verdict" }
 tempfile = "3"
 
 [lints]

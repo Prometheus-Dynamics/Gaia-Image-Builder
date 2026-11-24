@@ -56,6 +56,17 @@ fn has_entry(root: &Path) -> bool {
 
 #[test]
 fn a_crash_mid_commit_leaves_no_partial_entry() {
+    // 24 children killed mid-commit: kept under this test binary, which the
+    // children are (CI runs it every time; see gaia-verdict).
+    let Some(_pass) = gaia_verdict::Verdict::new(
+        "store::crash-mid-commit",
+        env!("CARGO_MANIFEST_DIR"),
+        &[],
+        &[],
+    )
+    .begin() else {
+        return;
+    };
     let dir = tempfile::tempdir().expect("tempdir");
     let root = dir.path().join("store");
     let exe = std::env::current_exe().expect("test binary");

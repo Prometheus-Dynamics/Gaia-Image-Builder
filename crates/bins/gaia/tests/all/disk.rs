@@ -105,6 +105,29 @@ fn a_disk_is_the_boards_partitions_then_the_fanned_in_ones() {
     let Some((python, debugfs, sfdisk)) = tools() else {
         return;
     };
+    // Kept under this test binary, the gaia binary it runs, the fixture,
+    // and the tools the build runs (CI runs it every time; see gaia-verdict).
+    let Some(_pass) = gaia_verdict::Verdict::new(
+        "disk::fan-in",
+        env!("CARGO_MANIFEST_DIR"),
+        &[
+            (
+                "python",
+                gaia_verdict::identity(
+                    Path::new(&python),
+                    &["-c", "import sys, pip, setuptools; print(sys.version, pip.__version__, setuptools.__version__)"],
+                ),
+            ),
+            ("debugfs", gaia_verdict::identity(Path::new(&debugfs), &["-V"])),
+            ("sfdisk", gaia_verdict::identity(Path::new(&sfdisk), &["--version"])),
+            ("bwrap", gaia_verdict::identity(Path::new("/usr/bin/bwrap"), &["--version"])),
+        ],
+        &[env!("CARGO_BIN_EXE_gaia"), "crates/bins/gaia/tests/fixtures/disk"],
+    )
+    .begin()
+    else {
+        return;
+    };
     let dir = tempfile::tempdir().expect("tempdir");
     copy_dir(&fixture(), dir.path());
     let extra = plan_args(&python, &debugfs);

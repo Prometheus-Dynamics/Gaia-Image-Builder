@@ -18,7 +18,10 @@
 //! - **the host toolchains** the case runs, by identity: each tool's
 //!   resolved path and what it says its version is.
 //! - **the gate's files** the case runs under ([`GATE_FILES`]), and any file
-//!   the case reads at run time, by content.
+//!   the case reads at run time, by content: under the repository (a script,
+//!   a fixture) or anywhere by its absolute path (a kernel, firmware, a
+//!   library put into an image).
+//! - **pins** given as text, as tools are: an image digest, a release.
 //! - **the case's name.**
 //!
 //! A binary built again from the same code may differ in its bytes; that
@@ -91,8 +94,9 @@ pub struct Verdict {
 impl Verdict {
     /// The verdict of `case` in the running test binary of the crate at
     /// `manifest_dir` (pass `env!("CARGO_MANIFEST_DIR")`). `tools` are the
-    /// host toolchains it runs, as (name, [`identity`]); `files` are files
-    /// or directories under the repository it reads at run time.
+    /// host toolchains it runs, as (name, [`identity`]), and any pin as
+    /// (name, text); `files` are files or directories it reads at run time,
+    /// under the repository or by absolute path.
     pub fn new(
         case: &str,
         manifest_dir: &str,
@@ -190,9 +194,42 @@ impl Verdict {
     }
 }
 
-/// A tool's identity: its resolved path (a bare name is looked up on `PATH`) and what `args` make it print (its
-/// version), on both streams. A tool that cannot run says so; that is an
-/// identity too.
+/// A case that has begun ([`Verdict::begin`]): when it is dropped by the
+/// test returning, which is the test passing, the pass is recorded; when it
+/// is dropped by a panic, which is the test failing, nothing is.
+#[derive(Debug)]
+pub struct Pass(Verdict);
+
+impl Drop for Pass {
+    fn drop(&mut self) {
+        if !std::thread::panicking() {
+            self.0.passed();
+        }
+    }
+}
+
+impl Verdict {
+    /// `None` when this key passed before (the case returns); otherwise the
+    /// [`Pass`] to hold until the test ends: `let Some(_pass) =
+    /// verdict.begin() else { return };`. For a case with early returns
+    /// before its checks are done, use [`Verdict::reused`] and
+    /// [`Verdict::passed`] instead.
+    pub fn begin(self) -> Option<Pass> {
+        if self.reused() {
+            None
+        } else {
+            Some(Pass(self))
+        }
+    }
+}
+
+/// A tool's identity: its resolved path (a bare name is looked up on
+/// `PATH`) and what `args` make it print (its version), on both streams. A
+/// tool that cannot run says so; that is an identity too. The command runs
+/// twice: output that differs between the two (a tool that prints the time
+/// or its process id, as one given an option it does not know may) would
+/// move the key on every run, so such a tool is named by its executable's
+/// content instead.
 pub fn identity(program: &Path, args: &[&str]) -> String {
     let found = if program.components().count() == 1 {
         std::env::var_os("PATH")
@@ -206,15 +243,24 @@ pub fn identity(program: &Path, args: &[&str]) -> String {
         program.to_path_buf()
     };
     let resolved = std::fs::canonicalize(&found).unwrap_or(found);
-    match Command::new(program).args(args).output() {
+    let said = || match Command::new(program).args(args).output() {
         Ok(out) => format!(
-            "{}\n{}\n{}\n{}",
-            resolved.display(),
+            "{}\n{}\n{}",
             out.status,
             String::from_utf8_lossy(&out.stdout),
             String::from_utf8_lossy(&out.stderr)
         ),
-        Err(error) => format!("{}\ncannot run: {error}", resolved.display()),
+        Err(error) => format!("cannot run: {error}"),
+    };
+    let (first, second) = (said(), said());
+    if first == second {
+        format!("{}\n{first}", resolved.display())
+    } else {
+        format!(
+            "{}\nits output varies; its content: {}",
+            resolved.display(),
+            content_hash(&resolved)
+        )
     }
 }
 

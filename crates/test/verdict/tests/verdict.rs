@@ -76,6 +76,26 @@ fn the_key_moves_with_each_input_class_and_nothing_else() {
     moved("fixture", key(&place, "go1.25.5"));
     write(&place.root.join("fixtures/a/new.txt"), "new\n");
     moved("a new fixture", key(&place, "go1.25.5"));
+    // A file outside the repository it boots or packs, by absolute path.
+    let kernel = place.root.parent().expect("dir").join("kernel.img");
+    write(&kernel, "kernel one\n");
+    let with = |kernel_text: Option<&str>, pin: &str| {
+        if let Some(text) = kernel_text {
+            write(&kernel, text);
+        }
+        Verdict::at(
+            "case",
+            &place,
+            &[("go", "go1.25.5".into()), ("image", pin.into())],
+            &["fixtures/a", kernel.to_str().expect("utf8")],
+        )
+        .key()
+        .to_string()
+    };
+    moved("an absolute file", with(None, "sha256:aa"));
+    moved("its content", with(Some("kernel two\n"), "sha256:aa"));
+    // A pin given as text: an image digest.
+    moved("a pin", with(None, "sha256:bb"));
     // The case.
     moved(
         "case",
@@ -125,4 +145,35 @@ fn a_tools_identity_is_its_path_and_what_it_says() {
     assert!(sh.contains("one"), "{sh}");
     assert_ne!(sh, identity(Path::new("/bin/sh"), &["-c", "echo two"]));
     assert!(identity(Path::new("/no/such/tool"), &[]).contains("cannot run"));
+    // A tool whose output varies (the time, a process id) is named the same
+    // every time: by its content.
+    let varies = || identity(Path::new("/bin/sh"), &["-c", "echo $$"]);
+    assert_eq!(varies(), varies());
+    assert!(varies().contains("its output varies"), "{}", varies());
+}
+
+#[test]
+fn a_begun_case_records_its_pass_when_it_returns_and_not_when_it_panics() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let place = place(dir.path());
+    let failing = Verdict::at("fails", &place, &[], &[]);
+    let panicked = std::panic::catch_unwind(move || {
+        let _pass = failing.begin().expect("not passed yet");
+        panic!("the case fails");
+    });
+    assert!(panicked.is_err());
+    assert!(
+        !Verdict::at("fails", &place, &[], &[]).reused(),
+        "a failure is no pass"
+    );
+
+    {
+        let _pass = Verdict::at("passes", &place, &[], &[])
+            .begin()
+            .expect("not passed yet");
+    }
+    assert!(
+        Verdict::at("passes", &place, &[], &[]).begin().is_none(),
+        "returned: passed, and the next run reuses it"
+    );
 }

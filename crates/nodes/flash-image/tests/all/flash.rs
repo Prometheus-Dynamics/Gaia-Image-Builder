@@ -377,6 +377,20 @@ fn multi_block_image() -> Vec<u8> {
 /// `multi-block-signed.img.xz`, each with its `.raw`).
 #[test]
 fn a_multi_block_image_is_read_back_whole_unsigned_and_signed() {
+    // Kept under this test binary and the stock xz it reads back with (CI
+    // runs it every time; see gaia-verdict).
+    let Some(_pass) = gaia_verdict::Verdict::new(
+        "flash::multi-block",
+        env!("CARGO_MANIFEST_DIR"),
+        &[(
+            "xz",
+            gaia_verdict::identity(Path::new("/usr/bin/xz"), &["--version"]),
+        )],
+        &[],
+    )
+    .begin() else {
+        return;
+    };
     let root = tempfile::tempdir().expect("tempdir");
     let store = store_path(&root.path().join("store"));
     let raw = multi_block_image();

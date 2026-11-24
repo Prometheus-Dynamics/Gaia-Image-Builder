@@ -489,6 +489,39 @@ fn podman_loads_the_oci_archive_and_runs_its_entrypoint() {
         return;
     };
     let (podman, ldd) = (&tools[0], &tools[1]);
+    // Kept under this test binary, podman, and the files the image is made
+    // of (/usr/bin/true and its libraries, by content) (CI runs it every
+    // time; see gaia-verdict).
+    let listed = Command::new(ldd)
+        .arg("/usr/bin/true")
+        .output()
+        .expect("ldd");
+    let mut files = vec!["/usr/bin/true".to_string()];
+    files.extend(
+        String::from_utf8_lossy(&listed.stdout)
+            .split_whitespace()
+            .filter(|word| word.starts_with('/'))
+            .map(str::to_string),
+    );
+    let files: Vec<&str> = files.iter().map(String::as_str).collect();
+    let Some(_pass) = gaia_verdict::Verdict::new(
+        "package::podman-oci",
+        env!("CARGO_MANIFEST_DIR"),
+        &[
+            (
+                "podman",
+                gaia_verdict::identity(Path::new(podman), &["--version"]),
+            ),
+            (
+                "ldd",
+                gaia_verdict::identity(Path::new(ldd), &["--version"]),
+            ),
+        ],
+        &files,
+    )
+    .begin() else {
+        return;
+    };
     let dir = tempfile::tempdir().expect("tempdir");
     let src = dir.path().join("src");
     copy_with_libraries("/usr/bin/true", &src, ldd);

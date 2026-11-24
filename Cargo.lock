@@ -634,6 +634,7 @@ dependencies = [
  "gaia-strip",
  "gaia-tree",
  "gaia-types",
+ "gaia-verdict",
  "gaia-verity",
  "lzma-sys",
  "serde",
@@ -1083,6 +1084,7 @@ dependencies = [
  "gaia-step",
  "gaia-store",
  "gaia-types",
+ "gaia-verdict",
  "miniz_oxide",
  "serde",
  "serde_json",
@@ -1283,6 +1285,7 @@ dependencies = [
 name = "gaia-store"
 version = "2.0.6-dev"
 dependencies = [
+ "gaia-verdict",
  "rustix",
  "serde",
  "serde_json",
