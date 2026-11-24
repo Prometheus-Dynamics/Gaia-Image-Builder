@@ -29,6 +29,7 @@ set -euo pipefail
 [[ $# -ge 4 ]] || { sed -n '2,/^set -euo/{/^set -euo/d;s/^# \{0,1\}//;p}' "$0"; exit 2; }
 devices=$(realpath "$1"); product=$2; board=$3; out=$4; shift 4
 here=$(dirname "$(realpath "$0")")
+source "$here/nice.sh"
 gaia=${GAIA:-gaia}
 [[ -n ${GAIA_STORE:-} ]] || { echo "GAIA_STORE names the store the kernel is built in" >&2; exit 2; }
 [[ -f $devices/$product && -f $devices/$board ]] || { echo "no $product or $board under $devices" >&2; exit 2; }

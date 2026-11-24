@@ -17,6 +17,7 @@
 # landing.
 set -euo pipefail
 cd "$(dirname "${BASH_SOURCE[0]}")/.."
+source scripts/nice.sh
 export CARGO_INCREMENTAL="${CARGO_INCREMENTAL:-0}"
 
 base_ref="${1:-origin/next}"

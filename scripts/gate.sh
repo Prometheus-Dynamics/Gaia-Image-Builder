@@ -2,6 +2,8 @@
 # The check every PR into next must pass. CI runs exactly this.
 set -euo pipefail
 cd "$(dirname "${BASH_SOURCE[0]}")/.."
+# One niceness for all heavy work on the host (see the script).
+source scripts/nice.sh
 # Incremental compilation on a kept target (here: an edit to gaia-store, the
 # workspace's test binaries rebuilt, interleaved 3 and 3 at load 120-149:
 # 127 CPU-s and 20.1 s against 219 CPU-s and 27.6 s). Off on CI, which
