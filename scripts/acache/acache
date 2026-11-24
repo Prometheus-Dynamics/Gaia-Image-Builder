@@ -1,0 +1,288 @@
+#!/usr/bin/env python3
+"""acache: the shared content-addressed artifact cache (Gaia, Lemnos, Atlas).
+
+An entry is an artifact (a file or a tree) named by the hash of everything it
+was made from. A miss only costs time: the caller builds and puts. Nothing in
+the cache is ever changed in place; an entry exists whole or not at all.
+
+Root: $ACACHE_ROOT, default /mnt/nvme-wd/artifact-cache. Layout:
+
+  v1/<kind>/<key>/inputs   the input manifest, as given (key = its sha256)
+  v1/<kind>/<key>/out      the artifact: a file or a directory
+  v1/<kind>/<key>/meta     producer, time, size, sha256 of the artifact
+  v1/<kind>/<key>/used     touched on every hit (the disk is noatime)
+  v1/<kind>/.locks/<key>   flock: one builder per key
+  v1/<kind>/.tmp-*         puts in progress (renamed into place, atomic)
+
+<kind> names what it is and how it is used: [a-z0-9._-]+, e.g.
+kernel-x86_64, busybox, buildroot-output, rootfs-piece, image.
+
+The manifest is the caller's: one `name=value` line per input, every input
+that can change the bytes (source tree or tarball hash, config hash, build
+script hash, compiler and tool versions, arch, flags). The lines are sorted
+before hashing, so their order does not matter. A forgotten input is a
+wrong hit; when in doubt, put it in.
+
+Commands (exit 0 = done; `get` exits 1 on a miss):
+
+  acache key  <kind> <manifest>          print the key
+  acache get  <kind> <manifest> <dest>   on a hit, copy the artifact to
+                                         <dest> (reflinked on btrfs; cheap)
+  acache path <kind> <manifest>          on a hit, print the artifact's path
+                                         (read only: never write under it)
+  acache put  <kind> <manifest> <src> [--producer NAME]
+                                         store a copy of <src>; if the key is
+                                         already there, keep the first one
+  acache run  <kind> <manifest> <dest> [--producer NAME] -- <cmd...>
+                                         get, or under the key's lock: get
+                                         again, else run <cmd> (it must write
+                                         <dest>), then put <dest>. Builds once
+                                         when many ask at the same time.
+  acache verify <kind> <key>             re-hash an entry against its meta
+  acache gc [--max-gib N]                drop least recently used entries
+                                         until the cache is under N GiB
+                                         (default $ACACHE_MAX_GIB or 200)
+  acache ls [<kind>]                     entries: kind key size last-used
+"""
+import fcntl
+import hashlib
+import json
+import os
+import pathlib
+import re
+import shutil
+import subprocess
+import sys
+import time
+
+ROOT = pathlib.Path(os.environ.get("ACACHE_ROOT", "/mnt/nvme-wd/artifact-cache")) / "v1"
+KIND = re.compile(r"^[a-z0-9._-]+$")
+
+
+def die(msg, code=2):
+    print(f"acache: {msg}", file=sys.stderr)
+    sys.exit(code)
+
+
+def manifest_text(path):
+    text = sys.stdin.read() if path == "-" else pathlib.Path(path).read_text()
+    lines = sorted(l.strip() for l in text.splitlines() if l.strip() and not l.startswith("#"))
+    for line in lines:
+        if "=" not in line:
+            die(f"manifest line without '=': {line!r}")
+    if not lines:
+        die("empty manifest")
+    return "\n".join(lines) + "\n"
+
+
+def kind_dir(kind):
+    if not KIND.match(kind):
+        die(f"bad kind {kind!r}")
+    return ROOT / kind
+
+
+def key_of(text):
+    return hashlib.sha256(text.encode()).hexdigest()
+
+
+def tree_digest(path):
+    """sha256 over a file's bytes, or a tree's sorted (path, mode, bytes or link)."""
+    h = hashlib.sha256()
+    p = pathlib.Path(path)
+    if p.is_file() and not p.is_symlink():
+        with open(p, "rb") as f:
+            for chunk in iter(lambda: f.read(1 << 20), b""):
+                h.update(chunk)
+        return h.hexdigest(), p.stat().st_size
+    size = 0
+    for dirpath, dirnames, filenames in os.walk(p):
+        dirnames.sort()
+        for name in sorted(filenames + [d for d in dirnames if os.path.islink(os.path.join(dirpath, d))]):
+            full = pathlib.Path(dirpath, name)
+            rel = full.relative_to(p).as_posix()
+            st = full.lstat()
+            h.update(f"{rel}\0{st.st_mode:o}\0".encode())
+            if full.is_symlink():
+                h.update(os.readlink(full).encode())
+            else:
+                with open(full, "rb") as f:
+                    for chunk in iter(lambda: f.read(1 << 20), b""):
+                        h.update(chunk)
+                size += st.st_size
+            h.update(b"\0")
+    return h.hexdigest(), size
+
+
+def copy(src, dest):
+    dest = pathlib.Path(dest)
+    if dest.exists() or dest.is_symlink():
+        die(f"{dest} exists; get copies into a new path")
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    subprocess.run(["cp", "-a", "--reflink=auto", "--", str(src), str(dest)], check=True)
+
+
+def hit(kind, text):
+    entry = kind_dir(kind) / key_of(text)
+    if (entry / "meta").is_file():
+        try:
+            os.utime(entry / "used")
+        except FileNotFoundError:
+            (entry / "used").touch()
+        return entry
+    return None
+
+
+def put(kind, text, src, producer):
+    kd = kind_dir(kind)
+    kd.mkdir(parents=True, exist_ok=True)
+    key = key_of(text)
+    entry = kd / key
+    if (entry / "meta").is_file():
+        return entry
+    tmp = kd / f".tmp-{key}-{os.getpid()}-{time.time_ns()}"
+    tmp.mkdir()
+    try:
+        (tmp / "inputs").write_text(text)
+        copy(src, tmp / "out")
+        digest, size = tree_digest(tmp / "out")
+        meta = {
+            "key": key,
+            "kind": kind,
+            "producer": producer,
+            "created": time.strftime("%Y-%m-%dT%H:%M:%S%z"),
+            "size": size,
+            "sha256": digest,
+            "type": "file" if (tmp / "out").is_file() else "tree",
+        }
+        (tmp / "meta").write_text(json.dumps(meta, indent=1) + "\n")
+        (tmp / "used").touch()
+        try:
+            os.rename(tmp, entry)  # atomic; fails if another put won
+        except OSError:
+            if not (entry / "meta").is_file():
+                raise
+    finally:
+        if tmp.exists():
+            shutil.rmtree(tmp, ignore_errors=True)
+    return entry
+
+
+class Lock:
+    def __init__(self, kind, key):
+        d = kind_dir(kind) / ".locks"
+        d.mkdir(parents=True, exist_ok=True)
+        self.fd = os.open(d / key, os.O_RDWR | os.O_CREAT, 0o644)
+
+    def __enter__(self):
+        fcntl.flock(self.fd, fcntl.LOCK_EX)
+
+    def __exit__(self, *a):
+        fcntl.flock(self.fd, fcntl.LOCK_UN)
+        os.close(self.fd)
+
+
+def entries(kind=None):
+    if not ROOT.is_dir():
+        return
+    for kd in sorted(ROOT.iterdir()):
+        if kind and kd.name != kind or not kd.is_dir():
+            continue
+        for e in sorted(kd.iterdir()):
+            if e.name.startswith(".") or not (e / "meta").is_file():
+                continue
+            meta = json.loads((e / "meta").read_text())
+            used = (e / "used").stat().st_mtime if (e / "used").exists() else 0
+            yield kd.name, e, meta, used
+
+
+def gc(max_gib):
+    cap = int(max_gib * (1 << 30))
+    all_ = sorted(entries(), key=lambda x: x[3])
+    total = sum(m["size"] for _, _, m, _ in all_)
+    for kind, e, meta, _ in all_:
+        if total <= cap:
+            break
+        lock = Lock(kind, e.name)
+        with lock:
+            gone = e.parent / f".tmp-gc-{e.name}-{os.getpid()}"
+            os.rename(e, gone)
+        shutil.rmtree(gone, ignore_errors=True)
+        total -= meta["size"]
+        print(f"dropped {kind}/{e.name} ({meta['size']} bytes)")
+    print(f"cache: {total / (1 << 30):.1f} GiB of {max_gib} GiB")
+
+
+def opt(args, name, default):
+    if name in args:
+        i = args.index(name)
+        value = args[i + 1]
+        del args[i : i + 2]
+        return value
+    return default
+
+
+def main():
+    args = sys.argv[1:]
+    if not args or args[0] in ("-h", "--help", "help"):
+        print(__doc__)
+        return
+    cmd, rest = args[0], args[1:]
+    if cmd == "key" and len(rest) == 2:
+        kind_dir(rest[0])
+        print(key_of(manifest_text(rest[1])))
+    elif cmd == "get" and len(rest) == 3:
+        entry = hit(rest[0], manifest_text(rest[1]))
+        if not entry:
+            sys.exit(1)
+        copy(entry / "out", rest[2])
+    elif cmd == "path" and len(rest) == 2:
+        entry = hit(rest[0], manifest_text(rest[1]))
+        if not entry:
+            sys.exit(1)
+        print(entry / "out")
+    elif cmd == "put" and len(rest) >= 3:
+        producer = opt(rest, "--producer", os.environ.get("USER", "?"))
+        text = manifest_text(rest[1])
+        with Lock(rest[0], key_of(text)):
+            print(put(rest[0], text, rest[2], producer))
+    elif cmd == "run" and "--" in rest:
+        cut = rest.index("--")
+        head, command = rest[:cut], rest[cut + 1 :]
+        producer = opt(head, "--producer", os.environ.get("USER", "?"))
+        if len(head) != 3 or not command:
+            die("usage: acache run <kind> <manifest> <dest> [--producer NAME] -- <cmd...>")
+        kind, text, dest = head[0], manifest_text(head[1]), head[2]
+        entry = hit(kind, text)
+        if not entry:
+            with Lock(kind, key_of(text)):
+                entry = hit(kind, text)
+                if not entry:
+                    print(f"acache: miss {kind}/{key_of(text)[:12]}: building", file=sys.stderr)
+                    code = subprocess.run(command).returncode
+                    if code != 0:
+                        sys.exit(code)
+                    if not os.path.lexists(dest):
+                        die(f"the command did not write {dest}")
+                    put(kind, text, dest, producer)
+                    return
+        print(f"acache: hit {kind}/{entry.name[:12]}", file=sys.stderr)
+        copy(entry / "out", dest)
+    elif cmd == "verify" and len(rest) == 2:
+        e = kind_dir(rest[0]) / rest[1]
+        meta = json.loads((e / "meta").read_text())
+        digest, _ = tree_digest(e / "out")
+        if digest != meta["sha256"]:
+            die(f"{rest[0]}/{rest[1]}: {digest} against {meta['sha256']}", 1)
+        if key_of((e / "inputs").read_text()) != rest[1]:
+            die(f"{rest[0]}/{rest[1]}: inputs do not hash to the key", 1)
+        print("ok")
+    elif cmd == "gc":
+        gc(float(opt(rest, "--max-gib", os.environ.get("ACACHE_MAX_GIB", "200"))))
+    elif cmd == "ls":
+        for kind, e, meta, used in entries(rest[0] if rest else None):
+            print(f"{kind}\t{e.name}\t{meta['size']}\t{time.strftime('%F %T', time.localtime(used))}\t{meta['producer']}")
+    else:
+        die("usage: see acache --help")
+
+
+main()

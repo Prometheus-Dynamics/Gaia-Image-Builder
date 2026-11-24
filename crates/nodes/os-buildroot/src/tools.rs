@@ -246,11 +246,14 @@ mod tests {
         let dir = tempfile::tempdir().expect("tempdir");
         write(dir.path()).expect("wrappers");
         let tools = dir.path();
-        // `path(dir)` puts `dir/.gaia-tools` first.
-        let plain = archive(tools, "plain.a", "rcs", false);
+        // `path(dir)` puts `dir/.gaia-tools` first. The machine's own ar
+        // asked for real dates: some hosts' ar (Debian's, Ubuntu's) writes
+        // 0 by default, others (Fedora's) the time, so the sample of an
+        // archive with dates asks for them.
+        let plain = archive(tools, "plain.a", "rcsU", false);
         assert!(
             !table_fields(&plain).starts_with("0 "),
-            "the machine's ar is deterministic already: {:?}",
+            "the machine's ar wrote no date when asked for one: {:?}",
             table_fields(&plain)
         );
         let first = archive(tools, "one.a", "rcs", true);
@@ -286,7 +289,8 @@ mod tests {
         fs::create_dir_all(tree.join("lib")).expect("tree");
         fs::write(
             tree.join("lib/libplain.a"),
-            archive(dir.path(), "plain.a", "rcs", false),
+            // Real dates, as an unwrapped ar writes on some hosts.
+            archive(dir.path(), "plain.a", "rcsU", false),
         )
         .expect("plain");
         fs::write(tree.join("lib/libwrapped.a"), &wrapped).expect("wrapped");

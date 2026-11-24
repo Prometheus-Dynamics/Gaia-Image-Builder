@@ -282,14 +282,44 @@ pub(crate) fn run(
     })
 }
 
+/// Kills the tool's process group and every process it started, by its
+/// process ID as well: a process that left the group (a sandbox's own
+/// session) is reached by its ID. A sandbox counts on its first process
+/// taking the rest with it when the sandbox dies, and a host that clears
+/// that death signal when the sandbox's first program starts (Ubuntu's
+/// AppArmor profile for bubblewrap) would leave it running and holding the
+/// tool's pipes. The tree is read before anything is killed, while every
+/// parent still names its children.
 fn kill_group(group: u32) {
-    let Some(pid) = i32::try_from(group)
-        .ok()
-        .and_then(rustix::process::Pid::from_raw)
-    else {
+    let mut tree = Vec::new();
+    descendants(group, &mut tree);
+    if let Some(pid) = pid_of(group) {
+        let _ = rustix::process::kill_process_group(pid, rustix::process::Signal::KILL);
+    }
+    for pid in tree.into_iter().filter_map(pid_of) {
+        let _ = rustix::process::kill_process(pid, rustix::process::Signal::KILL);
+    }
+}
+
+/// Every process below `pid`, from `/proc/<pid>/task/*/children`.
+fn descendants(pid: u32, out: &mut Vec<u32>) {
+    let Ok(tasks) = std::fs::read_dir(format!("/proc/{pid}/task")) else {
         return;
     };
-    let _ = rustix::process::kill_process_group(pid, rustix::process::Signal::KILL);
+    for task in tasks.flatten() {
+        let Ok(text) = std::fs::read_to_string(task.path().join("children")) else {
+            continue;
+        };
+        for child in text
+            .split_whitespace()
+            .filter_map(|c| c.parse::<u32>().ok())
+        {
+            if !out.contains(&child) {
+                out.push(child);
+                descendants(child, out);
+            }
+        }
+    }
 }
 
 /// The process ID of a child, as the wait calls take it.

@@ -49,7 +49,7 @@ host-a:
 \tprintf 'int a(void) { return 1; }\\n' > $(O)/build/host-a-1/src/a.c
 \tcc -c -o $(O)/build/host-a-1/src/a.o $(O)/build/host-a-1/src/a.c
 \tar rcs $(O)/host/lib/liba.a $(O)/build/host-a-1/src/a.o
-\t/usr/bin/ar rcs $(O)/host/lib/libplain.a $(O)/build/host-a-1/src/a.o
+\t/usr/bin/ar rcsU $(O)/host/lib/libplain.a $(O)/build/host-a-1/src/a.o
 \tprintf 'X = 1\\n' > $(O)/host/lib/py/m.py
 \tpython3 -c 'import sys; sys.path.insert(0, \"$(O)/host/lib/py\"); import m'
 \tln -s \"$$(command -v python3)\" $(O)/host/bin/python3
