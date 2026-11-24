@@ -23,6 +23,12 @@ script hash, compiler and tool versions, arch, flags). The lines are sorted
 before hashing, so their order does not matter. A forgotten input is a
 wrong hit; when in doubt, put it in.
 
+Only what does not depend on where it lies goes in: a kernel image, a
+config, a tarball, a disk image. A tree with its own absolute path written
+into it (a Kbuild KDIR, a Buildroot host directory, a Python venv) works
+from its copy as if it were still at the first place, quietly: keep such a
+tree at a fixed path of your own, and put what it made in the cache.
+
 Commands (exit 0 = done; `get` exits 1 on a miss):
 
   acache key  <kind> <manifest>          print the key

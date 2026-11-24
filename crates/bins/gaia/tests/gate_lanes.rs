@@ -88,6 +88,24 @@ fn the_gate_tests_what_a_change_can_reach_and_nothing_a_passed_tree_holds() {
     assert_eq!(words[0], "lanes", "{plan}");
     assert_eq!(&words[2..], ["high", "low"], "{plan}");
 
+    // A change to `low`'s own tests: `low` alone.
+    write(&repo.join("crates/low/tests/t.rs"), "#[test]\nfn t() {}\n");
+    let plan = run("plan");
+    assert_eq!(
+        &plan.split_whitespace().collect::<Vec<_>>()[2..],
+        ["high", "low"],
+        "with the library change, its users still: {plan}"
+    );
+    write(&repo.join("crates/low/src/lib.rs"), "\n");
+    let plan = run("plan");
+    assert_eq!(
+        &plan.split_whitespace().collect::<Vec<_>>()[2..],
+        ["low"],
+        "a test of its own only: {plan}"
+    );
+    std::fs::remove_file(repo.join("crates/low/tests/t.rs")).expect("remove");
+    write(&repo.join("crates/low/src/lib.rs"), "pub fn x() {}\n");
+
     // Committed, it is still measured from the passed ancestor.
     git(&repo, &["commit", "-q", "-am", "two"]);
     let plan = run("plan");

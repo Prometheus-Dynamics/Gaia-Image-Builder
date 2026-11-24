@@ -23,7 +23,10 @@ pass. Nothing here skips a test whose result could have changed:
     library, so no doc tests) whose crate directories
     changed since the passed ancestor `base`, and every workspace package
     that depends on one of them (normal, build or dev dependency), to the
-    end of the chain. Their tests, and only theirs, can see the change.
+    end of the chain. Their tests, and only theirs, can see the change. A
+    change only under a crate's `tests/` is its own: no other package
+    builds or reads a crate's integration tests, so its users are not
+    added for it.
 """
 import hashlib
 import json
@@ -124,15 +127,18 @@ def plan():
         dirs, users, libs = packages()
     except subprocess.CalledProcessError as error:
         return f"full cargo metadata failed: {error.stderr.strip().splitlines()[-1:]}"
-    hit = set()
+    hit, own = set(), set()
     for path in changed_since(base):
         owner = next((d for d in dirs if path.startswith(d + "/")), None)
         if owner is None:
             return f"full {path} is outside every crate"
-        hit.add(dirs[owner])
-    if not hit:
+        if path.startswith(owner + "/tests/"):
+            own.add(dirs[owner])
+        else:
+            hit.add(dirs[owner])
+    if not hit and not own:
         return f"none {base}"
-    todo, closure = list(hit), set(hit)
+    todo, closure = list(hit), hit | own
     while todo:
         for user in users[todo.pop()]:
             if user not in closure:
