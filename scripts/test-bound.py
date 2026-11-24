@@ -145,10 +145,11 @@ def run(argv, bound, out=sys.stderr, **popen):
 
 
 def self_test():
-    """Three cases on one CPU that outside spinners share, judged by usable time, never wall."""
+    """Three cases, each on a CPU of its own that outside spinners share, judged by usable time,
+    never wall. The cases run at once when there are three CPUs to give them, else in turn."""
+    import threading
     bound = 3.0
-    cpu = sorted(os.sched_getaffinity(0))[-1]
-    pin = lambda: os.sched_setaffinity(0, {cpu})
+    cpus = sorted(os.sched_getaffinity(0))
     spin = "import time\nend = time.process_time() + {cpu}\nwhile time.process_time() < end: pass\n"
     failed = []
 
@@ -157,7 +158,8 @@ def self_test():
         if not ok:
             failed.append(what)
 
-    def case(code, others):
+    def case(code, others, cpu):
+        pin = lambda: os.sched_setaffinity(0, {cpu})
         spinners = [subprocess.Popen([sys.executable, "-c", "while True: pass"], preexec_fn=pin)
                     for _ in range(others)]
         try:
@@ -174,16 +176,35 @@ def self_test():
     if not waited(os.getpgid(0)):
         print("skipped: the kernel keeps no schedstat here, so the bound is wall time")
         return 0
+    codes = [
+        "import time; time.sleep(60)",
+        spin.format(cpu=bound * 0.5),
+        spin.format(cpu=bound * 3),
+    ]
+    results = [None] * len(codes)
+
+    def run(i):
+        results[i] = case(codes[i], 3, cpus[-1 - i % len(cpus)])
+
+    if len(cpus) >= len(codes):
+        threads = [threading.Thread(target=run, args=(i,)) for i in range(len(codes))]
+        for thread in threads:
+            thread.start()
+        for thread in threads:
+            thread.join()
+    else:
+        for i in range(len(codes)):
+            run(i)
     # 1. Sleeping is not waiting for a CPU: stopped at the bound, nothing taken off.
-    ended, wall, lost = case("import time; time.sleep(60)", 3)
+    ended, wall, lost = results[0]
     check("a sleeper is stopped at its bound", not ended and wall - lost >= bound and lost < 1.0,
           f"ended={ended} usable={wall - lost:.1f} s lost={lost:.1f} s")
     # 2. Needs less CPU than the bound, on a CPU three spinners share: starved, not slow.
-    ended, wall, lost = case(spin.format(cpu=bound * 0.5), 3)
+    ended, wall, lost = results[1]
     check("a starved test that needs less than its bound passes", ended and lost > 0.5,
           f"ended={ended} usable={wall - lost:.1f} s lost={lost:.1f} s (wall is not judged)")
     # 3. Needs more CPU than the bound: stopped when its usable time reaches it, starved or not.
-    ended, wall, lost = case(spin.format(cpu=bound * 3), 3)
+    ended, wall, lost = results[2]
     check("a test that needs more than its bound is stopped at it",
           not ended and bound <= wall - lost < bound + 1.5 and lost > 0.5,
           f"ended={ended} usable={wall - lost:.1f} s lost={lost:.1f} s")
