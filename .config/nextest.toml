@@ -3,10 +3,12 @@
 # cases (each builds a toolchain's project, boots a guest or encodes
 # hundreds of megabytes) start first, the hundreds of small ones fill in
 # around them. Order only: every case still runs, each bounded as before.
+# Folded tests (tests/all/) are named by their module: `disk::...`.
 [[profile.default.overrides]]
 filter = '''
-binary(qemu_runner) | binary(build_go) | binary(build_node) | binary(build_python)
-| binary(build_java) | binary(build_rust) | binary(compress) | binary(test_bound)
-| binary(disk) | binary(flash) | (package(gaia-flash-image) & test(/^tests::the_stream/))
+binary(build_go) | binary(build_node) | binary(build_python)
+| binary(build_java) | binary(build_rust)
+| test(/^(qemu_runner|compress|test_bound|disk|flash)::/)
+| (package(gaia-flash-image) & test(/^tests::the_stream/))
 '''
 priority = 50

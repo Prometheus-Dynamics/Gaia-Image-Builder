@@ -1,9 +1,7 @@
 //! Every port type round-trips through Daedalus values (fed into a graph,
 //! through a node, taken back out) and through its serialized value form.
 
-mod common;
-
-use common::*;
+use crate::common::*;
 use daedalus::prelude::*;
 use daedalus_cpu::CpuBackend;
 use gaia_types::*;
