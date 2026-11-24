@@ -5,6 +5,7 @@ mod acache;
 mod cli;
 mod disk;
 mod gate_lanes;
+mod gate_steps;
 mod gate_target;
 mod input;
 mod os;
