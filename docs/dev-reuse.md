@@ -30,6 +30,27 @@ changed get a new time, because cargo goes by times. The details are in
 `crates/nodes/build-rust/src/warm.rs`. A description cannot set the step's
 `dev` input, and a clean build in which a step has one is refused by name.
 
+A dev build's Rust is compiled with **no LTO and 16 codegen units**
+(`CARGO_PROFILE_<P>_LTO=off`, `CARGO_PROFILE_<P>_CODEGEN_UNITS=16`, in the
+dev sandbox only): the link that fat LTO makes the longest part of an edit
+loop is short, and the code is not the code a clean build ships. The step's
+line, the `DEV BUILD` banner and each output's marker (`"rust_profile"`) say
+so. A clean build, the landing gate and any image flashed for a proof or a
+release keep the source's profile. `--verify` builds its dev half with the
+source's profile, in a kept target of its own, so its comparison holds.
+
+## Iterating on a bench board
+
+Stop at what the board takes. When only the software changed and the board
+updates its slot from a bundle, build `--until` the bundle step (seconds) and
+install that. Build the full disk or flash image (it compresses the whole
+disk) only to flash a board. The release path is unchanged: it is a clean
+build of everything.
+
+```
+gaia build product.toml --dev-reuse --until <bundle step>
+```
+
 ## What keeps it apart from a release
 
 **A release is a clean build.** Whatever later builds the release path
