@@ -3105,3 +3105,61 @@ fn a_generated_ramdisk_boot_takes_the_generators_overlay_and_fragment() {
         "{err}"
     );
 }
+
+/// A host whose `/dev/shm` has quotas on and no `quota` program to read them
+/// (a GitHub runner) builds: the automatic placement puts the work on the
+/// disk and says so once, rather than stopping. The `quota` program is taken
+/// out of the PATH the build sees; everything else on it stays.
+#[test]
+fn a_build_runs_where_the_shm_quota_cannot_be_read() {
+    let mountinfo = std::fs::read_to_string("/proc/self/mountinfo").expect("mountinfo");
+    let quotas_on = mountinfo
+        .lines()
+        .any(|line| line.split_whitespace().nth(4) == Some("/dev/shm") && line.contains("quota"));
+    let dir = project();
+    // Every program on PATH but `quota`, as links in one directory.
+    let bin = dir.path().join("path-without-quota");
+    std::fs::create_dir_all(&bin).expect("mkdir");
+    for part in std::env::split_paths(&std::env::var_os("PATH").unwrap_or_default()) {
+        for entry in std::fs::read_dir(&part).into_iter().flatten().flatten() {
+            let name = entry.file_name();
+            let link = bin.join(&name);
+            if name != "quota" && !link.exists() {
+                let _ = std::os::unix::fs::symlink(entry.path(), link);
+            }
+        }
+    }
+    assert!(!bin.join("quota").exists());
+    let out = Command::new(env!("CARGO_BIN_EXE_gaia"))
+        .args([
+            "build",
+            "examples/products/zero-3e-demo/product.toml",
+            "--recipes",
+            "recipes",
+            "--until",
+            "gaia.source.input",
+        ])
+        .current_dir(dir.path())
+        .env("PATH", &bin)
+        .env("GAIA_STORE", dir.path().join("store"))
+        .env("GAIA_JOBS", "2")
+        .env_remove("GAIA_WORK_DIR")
+        .env_remove("GAIA_EROFS_TOOL")
+        .output()
+        .expect("runs");
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    eprint!("{stderr}");
+    assert!(out.status.success(), "the build runs without `quota`");
+    if quotas_on {
+        assert_eq!(
+            stderr
+                .matches("gaia: work directories are on the disk:")
+                .count(),
+            1,
+            "said once"
+        );
+        assert!(stderr.contains("`quota` could not be run"), "{stderr}");
+    } else {
+        println!("/dev/shm has no quota on here: the build is checked, the note is not");
+    }
+}

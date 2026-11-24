@@ -166,10 +166,20 @@ impl Store {
     pub fn scratch_for(&self, expected: u64) -> Result<Scratch<'_>> {
         let settings = Settings::from_env()?;
         let shm = std::path::Path::new(placement::SHM);
-        // Read only for the automatic choice: a quota that cannot be read
-        // stops it, and a chosen mode needs no reading.
+        // Read only for the automatic choice, and a chosen mode needs no
+        // reading. What the automatic choice cannot read (a quota on with no
+        // `quota` program, a project quota) puts the work on the disk,
+        // which no quota there limits, with one note per process: a host
+        // without quota-tools still builds. `GAIA_WORK_DIR=ram` stays as
+        // asked.
         let room = match settings.mode {
-            placement::Mode::Auto => Room::read(shm)?,
+            placement::Mode::Auto => match Room::read(shm) {
+                Ok(room) => room,
+                Err(error) => {
+                    placement::note_disk(&error);
+                    return self.scratch();
+                }
+            },
             placement::Mode::Disk | placement::Mode::Ram => Room::default(),
         };
         self.scratch_with(expected, &settings, room, shm, &placement::BUDGET)

@@ -130,7 +130,7 @@ impl Room {
     /// the free space of `shm` and the quota on it
     /// (see [`quota_headroom`]). A quota that is on and cannot be read is an
     /// error: the free space alone would put a step where the quota refuses
-    /// its writes.
+    /// its writes. [`crate::Store::scratch_for`] then uses the disk.
     pub fn read(shm: &Path) -> Result<Self> {
         let mem_available = fs::read_to_string("/proc/meminfo")
             .ok()
@@ -153,6 +153,15 @@ impl Room {
         let free = self.shm_free?;
         Some(self.shm_quota.map_or(free, |quota| quota.min(free)))
     }
+}
+
+/// Says once per process why the automatic choice put work on the disk:
+/// what it could not read in `/dev/shm`.
+pub(crate) fn note_disk(error: &Error) {
+    static NOTED: std::sync::Once = std::sync::Once::new();
+    NOTED.call_once(|| {
+        eprintln!("gaia: work directories are on the disk: {error}");
+    });
 }
 
 /// Which quotas a mount has on, from its options.
