@@ -223,16 +223,44 @@ fn a_sandboxed_tools_cpu_time_is_recorded() {
     }
     let dir = tempfile::tempdir().expect("tempdir");
     let store = dir.path().join("store");
-    let script = "(i=0; while [ $i -lt 300000 ]; do i=$((i+1)); done); touch /out/done";
-    run(&store, sandbox(dir.path()), script).expect("runs");
+    let spin = "i=0; while [ $i -lt 300000 ]; do i=$((i+1)); done";
+    let script = format!("({spin}); touch /out/done");
+    run(&store, sandbox(dir.path()), &script).expect("runs");
     let store = Store::open(&store).expect("store");
     let records = gaia_step::step_records(&gaia_step::logs_dir(&store));
     let cpu_ns = records.last().expect("a record").report.cpu_ns;
-    println!("the spinning tool's CPU: {} ms", cpu_ns / 1_000_000);
-    assert!(
-        cpu_ns >= 300_000_000,
-        "a loop of 300,000 shell steps takes well over 0.3 s: {cpu_ns} ns"
+    // The same loop on the host, on this machine: what it costs here, not
+    // a figure from another machine's speed.
+    let host_ns = host_cpu_ns(spin);
+    println!(
+        "the spinning tool's CPU: {} ms; the same loop on the host: {} ms",
+        cpu_ns / 1_000_000,
+        host_ns / 1_000_000
     );
+    assert!(host_ns >= 20_000_000, "the loop spins: {host_ns} ns");
+    assert!(
+        cpu_ns >= host_ns / 2,
+        "the sandboxed loop's CPU is recorded: {cpu_ns} ns against {host_ns} ns on the host"
+    );
+}
+
+/// The user and system CPU of `script` run by the host's `sh`, as bash's
+/// `time` reports it.
+fn host_cpu_ns(script: &str) -> u64 {
+    let out = std::process::Command::new("bash")
+        .args([
+            "-c",
+            &format!("TIMEFORMAT='%3U %3S'; time sh -c '{script}'"),
+        ])
+        .output()
+        .expect("bash");
+    let text = String::from_utf8_lossy(&out.stderr);
+    // Each is seconds with three decimals: summed in milliseconds.
+    let ms: u64 = text
+        .split_whitespace()
+        .map(|s| s.replace('.', "").parse::<u64>().expect("seconds"))
+        .sum();
+    ms * 1_000_000
 }
 
 /// The host processes whose command line holds `marker`.
