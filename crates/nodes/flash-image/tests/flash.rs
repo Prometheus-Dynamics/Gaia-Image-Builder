@@ -380,7 +380,9 @@ fn a_multi_block_image_is_read_back_whole_unsigned_and_signed() {
     let root = tempfile::tempdir().expect("tempdir");
     let store = store_path(&root.path().join("store"));
     let raw = multi_block_image();
-    for signed in [false, true] {
+    // Unsigned and signed are two steps of their own (two keys, one store):
+    // both at once.
+    let check = |signed: bool| {
         let image = store_image(Path::new(&store), &raw);
         let text = secret_file_text();
         let key = signed.then_some(KEY_VAR);
@@ -430,5 +432,11 @@ fn a_multi_block_image_is_read_back_whole_unsigned_and_signed() {
                 "{name}: stock xz does not read back the image"
             );
         }
-    }
+    };
+    std::thread::scope(|scope| {
+        let unsigned = scope.spawn(|| check(false));
+        let signed = scope.spawn(|| check(true));
+        unsigned.join().expect("unsigned");
+        signed.join().expect("signed");
+    });
 }
