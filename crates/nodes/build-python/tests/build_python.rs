@@ -211,18 +211,34 @@ sys.exit(1 if bad or not checked else 0)
     assert!(run.status.success(), "RECORD does not match the files");
     assert!(text.contains("bin/hello"), "the script is checked: {text}");
 
-    // A fresh venv (its own pip, no system packages) with the installed tree
-    // on its path: pip check finds nothing broken in the tree.
+    // A fresh venv (no system packages) with the installed tree on its path:
+    // pip check finds nothing broken in the tree. The venv gets no pip of its
+    // own (ensurepip costs seconds of CPU); the host's pip package is on the
+    // path alone, by a link in a directory of its own, with no distribution
+    // of it beside the tree's.
     let venv = root.path().join("venv");
     let made = Command::new(PYTHON)
-        .args(["-m", "venv"])
+        .args(["-m", "venv", "--without-pip"])
         .arg(&venv)
         .output()
         .expect("venv");
     assert!(made.status.success(), "venv: {made:?}");
+    let found = Command::new(PYTHON)
+        .args(["-c", "import os, pip; print(os.path.dirname(pip.__file__))"])
+        .output()
+        .expect("python");
+    assert!(found.status.success(), "pip: {found:?}");
+    let pip_only = root.path().join("pip-only");
+    std::fs::create_dir(&pip_only).expect("mkdir");
+    std::os::unix::fs::symlink(
+        String::from_utf8_lossy(&found.stdout).trim(),
+        pip_only.join("pip"),
+    )
+    .expect("link");
+    let path = std::env::join_paths([&site, &pip_only]).expect("path");
     let pip = Command::new(venv.join("bin/python"))
         .args(["-m", "pip", "check"])
-        .env("PYTHONPATH", &site)
+        .env("PYTHONPATH", &path)
         .env("PYTHONDONTWRITEBYTECODE", "1")
         .env("PIP_NO_INPUT", "1")
         .env("PIP_NO_CACHE_DIR", "1")
