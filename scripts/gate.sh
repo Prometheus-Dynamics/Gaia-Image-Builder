@@ -71,8 +71,12 @@ tests() {
     local host runner
     host=$(rustc -vV | sed -n 's/^host: //p')
     runner="CARGO_TARGET_$(printf '%s' "$host" | tr 'a-z-' 'A-Z_')_RUNNER"
+    # On a CI runner every case runs to its end: one red run names every
+    # case that fails there, not just the first.
+    local all=()
+    if [ -n "${GITHUB_ACTIONS:-}" ]; then all=(--no-fail-fast); fi
     env "$runner=$PWD/scripts/test-bound.py" \
-      cargo nextest run --locked "${packages[@]}" --all-features || cases=$?
+      cargo nextest run --locked "${packages[@]}" "${all[@]}" --all-features || cases=$?
     if [ "${#doc_packages[@]}" -gt 0 ]; then
       cargo test --locked "${doc_packages[@]}" --all-features --doc || docs=$?
     fi

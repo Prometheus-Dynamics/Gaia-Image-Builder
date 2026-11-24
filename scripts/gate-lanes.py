@@ -6,7 +6,8 @@ pass. Nothing here skips a test whose result could have changed:
 
 - The **code tree** is the commit's tree less what no build or test reads:
   `*.md`, `docs/`, `LICENSE-*` (the same set next.yml's push trigger leaves
-  out). Its hash names a pass.
+  out), and `.github/`: the workflows run the gate, the gate never reads
+  them. Its hash names a pass.
 - `passed`: a clean worktree's code tree is recorded as passed, under
   `$GAIA_GATE_RECORDS` (default `~/.cache/gaia/gate-passed`). A dirty
   worktree records nothing: what passed is not a commit.
@@ -47,7 +48,11 @@ def git(*args, check=True):
 
 def not_code(path):
     name = path.rsplit("/", 1)[-1]
-    return path.endswith(".md") or path.startswith("docs/") or name.startswith("LICENSE-")
+    return (
+        path.endswith(".md")
+        or path.startswith(("docs/", ".github/"))
+        or name.startswith("LICENSE-")
+    )
 
 
 def code_hash(commit):

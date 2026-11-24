@@ -101,6 +101,11 @@ fn the_gate_tests_what_a_change_can_reach_and_nothing_a_passed_tree_holds() {
     write(&repo.join("docs/a.md"), "b\n");
     git(&repo, &["commit", "-q", "-am", "docs"]);
     assert!(run("plan").starts_with("none "), "docs only");
+    // A workflow alone: the gate does not read it.
+    write(&repo.join(".github/workflows/next.yml"), "on: push\n");
+    git(&repo, &["add", "-A"]);
+    git(&repo, &["commit", "-q", "-m", "workflow"]);
+    assert!(run("plan").starts_with("none "), "a workflow only");
 
     // Anything outside a crate: everything.
     write(&repo.join("rust-toolchain.toml"), "[toolchain]\n");
