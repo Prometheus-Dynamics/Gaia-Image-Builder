@@ -35,6 +35,34 @@ fn available() -> bool {
     ok
 }
 
+/// A heavy case's verdict: kept under its test binary, the host's Python
+/// with its pip and setuptools, and the sandbox's bwrap, so an unchanged case
+/// is not built again locally (CI runs it every time; see gaia-verdict).
+fn verdict(case: &str) -> gaia_verdict::Verdict {
+    use gaia_verdict::identity;
+    gaia_verdict::Verdict::new(
+        &format!("build_python::{case}"),
+        env!("CARGO_MANIFEST_DIR"),
+        &[
+            (
+                "python",
+                identity(
+                    Path::new(PYTHON),
+                    &[
+                        "-c",
+                        "import sys, pip, setuptools; print(sys.version, pip.__version__, setuptools.__version__)",
+                    ],
+                ),
+            ),
+            (
+                "bwrap",
+                identity(Path::new("/usr/bin/bwrap"), &["--version"]),
+            ),
+        ],
+        &[],
+    )
+}
+
 fn write(path: &Path, text: &str) {
     std::fs::create_dir_all(path.parent().expect("parent")).expect("mkdir");
     std::fs::write(path, text).expect("write");
@@ -116,6 +144,10 @@ fn a_small_package_builds_offline_twice_to_the_same_digest() {
     if !available() {
         return;
     }
+    let verdict = verdict("twice");
+    if verdict.reused() {
+        return;
+    }
     let (a, b) = (
         tempfile::tempdir().expect("tempdir"),
         tempfile::tempdir().expect("tempdir"),
@@ -162,6 +194,7 @@ fn a_small_package_builds_offline_twice_to_the_same_digest() {
     let text = String::from_utf8_lossy(&out.stdout);
     println!("runs: {}", text.trim());
     assert_eq!(text.trim(), "hello 42");
+    verdict.passed();
 }
 
 /// Every RECORD row that has a hash names a file whose sha256 (urlsafe
@@ -170,6 +203,10 @@ fn a_small_package_builds_offline_twice_to_the_same_digest() {
 #[test]
 fn installed_records_match_their_files() {
     if !available() {
+        return;
+    }
+    let verdict = verdict("installed-records");
+    if verdict.reused() {
         return;
     }
     let root = tempfile::tempdir().expect("tempdir");
@@ -250,6 +287,7 @@ sys.exit(1 if bad or not checked else 0)
     print!("pip check: {report}");
     assert!(pip.status.success(), "pip check failed: {report}");
     assert!(report.contains("No broken requirements found"), "{report}");
+    verdict.passed();
 }
 
 fn list(root: &Path, dir: &Path, out: &mut Vec<String>) {

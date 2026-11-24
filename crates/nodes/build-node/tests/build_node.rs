@@ -8,6 +8,26 @@ use gaia_types::Tree;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
+/// The twice case's verdict: kept under its test binary, node and npm, and
+/// the sandbox's bwrap, so an unchanged case is not built again locally (CI
+/// runs it every time; see gaia-verdict).
+fn verdict(home: &Path) -> gaia_verdict::Verdict {
+    use gaia_verdict::identity;
+    gaia_verdict::Verdict::new(
+        "build_node::twice",
+        env!("CARGO_MANIFEST_DIR"),
+        &[
+            ("node", identity(&home.join("bin/node"), &["--version"])),
+            ("npm", identity(&home.join("bin/npm"), &["--version"])),
+            (
+                "bwrap",
+                identity(Path::new("/usr/bin/bwrap"), &["--version"]),
+            ),
+        ],
+        &[],
+    )
+}
+
 fn write(path: &Path, text: &str) {
     std::fs::create_dir_all(path.parent().expect("parent")).expect("mkdir");
     std::fs::write(path, text).expect("write");
@@ -132,6 +152,10 @@ fn a_small_app_builds_offline_twice_to_the_same_digest() {
         println!("SKIPPED: no node and npm here");
         return;
     };
+    let verdict = verdict(&home);
+    if verdict.reused() {
+        return;
+    }
     let shared = tempfile::tempdir().expect("tempdir");
     let (app, tgz) = inputs(&home, shared.path());
     // The caches are filled one after another, as two hosts would at two
@@ -233,6 +257,7 @@ fn a_small_app_builds_offline_twice_to_the_same_digest() {
             .iter()
             .any(|f| f == "node_modules/@gaia-test/tiny/index.js")
     );
+    verdict.passed();
 }
 
 fn list(root: &Path, dir: &Path, out: &mut Vec<String>) {

@@ -435,6 +435,21 @@ mod tests {
     /// what a reader gets back is the image.
     #[test]
     fn the_stream_is_the_agreed_one_at_any_thread_count() {
+        // 160 MiB encoded at two thread counts: kept under this test binary
+        // and the xz program it compares with, so an unchanged case is not
+        // encoded again locally (CI runs it every time; see gaia-verdict).
+        let verdict = gaia_verdict::Verdict::new(
+            "flash_image::agreed-stream",
+            env!("CARGO_MANIFEST_DIR"),
+            &[(
+                "xz",
+                gaia_verdict::identity(Path::new("xz"), &["--version"]),
+            )],
+            &[],
+        );
+        if verdict.reused() {
+            return;
+        }
         let dir = tempfile::tempdir().expect("tempdir");
         let image = dir.path().join("sample.img");
         let raw = sample();
@@ -499,6 +514,7 @@ mod tests {
             }
             _ => println!("SKIPPED the comparison with the xz program: none ran"),
         }
+        verdict.passed();
     }
 
     /// A sparse image as a disk is: blocks of zeros, a data block between

@@ -24,6 +24,7 @@ xz2 = "=0.1.7"
 zstd = { version = "0.13", features = ["zstdmt"] }
 
 [dev-dependencies]
+gaia-verdict = { path = "../../test/verdict" }
 tempfile = "3"
 
 [lints]

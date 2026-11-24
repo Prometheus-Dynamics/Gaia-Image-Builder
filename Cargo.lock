@@ -669,6 +669,7 @@ dependencies = [
  "gaia-step",
  "gaia-store",
  "gaia-types",
+ "gaia-verdict",
  "tempfile",
 ]
 
@@ -683,6 +684,7 @@ dependencies = [
  "gaia-step",
  "gaia-store",
  "gaia-types",
+ "gaia-verdict",
  "tempfile",
 ]
 
@@ -712,6 +714,7 @@ dependencies = [
  "gaia-step",
  "gaia-store",
  "gaia-types",
+ "gaia-verdict",
  "serde_json",
  "tempfile",
 ]
@@ -728,6 +731,7 @@ dependencies = [
  "gaia-step",
  "gaia-store",
  "gaia-types",
+ "gaia-verdict",
  "tempfile",
 ]
 
@@ -744,6 +748,7 @@ dependencies = [
  "gaia-step",
  "gaia-store",
  "gaia-types",
+ "gaia-verdict",
  "rustix",
  "serde_json",
  "tempfile",
@@ -777,6 +782,7 @@ dependencies = [
  "gaia-step",
  "gaia-store",
  "gaia-types",
+ "gaia-verdict",
  "lzma-sys",
  "miniz_oxide",
  "tar",
@@ -827,6 +833,7 @@ dependencies = [
  "gaia-step",
  "gaia-store",
  "gaia-types",
+ "gaia-verdict",
  "lzma-sys",
  "rustix",
  "serde_json",
@@ -1330,6 +1337,14 @@ dependencies = [
  "serde",
  "serde_json",
  "sha2 0.11.1",
+]
+
+[[package]]
+name = "gaia-verdict"
+version = "2.0.6-dev"
+dependencies = [
+ "sha2 0.11.1",
+ "tempfile",
 ]
 
 [[package]]

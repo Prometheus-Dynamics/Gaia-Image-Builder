@@ -7,6 +7,27 @@ use gaia_store::{Store, file_digest};
 use gaia_types::Tree;
 use std::path::{Path, PathBuf};
 
+/// The twice case's verdict: kept under its test binary, the JDK, and the
+/// sandbox's bwrap, so an unchanged case is not built again locally (CI runs
+/// it every time; see gaia-verdict).
+fn verdict(jdk: &Path) -> gaia_verdict::Verdict {
+    use gaia_verdict::identity;
+    gaia_verdict::Verdict::new(
+        "build_java::twice",
+        env!("CARGO_MANIFEST_DIR"),
+        &[
+            ("javac", identity(&jdk.join("bin/javac"), &["-version"])),
+            ("java", identity(&jdk.join("bin/java"), &["-version"])),
+            ("jar", identity(&jdk.join("bin/jar"), &["--version"])),
+            (
+                "bwrap",
+                identity(Path::new("/usr/bin/bwrap"), &["--version"]),
+            ),
+        ],
+        &[],
+    )
+}
+
 fn write(path: &Path, text: &str) {
     std::fs::create_dir_all(path.parent().expect("parent")).expect("mkdir");
     std::fs::write(path, text).expect("write");
@@ -116,6 +137,10 @@ fn a_small_project_builds_offline_twice_to_the_same_digest() {
         println!("SKIPPED: no JDK (javac and jar) here");
         return;
     };
+    let verdict = verdict(&jdk);
+    if verdict.reused() {
+        return;
+    }
     let (a, b) = (
         tempfile::tempdir().expect("tempdir"),
         tempfile::tempdir().expect("tempdir"),
@@ -163,6 +188,7 @@ fn a_small_project_builds_offline_twice_to_the_same_digest() {
     assert!(manifest.success());
     let text = std::fs::read_to_string(a.path().join("META-INF/MANIFEST.MF")).expect("manifest");
     assert!(text.contains("Main-Class: dev.gaia.app.Main"), "{text}");
+    verdict.passed();
 }
 
 #[test]

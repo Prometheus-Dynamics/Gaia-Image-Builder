@@ -1,0 +1,18 @@
+[package]
+name = "gaia-verdict"
+description = "A heavy test's pass, kept under the hash of everything it reads, so an unchanged case is not run again locally"
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+rust-version.workspace = true
+repository.workspace = true
+publish = false
+
+[dependencies]
+sha2 = "0.11.0"
+
+[dev-dependencies]
+tempfile = "3"
+
+[lints]
+workspace = true

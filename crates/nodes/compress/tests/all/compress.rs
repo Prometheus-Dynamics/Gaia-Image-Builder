@@ -44,6 +44,19 @@ fn stored(store: &Store, path: &Path) -> Artifact {
 
 #[test]
 fn compression_is_the_same_at_every_thread_count() {
+    // Every codec and level at four thread counts, each in a store of its
+    // own: kept under this test binary (its codecs are compiled in), so an
+    // unchanged case is not compressed again locally (CI runs it every
+    // time; see gaia-verdict).
+    let verdict = gaia_verdict::Verdict::new(
+        "compress::thread-counts",
+        env!("CARGO_MANIFEST_DIR"),
+        &[],
+        &[],
+    );
+    if verdict.reused() {
+        return;
+    }
     let root = tempfile::tempdir().expect("tempdir");
     let store_root = root.path().join("store");
     let store = Store::open(&store_root).expect("store");
@@ -128,6 +141,7 @@ fn compression_is_the_same_at_every_thread_count() {
         .map(|r| r.made)
         .collect();
     assert_eq!(made, [true, false, true]);
+    verdict.passed();
 }
 
 #[test]

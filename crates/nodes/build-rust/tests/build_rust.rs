@@ -51,6 +51,22 @@ fn sandbox_here() -> bool {
     ok
 }
 
+/// A heavy case's verdict: kept under its test binary (which holds the
+/// pinned release's and the image's digests) and the sandbox's bwrap, so an
+/// unchanged case is not built again locally (CI runs it every time; see
+/// gaia-verdict).
+fn verdict(case: &str) -> gaia_verdict::Verdict {
+    gaia_verdict::Verdict::new(
+        &format!("build_rust::{case}"),
+        env!("CARGO_MANIFEST_DIR"),
+        &[(
+            "bwrap",
+            gaia_verdict::identity(Path::new(BWRAP), &["--version"]),
+        )],
+        &[],
+    )
+}
+
 fn write(path: &Path, text: &str) {
     std::fs::create_dir_all(path.parent().expect("parent")).expect("mkdir");
     std::fs::write(path, text).expect("write");
@@ -317,6 +333,10 @@ fn aarch64_musl_twice_gives_identical_digests() {
     if !sandbox_here() {
         return;
     }
+    let verdict = verdict("aarch64-musl-twice");
+    if verdict.reused() {
+        return;
+    }
     let Some(sysroot) = sysroot() else {
         return;
     };
@@ -408,6 +428,7 @@ fn aarch64_musl_twice_gives_identical_digests() {
             .any(|t| t.contains("/toolchain/bin/cargo build")),
         "no cargo build in the run logs: {tools:?}"
     );
+    verdict.passed();
 }
 
 /// A source like a real repository's: a crates.io dependency named only in
@@ -701,6 +722,10 @@ fn a_dev_build_keeps_its_target_and_a_clean_build_never_sees_it() {
     if !sandbox_here() {
         return;
     }
+    let verdict = verdict("dev-build");
+    if verdict.reused() {
+        return;
+    }
     let Some(sysroot) = sysroot() else {
         return;
     };
@@ -767,4 +792,5 @@ fn a_dev_build_keeps_its_target_and_a_clean_build_never_sees_it() {
         dev, clean,
         "the dev profile (no LTO, 16 units) is not the code a clean build ships"
     );
+    verdict.passed();
 }

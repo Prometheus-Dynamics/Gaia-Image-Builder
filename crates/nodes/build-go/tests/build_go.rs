@@ -5,6 +5,7 @@ use gaia_build_go::{build_go, go_target};
 use gaia_step::Ctx;
 use gaia_store::{Store, file_digest};
 use gaia_types::Tree;
+use gaia_verdict::{Verdict, identity};
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
@@ -25,6 +26,24 @@ fn goroot() -> Option<PathBuf> {
         println!("SKIPPED: no Go toolchain here");
         None
     }
+}
+
+/// A heavy case's verdict: kept under its test binary, the Go toolchain and
+/// the sandbox's bwrap, so an unchanged case is not built again locally
+/// (CI runs it every time; see gaia-verdict).
+fn verdict(case: &str, goroot: &Path) -> Verdict {
+    Verdict::new(
+        &format!("build_go::{case}"),
+        env!("CARGO_MANIFEST_DIR"),
+        &[
+            ("go", identity(&goroot.join("bin/go"), &["version"])),
+            (
+                "bwrap",
+                identity(Path::new("/usr/bin/bwrap"), &["--version"]),
+            ),
+        ],
+        &[],
+    )
 }
 
 fn write(path: &Path, text: &str) {
@@ -100,6 +119,10 @@ fn build(root: &Path, goroot: &Path, triple: &str) -> Vec<(String, u64, String)>
 #[test]
 fn a_small_module_builds_for_aarch64_twice_to_the_same_digest() {
     let Some(goroot) = goroot() else { return };
+    let verdict = verdict("aarch64-twice", &goroot);
+    if verdict.reused() {
+        return;
+    }
     let (a, b) = (
         tempfile::tempdir().expect("tempdir"),
         tempfile::tempdir().expect("tempdir"),
@@ -133,11 +156,16 @@ fn a_small_module_builds_for_aarch64_twice_to_the_same_digest() {
         !machines.is_empty() && machines.iter().all(|m| *m == 183),
         "{machines:?}"
     );
+    verdict.passed();
 }
 
 #[test]
 fn the_host_build_runs() {
     let Some(goroot) = goroot() else { return };
+    let verdict = verdict("host-build", &goroot);
+    if verdict.reused() {
+        return;
+    }
     let dir = tempfile::tempdir().expect("tempdir");
     build(dir.path(), &goroot, "x86_64-unknown-linux-gnu");
     // The built tree is under the store; find hello by walking it.
@@ -153,6 +181,7 @@ fn the_host_build_runs() {
     let text = String::from_utf8_lossy(&out.stdout);
     println!("runs: {}", text.trim());
     assert_eq!(text.trim(), "hello 42");
+    verdict.passed();
 }
 
 fn walk(dir: &Path, f: &mut dyn FnMut(&Path)) {
