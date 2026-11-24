@@ -1757,9 +1757,72 @@ fn the_firmware_rpiboot_order_serves_the_ram_boot_again() {
     let replaced = |record: &Path, n: u32| {
         std::fs::read_to_string(record.join(format!("state/boot-{n}.replaced"))).unwrap_or_default()
     };
+    let other = |magic: u32, version: u32| {
+        let mut page = mailbox_page(1, 3, 0, 0, 1, 0);
+        page[..4].copy_from_slice(&magic.to_le_bytes());
+        page[4..8].copy_from_slice(&version.to_le_bytes());
+        page
+    };
+    // Every run is its own: its own record and state, the images only read.
+    // They run at once, and are checked one by one below.
+    /// The firmware's pages a run starts with, by boot.
+    type Pages = Vec<(u32, Vec<u8>)>;
+    let runs: Vec<(&str, Pages, &str, &Path)> = vec![
+        (
+            "order",
+            vec![(1, mailbox_page(1, 3, 0, 0, 1, 0))],
+            "1,2",
+            &set,
+        ),
+        (
+            "clear",
+            vec![(1, mailbox_page(0, 0, 1, 0, 1, 0))],
+            "1",
+            &set,
+        ),
+        (
+            "unknown",
+            vec![(1, mailbox_page(1, 5, 0, 0, 1, 0))],
+            "1",
+            &set,
+        ),
+        (
+            "emmc-order",
+            vec![(2, mailbox_page(1, 3, 0, 0, 1, 0))],
+            "1,2",
+            &set,
+        ),
+        ("magic", vec![(1, other(0x1234_5678, 1))], "1", &set),
+        ("version", vec![(1, other(0x424d_5647, 2))], "1", &set),
+        ("none", vec![(1, vec![0; 64])], "1", &set),
+        (
+            "disk",
+            vec![(1, mailbox_page(1, 3, 0, 0, 1, 0))],
+            "1",
+            &flash,
+        ),
+    ];
+    let mut done: std::collections::BTreeMap<&str, (PathBuf, bool, String)> =
+        std::thread::scope(|scope| {
+            let running: Vec<_> = runs
+                .iter()
+                .map(|(name, pages, reboots, image)| {
+                    let boots = &boots;
+                    (
+                        *name,
+                        scope.spawn(move || boots(name, pages, reboots, image)),
+                    )
+                })
+                .collect();
+            running
+                .into_iter()
+                .map(|(name, run)| (name, run.join().expect("the run's thread")))
+                .collect()
+        });
+    let mut boots = |name: &str| done.remove(name).expect("run");
 
     // RPIBOOT taken in boot 1: the RAM boot again, then the eMMC.
-    let (record, ok, out) = boots("order", &[(1, mailbox_page(1, 3, 0, 0, 1, 0))], "1,2", &set);
+    let (record, ok, out) = boots("order");
     assert!(ok, "{out}");
     assert!(
         out.contains(
@@ -1838,7 +1901,7 @@ fn the_firmware_rpiboot_order_serves_the_ram_boot_again() {
     assert_eq!(get(3, &["-t", "x", "/chosen/bootloader", "boot-mode"]), "1");
 
     // No order, the boot count set to 0: boot 2 is the eMMC, with count 1.
-    let (record, ok, out) = boots("clear", &[(1, mailbox_page(0, 0, 1, 0, 1, 0))], "1", &set);
+    let (record, ok, out) = boots("clear");
     assert!(ok, "{out}");
     assert!(!out.contains("== RPIBOOT"), "{out}");
     let two = replaced(&record, 2);
@@ -1849,7 +1912,7 @@ fn the_firmware_rpiboot_order_serves_the_ram_boot_again() {
     );
 
     // An order the stand-in does not know: recorded, not acted on.
-    let (record, ok, out) = boots("unknown", &[(1, mailbox_page(1, 5, 0, 0, 1, 0))], "1", &set);
+    let (record, ok, out) = boots("unknown");
     assert!(
         ok && out
             .contains("reboot order 5 is not one the stand-in knows (3 is RPIBOOT); not acted on"),
@@ -1859,12 +1922,7 @@ fn the_firmware_rpiboot_order_serves_the_ram_boot_again() {
 
     // RPIBOOT taken in an eMMC boot (boot 2): boot 3 is the RAM boot again,
     // boot mode 3 with no partition, as after boot 1.
-    let (record, ok, out) = boots(
-        "emmc-order",
-        &[(2, mailbox_page(1, 3, 0, 0, 1, 0))],
-        "1,2",
-        &set,
-    );
+    let (record, ok, out) = boots("emmc-order");
     assert!(
         ok && out.contains(
             "== RPIBOOT (the firmware's one-shot order from boot 2): the RAM-boot set again"
@@ -1881,11 +1939,8 @@ fn the_firmware_rpiboot_order_serves_the_ram_boot_again() {
     assert_eq!(get_in(&record, 3, "boot-mode"), "3");
 
     // A record of another version, or with another magic: not read.
-    for (name, magic, version) in [("magic", 0x1234_5678u32, 1u32), ("version", 0x424d_5647, 2)] {
-        let mut page = mailbox_page(1, 3, 0, 0, 1, 0);
-        page[..4].copy_from_slice(&magic.to_le_bytes());
-        page[4..8].copy_from_slice(&version.to_le_bytes());
-        let (record, ok, out) = boots(name, &[(1, page)], "1", &set);
+    for name in ["magic", "version"] {
+        let (record, ok, out) = boots(name);
         assert!(
             ok && !out.contains("== firmware mailbox") && !out.contains("== RPIBOOT"),
             "{name}: {out}"
@@ -1897,7 +1952,7 @@ fn the_firmware_rpiboot_order_serves_the_ram_boot_again() {
     }
 
     // A page with no record (no stand-in ran): nothing recorded, the eMMC next.
-    let (record, ok, out) = boots("none", &[(1, vec![0; 64])], "1", &set);
+    let (record, ok, out) = boots("none");
     assert!(ok && !out.contains("== firmware mailbox"), "{out}");
     assert!(
         !replaced(&record, 1).contains("firmware mailbox: orders"),
@@ -1909,7 +1964,7 @@ fn the_firmware_rpiboot_order_serves_the_ram_boot_again() {
     );
 
     // A disk-mode run that gets RPIBOOT has no set to serve: it stops.
-    let (record, ok, out) = boots("disk", &[(1, mailbox_page(1, 3, 0, 0, 1, 0))], "1", &flash);
+    let (record, ok, out) = boots("disk");
     assert!(
         ok && out.contains("this run has no RAM-boot set to serve; stopping"),
         "{out}"

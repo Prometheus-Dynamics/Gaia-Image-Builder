@@ -105,8 +105,15 @@ fn a_small_module_builds_for_aarch64_twice_to_the_same_digest() {
         tempfile::tempdir().expect("tempdir"),
     );
     let triple = "aarch64-unknown-linux-musl";
-    let first = build(a.path(), &goroot, triple);
-    let second = build(b.path(), &goroot, triple);
+    // Two stores, independent: both builds at once.
+    let (first, second) = std::thread::scope(|s| {
+        let first = s.spawn(|| build(a.path(), &goroot, triple));
+        let second = s.spawn(|| build(b.path(), &goroot, triple));
+        (
+            first.join().expect("first build"),
+            second.join().expect("second build"),
+        )
+    });
     println!("{triple} (linux/arm64):");
     for (path, size, digest) in &first {
         println!("  {path:<10} {size:>8} bytes  {digest}");

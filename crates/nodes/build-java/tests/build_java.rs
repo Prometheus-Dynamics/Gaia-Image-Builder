@@ -120,8 +120,15 @@ fn a_small_project_builds_offline_twice_to_the_same_digest() {
         tempfile::tempdir().expect("tempdir"),
         tempfile::tempdir().expect("tempdir"),
     );
-    let (first, tree) = build(&jdk, a.path());
-    let (second, _) = build(&jdk, b.path());
+    // Two stores, independent: both builds at once.
+    let ((first, tree), (second, _)) = std::thread::scope(|s| {
+        let first = s.spawn(|| build(&jdk, a.path()));
+        let second = s.spawn(|| build(&jdk, b.path()));
+        (
+            first.join().expect("first build"),
+            second.join().expect("second build"),
+        )
+    });
     println!("JDK {}", jdk.display());
     for (name, size, digest) in &first {
         println!("  {name:<10} {size:>6} bytes  {digest}");

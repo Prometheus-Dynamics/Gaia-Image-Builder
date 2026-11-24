@@ -120,8 +120,15 @@ fn a_small_package_builds_offline_twice_to_the_same_digest() {
         tempfile::tempdir().expect("tempdir"),
         tempfile::tempdir().expect("tempdir"),
     );
-    let first = build(a.path());
-    let second = build(b.path());
+    // Two stores, independent: both builds at once.
+    let (first, second) = std::thread::scope(|s| {
+        let first = s.spawn(|| build(a.path()));
+        let second = s.spawn(|| build(b.path()));
+        (
+            first.join().expect("first build"),
+            second.join().expect("second build"),
+        )
+    });
     println!("tree   {}", first.0);
     println!("wheel  {} ({} bytes)", first.1, first.2);
     assert_eq!(

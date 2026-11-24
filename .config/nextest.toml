@@ -1,0 +1,12 @@
+# The gate's wall time is its longest case's end. Under load a case that
+# takes 20 s alone takes 40-70 s, and one started last ends last: the heavy
+# cases (each builds a toolchain's project, boots a guest or encodes
+# hundreds of megabytes) start first, the hundreds of small ones fill in
+# around them. Order only: every case still runs, each bounded as before.
+[[profile.default.overrides]]
+filter = '''
+binary(qemu_runner) | binary(build_go) | binary(build_node) | binary(build_python)
+| binary(build_java) | binary(build_rust) | binary(compress) | binary(test_bound)
+| binary(disk) | binary(flash) | (package(gaia-flash-image) & test(/^tests::the_stream/))
+'''
+priority = 50
