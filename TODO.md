@@ -16,34 +16,34 @@ Open, in working order:
    rev. Expected: lemnos0's ifindex unchanged, connects carry on through the
    restart, no rebind lines. Blocked on Lemnos landing GADGET-KEEP. Pre-empts
    everything else when it lands.
-2. [ ] (a) proof: the same one-line lemnosd change to the bundle with the
-   cargo target kept (expected about 40 s). In progress (code landed
-   eb5c9bd2). After it: delete the store copy work/item19/store.
-3. [ ] Row 17, the Gaia Raze example line: blocked on Lemnos's boot-holds row.
-4. [ ] G5 Aura: blocked on the RV1126B loader (u-boot-rockchip.bin).
-5. [ ] G4 Cubie: A7S is blocked on Atlas's fragment lines
+2. [ ] Row 17, the Gaia Raze example line: blocked on Lemnos's boot-holds row.
+3. [ ] G5 Aura: blocked on the RV1126B loader (u-boot-rockchip.bin).
+4. [ ] G4 Cubie: A7S is blocked on Atlas's fragment lines
    (UBOOT_FORMAT_CUSTOM, kernel over the bay). A7A/A7Z are blocked on a
    Makefile hunk that fails at fuzz 0.
-6. [ ] G6 K230D on hardware: blocked on board access and the NAND/strap facts.
-7. [ ] M2 rows 7–9 (Raze M2 image, size rows, busybox/payload sizes):
+5. [ ] G6 K230D on hardware: blocked on board access and the NAND/strap facts.
+6. [ ] M2 rows 7–9 (Raze M2 image, size rows, busybox/payload sizes):
    blocked on Lemnos's M2 rev.
-8. [ ] Row 40 USB load drop: waiting for the next drop's relay log to name
+7. [ ] Row 40 USB load drop: waiting for the next drop's relay log to name
    the error.
-9. [ ] Old rows 2 (B2 env check real-build run) and 5 (B4 Atlas Z2/C1
-   slot-image builds): the queue has no closing line for either. Row 2 looks
-   covered by item 17 (work/r17/run.txt). Row 5 is unverified. Both are with
-   the coordinator to close or keep.
-
-Not scheduled (need a coordinator OK to queue): F9 (lock every Buildroot
-download), F14 (Android boot image), F15 (plan notice, bootloader sign of
-life, `trial_attempts`), H2 (docs/guide).
+8. [ ] Row 2 (B2 env check real-build run): kept open. It closes with a
+   test pinning the old-refused/new-passes case, written in F9's PR. Row 5:
+   Z2 done (Atlas 1ab54a74); C1 blocked on Atlas's pr/C1.
+9. [ ] F9: `gaia lock` records every Buildroot download. Next after the
+   pause.
+10. [ ] F15 rest: `gaia plan` no-way-in notice, bootloader USB sign of life,
+    `trial_attempts`. After F9.
+11. [ ] H2 docs/guide. After F15.
 
 Parked (coordinator): (b) dev LTO override (revisit with (a)'s numbers);
 row 19 shared host stage (design accepted, no code); 22 .ipk plan; 25 kernel
 Rust (mechanism done); 12 SPL check hook; 13 Cubie A7A/A7Z dts as patches;
-14 RV1126B port; 15 K230D boot chain.
+14 RV1126B port; 15 K230D boot chain; F14 Android boot image (until a product needs
+fastboot: an RK35xx flasher would).
 
-Done today (2026-11-23): item 19 dev column (no-op 4.4 s; one files change
+Done today (2026-11-23): (a) proof: one lemnosd line to the bundle in 68.6 s
+and 63.2 s with the cargo target kept (was 131 s; only lemnosd compiles,
+49 s fat LTO at load ~80; store copy deleted); item 19 dev column (no-op 4.4 s; one files change
 43.6 s to the image, 7.5 s to the bundle; one lemnosd line 131 s to the
 bundle, of which cargo deps 64 s, sibling packages 26 s, fat-LTO 33 s);
 376a4b56 EROFS lz4 cluster read-back; e0252eac stock-host re-attach; eb5c9bd2
@@ -156,4 +156,4 @@ CI, docs, and the lock committed. Replacing `dev` with `next` is the user's call
 
 - [x] [H1](docs/prs/H1.md) CI and the GitHub action (wave 6; needs F3) — done d51e6d56 (#41, 2026-11-11)
 - [ ] [H2](docs/prs/H2.md) Docs — open, not started (no docs/guide on next)
-- [ ] [H3](docs/prs/H3.md) Lock and hand-over — blocked on G4, G5, G6, H2; replacing `dev` is the user's call
+- [ ] [H3](docs/prs/H3.md) Lock and hand-over — waits on the user's word
