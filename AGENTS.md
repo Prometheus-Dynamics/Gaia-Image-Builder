@@ -40,6 +40,12 @@ The work is a pre-planned list of PRs into `next`.
   open PRs in other repositories for it.
 - A PR merges when `scripts/gate.sh` passes. Paste the proof named in the brief into the PR
   description.
+- The gate tests what a change can reach (`scripts/gate-lanes.py`). A code tree that passed is
+  recorded, and a gate on the same code tree (docs, notes and licences aside) runs nothing. A
+  change inside crates tests those crates and every workspace crate that depends on them, from
+  the nearest passed ancestor. Anything else (Cargo.lock, the toolchain, scripts, examples,
+  recipes, workflows), or no known passed ancestor, runs everything. `GAIA_GATE_FULL=1` always
+  runs everything. A docs-only commit never needs a gate.
 
 ## Workers
 

@@ -702,7 +702,7 @@ fn the_board_profile_gives_an_emmc_and_the_firmwares_facts() {
 /// power-on, so --boot-count N gives N + 1 on its first boot.
 #[test]
 fn boot_count_sections_compare_as_the_firmware_does() {
-    if !tools_here(&["mformat", "mcopy", "mmd", "mtype", "sfdisk"]) {
+    if !tools_here(&["dtc", "mformat", "mcopy", "mmd", "mtype", "sfdisk"]) {
         return;
     }
     let dir = tempfile::tempdir().expect("tempdir");

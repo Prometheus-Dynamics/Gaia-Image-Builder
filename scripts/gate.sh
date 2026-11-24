@@ -17,6 +17,30 @@ step() {
   echo "    $label: $((SECONDS - start)) s"
 }
 
+# What the tests have to cover (scripts/gate-lanes.py): nothing when this
+# code tree passed already, the packages a change can reach when a passed
+# ancestor is known, else everything. GAIA_GATE_FULL=1 runs everything.
+plan="full asked for by GAIA_GATE_FULL=1"
+if [ "${GAIA_GATE_FULL:-}" != 1 ]; then
+  plan=$(scripts/gate-lanes.py plan)
+fi
+echo "==> plan: $plan"
+case "$plan" in
+  none\ *)
+    echo "gate passed (this code tree passed at ${plan#none }; nothing it tests changed)"
+    exit 0
+    ;;
+  lanes\ *)
+    read -r -a lane_words <<< "${plan#lanes }"
+    packages=() doc_packages=()
+    for word in "${lane_words[@]:1}"; do
+      packages+=(-p "${word%:bin}")
+      [[ $word == *:bin ]] || doc_packages+=(-p "$word")
+    done
+    ;;
+  *) packages=(--workspace) doc_packages=(--workspace) ;;
+esac
+
 # The workspace glob matches nothing until the first crate lands.
 # The committed Cargo.lock is what is built and tested. A manifest change
 # without its lock change stops here.
@@ -48,8 +72,10 @@ tests() {
     host=$(rustc -vV | sed -n 's/^host: //p')
     runner="CARGO_TARGET_$(printf '%s' "$host" | tr 'a-z-' 'A-Z_')_RUNNER"
     env "$runner=$PWD/scripts/test-bound.py" \
-      cargo nextest run --locked --workspace --all-features || cases=$?
-    cargo test --locked --workspace --all-features --doc || docs=$?
+      cargo nextest run --locked "${packages[@]}" --all-features || cases=$?
+    if [ "${#doc_packages[@]}" -gt 0 ]; then
+      cargo test --locked "${doc_packages[@]}" --all-features --doc || docs=$?
+    fi
     if [ "$cases" -ne 0 ] || [ "$docs" -ne 0 ]; then
       echo "tests failed: nextest exit $cases, doc tests exit $docs" >&2
       return 1
@@ -58,7 +84,7 @@ tests() {
     # Asked for by name: without nextest a process is a whole test binary,
     # so no case has a bound and a hung one holds this run.
     echo "cargo-nextest is not installed, and GAIA_GATE_UNBOUNDED=1: the tests run under plain cargo test, WITH NO BOUND on any test" >&2
-    cargo test --locked --workspace --all-features
+    cargo test --locked "${packages[@]}" --all-features
   else
     echo "cargo-nextest is not installed: the gate's tests run under it, each case bounded (scripts/test-bound.py)." >&2
     echo "Install it (cargo install cargo-nextest --locked), or set GAIA_GATE_UNBOUNDED=1 to run the tests with no bound on any of them." >&2
@@ -123,4 +149,5 @@ if compgen -G "crates/*/*/Cargo.toml" > /dev/null; then
   step "store verify" store_verify
 fi
 
+scripts/gate-lanes.py passed
 echo "gate passed"

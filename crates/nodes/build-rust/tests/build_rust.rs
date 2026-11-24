@@ -190,12 +190,19 @@ fn no_toolchain(store: &Path) -> Tree {
     stored_tree(store, dir.path())
 }
 
-/// The image, pulled into `store` by digest. Missing the network, a skip
-/// unless required.
+/// The image, in `store` by digest. It is pulled once per target directory,
+/// into a seed store there (the tests run as separate processes, so one
+/// holds a lock while it pulls; later ones find the OCI step's entry there,
+/// with no network), and put into `store` by its content: the same object.
+/// Missing the network, a skip unless required.
 fn pull(store: &Path) -> Option<Tree> {
-    let store_text = store.display().to_string();
+    let seed_dir = Path::new(env!("CARGO_TARGET_TMPDIR")).join("oci-seed");
+    std::fs::create_dir_all(&seed_dir).expect("mkdir");
+    let held = std::fs::File::create(seed_dir.join("lock")).expect("lock file");
+    held.lock().expect("lock");
+    let seed = seed_dir.join("store");
     match source(
-        &store_text,
+        &seed.display().to_string(),
         CURL,
         IMAGE,
         IMAGE_DIGEST,
@@ -203,7 +210,10 @@ fn pull(store: &Path) -> Option<Tree> {
         "",
         &Ctx::new(),
     ) {
-        Ok((tree, _)) => Some(tree),
+        Ok((tree, _)) => {
+            drop(held);
+            Some(image_in(store, &seed, &tree))
+        }
         Err(error) => {
             assert!(
                 !required("GAIA_REQUIRE_TOOLS"),
@@ -596,12 +606,13 @@ fn a_source_without_a_lock_is_refused_by_the_vendor_step() {
     assert!(error.to_string().contains("has no Cargo.lock"), "{error}");
 }
 
-/// One build of `app` from `src` in the store at `root/store`, clean or,
-/// with `dev`, a dev build with that warm root. Gives each output file
+/// One build of `app` from `src` in the store at `root/store`, with the
+/// toolchain already there, clean or, with `dev`, a dev build with that warm
+/// root. Gives each output file
 /// (path, size, digest) and the text of the run logs it wrote.
 fn build_from(
     root: &Path,
-    sysroot: &Path,
+    toolchain: &Tree,
     image: &Tree,
     src: &Path,
     dev: Option<&Path>,
@@ -637,7 +648,7 @@ fn build_from(
         &store.display().to_string(),
         BWRAP,
         image.clone(),
-        stored_tree(&store, sysroot),
+        toolchain.clone(),
         stored_tree(&store, src),
         stored_tree(&store, &vendor),
         "app",
@@ -701,7 +712,8 @@ fn a_dev_build_keeps_its_target_and_a_clean_build_never_sees_it() {
     let src = root.join("src");
     workspace(&src);
     let warm = root.join("dev-cargo");
-    let (_, first) = build_from(root, &sysroot, &image, &src, Some(&warm));
+    let toolchain = stored_tree(&root.join("store"), &sysroot);
+    let (_, first) = build_from(root, &toolchain, &image, &src, Some(&warm));
     assert_eq!(compiled(&first), ["app", "shout", "tiny"], "{first}");
     assert_eq!(
         warm.read_dir().expect("warm").count(),
@@ -721,7 +733,7 @@ fn a_dev_build_keeps_its_target_and_a_clean_build_never_sees_it() {
         .expect("open")
         .set_modified(std::time::SystemTime::now() - std::time::Duration::from_secs(3600))
         .expect("set");
-    let (dev, second) = build_from(root, &sysroot, &image, &src, Some(&warm));
+    let (dev, second) = build_from(root, &toolchain, &image, &src, Some(&warm));
     assert_eq!(
         compiled(&second),
         ["app", "shout"],
@@ -729,7 +741,7 @@ fn a_dev_build_keeps_its_target_and_a_clean_build_never_sees_it() {
     );
 
     // Clean, in the same store: everything compiled, the same bytes.
-    let (clean, third) = build_from(root, &sysroot, &image, &src, None);
+    let (clean, third) = build_from(root, &toolchain, &image, &src, None);
     assert_eq!(compiled(&third), ["app", "shout", "tiny"], "{third}");
     assert_eq!(dev, clean, "the dev build's binary is the clean build's");
 }

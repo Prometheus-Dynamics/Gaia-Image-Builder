@@ -36,6 +36,12 @@ debug = "line-tables-only"
 [profile.dev.package.lzma-sys]
 opt-level = 3
 
+# The store hashes every file it takes in (sha256). Unoptimized, putting a
+# Rust toolchain (744 MB) into a test's store took 52 s against 1.8 s for the
+# cargo build that used it. The digests do not depend on the optimization.
+[profile.dev.package.sha2]
+opt-level = 3
+
 [profile.release]
 lto = "thin"
 codegen-units = 1
