@@ -20,6 +20,16 @@ config change rebuilds the whole root or the whole kernel. With
 The target tree and the images are always made again. The details, and the
 exact rules, are in `crates/nodes/os-buildroot/src/dev.rs`.
 
+Each Rust build step (`gaia.build.rust`) keeps its cargo target directory
+under `<store>/dev-cargo/<identity>/`, one for each toolchain, image,
+vendored crate set, package set, profile, features, target, CPU and
+environment. The next dev build compiles what the changed files touch and
+reuses every other crate, the packages of the step left unchanged included.
+The source is mirrored into that directory, and only files whose bytes
+changed get a new time, because cargo goes by times. The details are in
+`crates/nodes/build-rust/src/warm.rs`. A description cannot set the step's
+`dev` input, and a clean build in which a step has one is refused by name.
+
 ## What keeps it apart from a release
 
 **A release is a clean build.** Whatever later builds the release path
@@ -69,9 +79,9 @@ carry dates; none of them is in the image.
 
 Each Buildroot step of each product keeps one warm directory, about the size
 of its clean build's output directory (12 GB for a Raspberry Pi kernel and
-root). A new Buildroot source, Gaia patch set, host tool set or product
+root), and each Rust step one cargo target. A new Buildroot source, Gaia patch set, host tool set or product
 input makes a new one, and nothing removes the old: `<store>/dev-buildroot`
-may be removed whenever no dev build is running.
+and `<store>/dev-cargo` may be removed whenever no dev build is running.
 
 ## Measuring
 

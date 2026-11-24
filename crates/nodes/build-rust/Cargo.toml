@@ -17,6 +17,7 @@ gaia-sandbox = { path = "../../core/sandbox" }
 gaia-step = { path = "../../core/step" }
 gaia-store = { path = "../../core/store" }
 gaia-types = { path = "../../core/types" }
+rustix = { version = "1", features = ["fs"] }
 serde_json = "1"
 
 [dev-dependencies]

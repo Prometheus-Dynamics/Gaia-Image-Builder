@@ -91,9 +91,14 @@ impl Project {
         };
         // After `--until`: what is cut away carries no image.
         let mut dev_erofs = Vec::new();
+        if !options.dev_reuse {
+            crate::dev::check_clean(&built.doc)?;
+        }
         if options.dev_reuse {
             let dev = crate::dev::dev_erofs(&mut built.doc);
             crate::dev::mark_generators(&mut built.doc);
+            let warm = absolute(&setup.store.join(crate::dev::WARM_CARGO));
+            crate::dev::mark_rust(&mut built.doc, &warm.display().to_string());
             built.notes.extend(dev.notes);
             dev_erofs = dev.made;
         }

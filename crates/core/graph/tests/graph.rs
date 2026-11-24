@@ -464,6 +464,19 @@ fn errors_name_the_description() {
         "{e}"
     );
 
+    // The kept cargo target of `gaia build --dev-reuse`, set by hand: an
+    // input of the node, and still refused, so a description can never
+    // make a clean, release or signed build start from one.
+    let e = try_with(
+        &base.replace("features = \"\"", "features = \"\"\ndev = \"/kept\""),
+        lock(),
+    );
+    println!("{}", shown(&e));
+    assert!(
+        e.contains("hello-b/component.toml: build.settings.dev: `dev` is set by `gaia build --dev-reuse` only"),
+        "{e}"
+    );
+
     // A Rust build with no toolchain of its own: the build machine's is
     // not taken in its place.
     let toolchain = format!(

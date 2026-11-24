@@ -11,7 +11,7 @@
 //!   so mount points for the inputs and the output exist in any image.
 //! - **Inputs** are bound read-only where the step says.
 //! - **The output directory is the only writable path that outlives the
-//!   tool.** `/tmp` is a private tmpfs, gone with the sandbox; `/proc` and
+//!   tool**, with what [`Sandbox::bind`] binds into it. `/tmp` is a private tmpfs, gone with the sandbox; `/proc` and
 //!   `/dev` are the sandbox's own.
 //! - **Environment:** only what the step sets.
 //! - **Host limits** ([`Limits`]): the CPU set (applied with the `taskset`
@@ -43,6 +43,7 @@ pub struct Sandbox {
     rootfs: PathBuf,
     inputs: Vec<(PathBuf, String)>,
     output: Option<(PathBuf, String)>,
+    binds: Vec<(PathBuf, String)>,
     network: bool,
     env: Vec<(String, String)>,
     cwd: Option<String>,
@@ -58,6 +59,7 @@ impl Sandbox {
             rootfs: rootfs.into(),
             inputs: Vec::new(),
             output: None,
+            binds: Vec::new(),
             network: false,
             env: Vec::new(),
             cwd: None,
@@ -75,6 +77,14 @@ impl Sandbox {
     /// output directory.
     pub fn output(mut self, from: impl Into<PathBuf>, at: impl Into<String>) -> Self {
         self.output = Some((from.into(), at.into()));
+        self
+    }
+
+    /// Binds the host directory `from` writable at `at` inside, over the
+    /// output directory's own (`at` is under it): a directory a step keeps
+    /// elsewhere, such as a dev build's cargo target.
+    pub fn bind(mut self, from: impl Into<PathBuf>, at: impl Into<String>) -> Self {
+        self.binds.push((from.into(), at.into()));
         self
     }
 
@@ -111,6 +121,9 @@ impl Sandbox {
         }
         if let Some((_, at)) = &self.output {
             key = key.config("sandbox.output", at);
+        }
+        for (index, (_, at)) in self.binds.iter().enumerate() {
+            key = key.config(&format!("sandbox.bind.{index}"), at);
         }
         for (name, value) in &self.env {
             key = key.config(&format!("sandbox.env.{name}"), value);
@@ -175,6 +188,9 @@ impl Sandbox {
             push(&[&"--ro-bind", from, at]);
         }
         if let Some((from, at)) = &self.output {
+            push(&[&"--bind", from, at]);
+        }
+        for (from, at) in &self.binds {
             push(&[&"--bind", from, at]);
         }
         push(&[&"--remount-ro", &"/"]);

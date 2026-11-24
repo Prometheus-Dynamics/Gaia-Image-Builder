@@ -744,6 +744,7 @@ dependencies = [
  "gaia-step",
  "gaia-store",
  "gaia-types",
+ "rustix",
  "serde_json",
  "tempfile",
 ]

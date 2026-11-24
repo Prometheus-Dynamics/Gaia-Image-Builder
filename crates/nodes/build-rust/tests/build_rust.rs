@@ -277,6 +277,7 @@ fn build(
         None,
         None,
         None,
+        None,
         &Ctx::new(),
     )
     .expect("builds");
@@ -512,6 +513,7 @@ fn a_repository_is_vendored_from_its_lock_and_built_with_its_profile_and_flags()
         Some(&"/src/tools/cc".to_string()),
         Some(&"TOOL_CACHE_DIR=/build/tool-cache\nRUSTC_WRAPPER=mytool\n".to_string()),
         Some(&tools),
+        None,
         &Ctx::new(),
     )
     .expect("builds with the service profile and the config's flag");
@@ -560,6 +562,7 @@ fn a_bad_env_line_or_a_reserved_name_is_refused() {
             None,
             Some(&env.to_string()),
             None,
+            None,
             &Ctx::new(),
         )
         .expect_err("refused")
@@ -591,4 +594,142 @@ fn a_source_without_a_lock_is_refused_by_the_vendor_step() {
     )
     .expect_err("no lock");
     assert!(error.to_string().contains("has no Cargo.lock"), "{error}");
+}
+
+/// One build of `app` from `src` in the store at `root/store`, clean or,
+/// with `dev`, a dev build with that warm root. Gives each output file
+/// (path, size, digest) and the text of the run logs it wrote.
+fn build_from(
+    root: &Path,
+    sysroot: &Path,
+    image: &Tree,
+    src: &Path,
+    dev: Option<&Path>,
+) -> (Vec<(String, u64, String)>, String) {
+    let store = root.join("store");
+    let logs = || -> Vec<PathBuf> {
+        let mut all = Vec::new();
+        for dir in std::fs::read_dir(root.join("logs"))
+            .into_iter()
+            .flatten()
+            .flatten()
+        {
+            if dir
+                .file_name()
+                .to_string_lossy()
+                .starts_with("gaia.build.rust")
+            {
+                all.extend(
+                    std::fs::read_dir(dir.path())
+                        .into_iter()
+                        .flatten()
+                        .flatten()
+                        .map(|e| e.path()),
+                );
+            }
+        }
+        all
+    };
+    let before = logs();
+    let vendor = root.join("vendor");
+    vendored(&vendor);
+    let (tree, _) = build_rust(
+        &store.display().to_string(),
+        BWRAP,
+        image.clone(),
+        stored_tree(&store, sysroot),
+        stored_tree(&store, src),
+        stored_tree(&store, &vendor),
+        "app",
+        None,
+        None,
+        TRIPLE,
+        Some(&"cortex-a55".to_string()),
+        None,
+        None,
+        None,
+        dev.map(|d| d.display().to_string()).as_ref(),
+        &Ctx::new(),
+    )
+    .expect("builds");
+    let mut text = String::new();
+    for log in logs() {
+        if !before.contains(&log) {
+            text.push_str(&std::fs::read_to_string(&log).expect("log"));
+        }
+    }
+    let opened = Store::open(&store).expect("store");
+    let out = tree.object.path_in(&opened).expect("in store");
+    let bin = out.join("bin/app");
+    let files = vec![(
+        "bin/app".to_string(),
+        std::fs::metadata(&bin).expect("size").len(),
+        file_digest(&bin).expect("digest").to_string(),
+    )];
+    (files, text)
+}
+
+fn compiled(log: &str) -> Vec<String> {
+    let mut names: Vec<String> = log
+        .lines()
+        .filter_map(|l| l.split("Compiling ").nth(1))
+        .filter_map(|rest| rest.split_whitespace().next().map(String::from))
+        .collect();
+    names.sort();
+    names
+}
+
+/// A dev build keeps its cargo target: a second dev build after a change
+/// compiles what the change touches and not the dependency, even when the
+/// changed file comes with an older time (as an exported revision has); its
+/// binary is the clean build's byte for byte; and a clean build after it
+/// compiles everything, from an empty target, finding nothing of the dev
+/// build's in the store.
+#[test]
+fn a_dev_build_keeps_its_target_and_a_clean_build_never_sees_it() {
+    if !sandbox_here() {
+        return;
+    }
+    let Some(sysroot) = sysroot() else {
+        return;
+    };
+    let dir = tempfile::tempdir().expect("tempdir");
+    let root = dir.path();
+    let Some(image) = pull(&root.join("store")) else {
+        return;
+    };
+    let src = root.join("src");
+    workspace(&src);
+    let warm = root.join("dev-cargo");
+    let (_, first) = build_from(root, &sysroot, &image, &src, Some(&warm));
+    assert_eq!(compiled(&first), ["app", "shout", "tiny"], "{first}");
+    assert_eq!(
+        warm.read_dir().expect("warm").count(),
+        1,
+        "one warm directory"
+    );
+
+    // The library changes: the same length, and a time an hour old.
+    let lib = src.join("shout/src/lib.rs");
+    let text = std::fs::read_to_string(&lib)
+        .expect("read")
+        .replace("\"!\"", "\"?\"");
+    std::fs::write(&lib, text).expect("write");
+    std::fs::File::options()
+        .write(true)
+        .open(&lib)
+        .expect("open")
+        .set_modified(std::time::SystemTime::now() - std::time::Duration::from_secs(3600))
+        .expect("set");
+    let (dev, second) = build_from(root, &sysroot, &image, &src, Some(&warm));
+    assert_eq!(
+        compiled(&second),
+        ["app", "shout"],
+        "the dependency is reused, the changed crate and what uses it are not: {second}"
+    );
+
+    // Clean, in the same store: everything compiled, the same bytes.
+    let (clean, third) = build_from(root, &sysroot, &image, &src, None);
+    assert_eq!(compiled(&third), ["app", "shout", "tiny"], "{third}");
+    assert_eq!(dev, clean, "the dev build's binary is the clean build's");
 }

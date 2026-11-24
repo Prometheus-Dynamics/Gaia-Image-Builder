@@ -84,6 +84,7 @@ fn component(
         None,
         None,
         None,
+        None,
         &ctx,
     )
     .expect("build");

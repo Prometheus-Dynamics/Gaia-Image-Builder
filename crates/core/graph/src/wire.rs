@@ -725,6 +725,18 @@ fn component_build(
     })?;
     let node = g.add(id, step("build"), file, &format!("{word}.builder"))?;
     for (key, value) in &build.settings {
+        // The warm cargo target is the dev build's (`gaia build
+        // --dev-reuse`) and nobody else's: a description never names it, so
+        // a clean or signed build never starts from one.
+        if key == DEV_INPUT {
+            return Err(Error::at(
+                file,
+                format!("{word}.settings.{key}"),
+                format!(
+                    "`{DEV_INPUT}` is set by `gaia build --dev-reuse` only; a kept cargo target never feeds a clean, release or signed build"
+                ),
+            ));
+        }
         if !g.has_input(node, key) {
             let ports: Vec<&str> = g.inputs(node).iter().map(|p| p.name).collect();
             return Err(Error::at(
@@ -852,6 +864,8 @@ fn component_build(
 
 /// The node a Rust build is: it takes its toolchain from the component.
 const RUST_BUILD: &str = "gaia.build.rust";
+/// The input a dev build gives the Rust step: its warm cargo target root.
+const DEV_INPUT: &str = "dev";
 
 /// The sysroot a Rust build for `triple` takes: the component's `toolchain`
 /// source's release files (rustc, cargo, the host's std and the target's),

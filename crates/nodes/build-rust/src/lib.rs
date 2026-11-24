@@ -31,6 +31,7 @@ mod group;
 mod split;
 mod toolchain;
 mod vendor;
+pub mod warm;
 
 pub use toolchain::lay_out;
 pub use vendor::vendor;
@@ -44,6 +45,9 @@ use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 
 const NAME: &str = "gaia.build.rust";
+/// What names a dev build's warm cargo target (`warm`): its key without
+/// the source.
+const DEV_TARGET: &str = "gaia.build.rust.dev-target";
 /// The probe that reads a tool's version inside the sandbox.
 const PROBE: &str = "gaia.build.rust.version";
 /// Changes when how the build is run changes.
@@ -78,13 +82,19 @@ const PATH_WITH_TOOLS: &str = "/toolchain/bin:/tools/bin:/tools:/usr/bin:/bin";
 /// compiler for the target, say), bound read-only at `/tools`, with
 /// `/tools/bin` and `/tools` on `PATH` after the toolchain. It is in the key.
 ///
+/// `dev` is the dev build's warm root (`gaia build --dev-reuse`: the
+/// directory under which each identity's kept cargo target is, see
+/// [`warm`]); empty or absent in a clean build, which starts from an empty
+/// target as always. A dev build's key says so, so its output is never a
+/// clean build's.
+///
 /// `features` goes back to a list (`Vec<String>`) when Daedalus decodes list
 /// constants (outside block X7, `docs/design.md`).
 #[node(
     id = "gaia.build.rust",
     inputs(
         store, bwrap, root, toolchain, source, vendor, package, features, profile, triple, cpu, cc,
-        env, tools
+        env, tools, dev
     ),
     outputs(tree, artifacts)
 )]
@@ -104,6 +114,7 @@ pub fn build_rust(
     cc: Option<&String>,
     env: Option<&String>,
     tools: Option<&Tree>,
+    dev: Option<&String>,
     cx: &Ctx,
 ) -> Result<(Tree, Vec<Artifact>), StepError> {
     let store = Store::open(store).map_err(StepError::store(NAME))?;
@@ -152,10 +163,15 @@ pub fn build_rust(
     }
     // What every tool of this build sees: the image, the toolchain and the
     // inputs. The writable step directory is added for the build itself.
-    let base = Sandbox::new(bwrap, root_dir.clone())
-        .input(toolchain_dir, TOOLCHAIN)
-        .input(source_dir.clone(), SOURCE)
-        .input(vendor_dir.clone(), VENDOR);
+    // The source is bound at /src: the stored tree, or in a dev build the
+    // warm directory's copy of it (the same mount point, so the same key).
+    let base_with = |source: PathBuf| {
+        Sandbox::new(bwrap, root_dir.clone())
+            .input(toolchain_dir.clone(), TOOLCHAIN)
+            .input(source, SOURCE)
+            .input(vendor_dir.clone(), VENDOR)
+    };
+    let base = base_with(source_dir.clone());
     // A tool's version, read by a step of its own in the sandbox.
     let probe = |program: &str, arg: &str| -> Result<String, StepError> {
         let key = base
@@ -223,119 +239,173 @@ pub fn build_rust(
         Some(tree) => Some(dir_of(tree, "tools tree")?),
         None => None,
     };
-    let mut sandbox = match &tools {
-        Some((_, dir)) => base.input(dir.clone(), TOOLS).env("PATH", PATH_WITH_TOOLS),
-        None => base.env("PATH", PATH_IN_SANDBOX),
+    let dress = |base: Sandbox| -> Result<Sandbox, StepError> {
+        let mut sandbox = match &tools {
+            Some((_, dir)) => base.input(dir.clone(), TOOLS).env("PATH", PATH_WITH_TOOLS),
+            None => base.env("PATH", PATH_IN_SANDBOX),
+        };
+        sandbox = sandbox
+            .env("CARGO_HOME", format!("{BUILD}/cargo-home"))
+            .env(target_var("RUSTFLAGS"), flags.join(" "))
+            .env(
+                format!(
+                    "CARGO_PROFILE_{}_STRIP",
+                    profile.to_ascii_uppercase().replace('-', "_")
+                ),
+                "symbols",
+            )
+            .env("CARGO_INCREMENTAL", "0")
+            .env("CARGO_TERM_COLOR", "never")
+            .env("SOURCE_DATE_EPOCH", "0")
+            .cwd(SOURCE);
+        if lld {
+            sandbox = sandbox.env(target_var("LINKER"), "rust-lld");
+        }
+        // A crate that compiles C (through the `cc` crate) finds its compiler by
+        // target: `cc` is a directory in the sandbox holding one program per
+        // target, named for the triple (and `<triple>-ar`, when there is one).
+        if let Some(dir) = cc.map(String::as_str).filter(|dir| !dir.is_empty()) {
+            if !dir.starts_with('/') {
+                return Err(fail(format!(
+                    "cc `{dir}` is not a path inside the sandbox: the source is at {SOURCE}"
+                )));
+            }
+            let name = triple.replace(['-', '.'], "_");
+            let dir = dir.trim_end_matches('/');
+            sandbox = sandbox.env(format!("CC_{name}"), format!("{dir}/{triple}"));
+            let ar = Path::new(dir)
+                .strip_prefix(SOURCE)
+                .ok()
+                .map(|inside| source_dir.join(inside).join(format!("{triple}-ar")));
+            if ar.is_some_and(|ar| ar.is_file()) {
+                sandbox = sandbox.env(format!("AR_{name}"), format!("{dir}/{triple}-ar"));
+            }
+        }
+        for (name, value) in &component_env {
+            sandbox = sandbox.env(name, value);
+        }
+        Ok(sandbox)
     };
-    sandbox = sandbox
-        .env("CARGO_HOME", format!("{BUILD}/cargo-home"))
-        .env(target_var("RUSTFLAGS"), flags.join(" "))
-        .env(
-            format!(
-                "CARGO_PROFILE_{}_STRIP",
-                profile.to_ascii_uppercase().replace('-', "_")
-            ),
-            "symbols",
-        )
-        .env("CARGO_INCREMENTAL", "0")
-        .env("CARGO_TERM_COLOR", "never")
-        .env("SOURCE_DATE_EPOCH", "0")
-        .cwd(SOURCE);
-    if lld {
-        sandbox = sandbox.env(target_var("LINKER"), "rust-lld");
-    }
-    // A crate that compiles C (through the `cc` crate) finds its compiler by
-    // target: `cc` is a directory in the sandbox holding one program per
-    // target, named for the triple (and `<triple>-ar`, when there is one).
-    if let Some(dir) = cc.map(String::as_str).filter(|dir| !dir.is_empty()) {
-        if !dir.starts_with('/') {
-            return Err(fail(format!(
-                "cc `{dir}` is not a path inside the sandbox: the source is at {SOURCE}"
-            )));
+    let sandbox = dress(base.clone())?;
+    let dev = dev.map(String::as_str).filter(|dev| !dev.is_empty());
+    // A build with no tools has the key it always had. The dev build's
+    // warm directory is named by the same key without the source.
+    let keyed = |kind: &str, version: u32, source: bool| {
+        let mut key = KeyBuilder::new(kind, version)
+            .config("rustc", &rustc)
+            .config("cargo", &cargo)
+            .config("package", package)
+            .config("profile", profile)
+            .config("features", features.join(","))
+            .config("triple", triple)
+            .config("cpu", cpu)
+            .input("image", root_digest)
+            .input("toolchain", toolchain_digest)
+            .input("vendor", vendor_digest);
+        if source {
+            key = key.input("source", source_digest);
         }
-        let name = triple.replace(['-', '.'], "_");
-        let dir = dir.trim_end_matches('/');
-        sandbox = sandbox.env(format!("CC_{name}"), format!("{dir}/{triple}"));
-        let ar = Path::new(dir)
-            .strip_prefix(SOURCE)
-            .ok()
-            .map(|inside| source_dir.join(inside).join(format!("{triple}-ar")));
-        if ar.is_some_and(|ar| ar.is_file()) {
-            sandbox = sandbox.env(format!("AR_{name}"), format!("{dir}/{triple}-ar"));
+        if let Some((digest, _)) = &tools {
+            key = key.input("tools", *digest);
         }
-    }
-    for (name, value) in &component_env {
-        sandbox = sandbox.env(name, value);
-    }
-    // A build with no tools has the key it always had.
-    let mut key = KeyBuilder::new(NAME, RECIPE_VERSION)
-        .config("rustc", rustc)
-        .config("cargo", cargo)
-        .config("package", package)
-        .config("profile", profile)
-        .config("features", features.join(","))
-        .config("triple", triple)
-        .config("cpu", cpu)
-        .input("image", root_digest)
-        .input("toolchain", toolchain_digest)
-        .input("source", source_digest)
-        .input("vendor", vendor_digest);
-    if let Some((digest, _)) = &tools {
-        key = key.input("tools", *digest);
-    }
-    let key = sandbox.key(key).finish();
+        sandbox.key(key)
+    };
+    let key = match dev {
+        None => keyed(NAME, RECIPE_VERSION, true).finish(),
+        Some(_) => keyed(NAME, RECIPE_VERSION, true)
+            .config("build", format!("dev-reuse {}", warm::VERSION))
+            .finish(),
+    };
+    let warm = match dev {
+        None => None,
+        Some(root) => {
+            let identity = keyed(DEV_TARGET, warm::VERSION, false).finish().0.hex();
+            Some((PathBuf::from(root), identity))
+        }
+    };
     let manifest = format!("{SOURCE}/Cargo.toml");
     let target_dir = format!("{BUILD}/target");
     let cargo = format!("{TOOLCHAIN}/bin/cargo");
+    let cargo_build = |work: &mut Work<'_>,
+                       sandbox: &Sandbox,
+                       build: &Path,
+                       target: &Path|
+     -> Result<(), StepError> {
+        let build = build.to_path_buf();
+        let home = build.join("cargo-home");
+        let out = build.join("out");
+        for dir in [&home, &out] {
+            std::fs::create_dir_all(dir).map_err(|e| fail(format!("{}: {e}", dir.display())))?;
+        }
+        std::fs::write(home.join("config.toml"), vendor_config(&vendor_dir))
+            .map_err(|e| fail(format!("cargo config: {e}")))?;
+        let profile_dir = target.join(triple).join(profile);
+        let build_with = |packages: &[&str]| {
+            group::build_args(profile, triple, packages, &features, &manifest, &target_dir)
+        };
+        if let [only] = names[..] {
+            sandboxed(work, sandbox, &build, &cargo, &build_with(&[only]))?;
+            collect(&profile_dir, &out)?;
+            return Ok(());
+        }
+        // Several packages: one cargo run when no crate changes its
+        // features, else one run per package in the same target directory.
+        let metadata = sandboxed(
+            work,
+            sandbox,
+            &build,
+            &cargo,
+            &cargo_metadata_args(&manifest),
+        )?;
+        match merge_refusal(
+            work, sandbox, &build, &cargo, &names, triple, &manifest, &features,
+        )? {
+            None => {
+                sandboxed(work, sandbox, &build, &cargo, &build_with(&names))?;
+            }
+            Some(why) => {
+                eprintln!(
+                    "gaia.build.rust: {} built one package at a time, not in one cargo run: {why}",
+                    names.join(", ")
+                );
+                for package in &names {
+                    sandboxed(work, sandbox, &build, &cargo, &build_with(&[*package]))?;
+                }
+            }
+        }
+        for package in &names {
+            let files = group::built_files(&metadata, package).map_err(fail)?;
+            collect_package(&profile_dir, &out.join(package), &files)?;
+        }
+        std::fs::create_dir_all(&out).map_err(|e| fail(format!("{}: {e}", out.display())))
+    };
     let made =
         Step::new(&store, cx, NAME, key).look_up_or_make(&[("out", Path::new("out"))], |work| {
+            // A dev build: the warm directory's copy of the source at /src,
+            // and its kept target bound where the target is, so cargo sees
+            // the paths a clean build has. It stays on the disk it is kept
+            // on, whatever the step's own directory is.
             let build = work.dir().to_path_buf();
-            let home = build.join("cargo-home");
-            let target = build.join("target");
-            let out = build.join("out");
-            for dir in [&home, &out] {
-                std::fs::create_dir_all(dir)
-                    .map_err(|e| fail(format!("{}: {e}", dir.display())))?;
-            }
-            std::fs::write(home.join("config.toml"), vendor_config(&vendor_dir))
-                .map_err(|e| fail(format!("cargo config: {e}")))?;
-            let profile_dir = target.join(triple).join(profile);
-            let build_with = |packages: &[&str]| {
-                group::build_args(profile, triple, packages, &features, &manifest, &target_dir)
-            };
-            if let [only] = names[..] {
-                sandboxed(work, &sandbox, &build, &cargo, &build_with(&[only]))?;
-                collect(&profile_dir, &out)?;
-                return Ok(());
-            }
-            // Several packages: one cargo run when no crate changes its
-            // features, else one run per package in the same target directory.
-            let metadata = sandboxed(
-                work,
-                &sandbox,
-                &build,
-                &cargo,
-                &cargo_metadata_args(&manifest),
-            )?;
-            match merge_refusal(work, &sandbox, &build, &cargo, &names, triple, &manifest, &features)? {
-                None => {
-                    sandboxed(work, &sandbox, &build, &cargo, &build_with(&names))?;
-                }
-                Some(why) => {
+            match &warm {
+                None => cargo_build(work, &sandbox, &build, &build.join("target")),
+                Some((root, identity)) => {
+                    let held = warm::Warm::open(root, identity).map_err(|e| fail(e.to_string()))?;
+                    let (copy, written) = held
+                        .source(&source_dir)
+                        .map_err(|e| fail(format!("the dev copy of the source: {e}")))?;
                     eprintln!(
-                        "gaia.build.rust: {} built one package at a time, not in one cargo run: {why}",
-                        names.join(", ")
+                        "gaia.build.rust: dev reuse: {} ({written} source files changed since its last build)",
+                        root.join(identity).display()
                     );
-                    for package in &names {
-                        sandboxed(work, &sandbox, &build, &cargo, &build_with(&[*package]))?;
+                    let target = held.target();
+                    for dir in [&target, &build.join("target")] {
+                        std::fs::create_dir_all(dir)
+                            .map_err(|e| fail(format!("{}: {e}", dir.display())))?;
                     }
+                    let dev = dress(base_with(copy))?.bind(&target, target_dir.clone());
+                    cargo_build(work, &dev, &build, &target)
                 }
             }
-            for package in &names {
-                let files = group::built_files(&metadata, package).map_err(fail)?;
-                collect_package(&profile_dir, &out.join(package), &files)?;
-            }
-            std::fs::create_dir_all(&out).map_err(|e| fail(format!("{}: {e}", out.display())))
         })?;
     let out = made.outputs["out"];
     let out_dir = store.path(&out);

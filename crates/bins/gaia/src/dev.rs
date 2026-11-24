@@ -39,6 +39,9 @@ pub const BUILD: &str = gaia_types::BUILD_DEV_REUSE;
 /// Where the warm Buildroot output directories are, beside the store's
 /// objects.
 pub const WARM: &str = "dev-buildroot";
+/// Where the warm cargo target directories are (`gaia-build-rust`, module
+/// `warm`), beside the store's objects.
+pub const WARM_CARGO: &str = "dev-cargo";
 /// Where a dev build's outputs are copied, beside the store's objects.
 pub const OUTPUTS: &str = "dev-outputs";
 /// The node that signs.
@@ -177,6 +180,39 @@ pub fn dev_erofs(doc: &mut GraphDoc) -> DevErofs {
         dev.made.push(name);
     }
     dev
+}
+
+/// The node that builds a Rust package.
+const RUST: &str = "gaia.build.rust";
+
+/// A dev build's Rust steps keep their cargo target between dev builds:
+/// each is given `dev`, the warm root `root` (`<store>/dev-cargo`), and keyed
+/// on it as a dev build. A clean build gives none, and starts from an empty
+/// target as always.
+pub fn mark_rust(doc: &mut GraphDoc, root: &str) {
+    for node in &mut doc.graph.nodes {
+        if node.id == RUST {
+            node.consts.insert("dev".into(), Lit::Str(root.into()));
+        }
+    }
+}
+
+/// The refusal of a clean build in which a step was given a warm cargo
+/// target (`dev`), by its label: only [`mark_rust`] gives one, in a dev
+/// build. A description cannot (`gaia-graph` refuses the setting), so this
+/// is the second lock on the same door.
+pub fn check_clean(doc: &GraphDoc) -> Result<(), Stop> {
+    let given: Vec<String> = (1..doc.graph.nodes.len())
+        .filter(|&node| doc.graph.nodes[node].consts.contains_key("dev"))
+        .map(|node| label(doc, node))
+        .collect();
+    if given.is_empty() {
+        return Ok(());
+    }
+    Err(Stop::usage(format!(
+        "a clean build never starts from a kept cargo target, and these steps were given one (`dev`):\n  {}",
+        given.join("\n  ")
+    )))
 }
 
 /// The generator nodes, whose runs may name `@build@`.
@@ -423,6 +459,32 @@ mod tests {
             [build(1), build(2), build(3), build(4)],
             ["dev-reuse", "dev-reuse", "dev-reuse", "None"]
         );
+    }
+
+    /// A dev build gives each Rust step the warm root; a clean build with
+    /// one given is refused, naming the step.
+    #[test]
+    fn rust_steps_get_the_warm_root_and_a_clean_build_refuses_it() {
+        let mut d = doc(
+            &[
+                ("gaia.build.rust", "p::lemnos.build", serde_json::json!({})),
+                ("gaia.fs.erofs", "p::erofs", serde_json::json!({})),
+            ],
+            &[],
+        );
+        check_clean(&d).expect("nothing given");
+        mark_rust(&mut d, "/store/dev-cargo");
+        assert_eq!(
+            d.graph.nodes[1].consts.get("dev"),
+            Some(&Lit::Str("/store/dev-cargo".into()))
+        );
+        assert!(!d.graph.nodes[2].consts.contains_key("dev"));
+        let error = check_clean(&d).expect_err("refused").message;
+        assert!(
+            error.contains("never starts from a kept cargo target"),
+            "{error}"
+        );
+        assert!(error.contains("p::lemnos.build"), "{error}");
     }
 
     fn release_erofs() -> serde_json::Value {
