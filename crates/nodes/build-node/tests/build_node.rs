@@ -134,51 +134,73 @@ fn a_small_app_builds_offline_twice_to_the_same_digest() {
     };
     let shared = tempfile::tempdir().expect("tempdir");
     let (app, tgz) = inputs(&home, shared.path());
-    let mut results = Vec::new();
-    let (mut caches, mut keys) = (Vec::new(), Vec::new());
-    for _ in 0..2 {
-        let dir = tempfile::tempdir().expect("tempdir");
-        let store = dir.path().join("store");
-        // Each run fills its own cache, as two fresh hosts would.
-        let cache = cache(&home, &tgz, &dir.path().join("fill"));
-        caches.push(tree_digest(&cache).expect("digest").to_string());
-        let (bundle, package) = build_node(
-            &store.display().to_string(),
-            &home.display().to_string(),
-            stored(&store, &app),
-            stored(&store, &cache),
-            "build",
-            &Ctx::new(),
-        )
-        .expect("builds");
-        let handle = Store::open(&store).expect("store");
-        let records = gaia_step::step_records(&gaia_step::logs_dir(&handle));
-        keys.push(
-            records
-                .iter()
-                .find(|record| record.step == "gaia.build.node")
-                .expect("a step record")
-                .key
-                .0
-                .to_string(),
-        );
-        let bundle_dir = bundle.object.path_in(&handle).expect("in");
-        let tgz = package.object.path_in(&handle).expect("in");
-        let out = Command::new(home.join("bin/node"))
-            .arg(bundle_dir.join("dist/app.js"))
-            .output()
-            .expect("node");
-        let mut files = Vec::new();
-        list(&bundle_dir, &bundle_dir, &mut files);
-        results.push((
-            tree_digest(&bundle_dir).expect("digest").to_string(),
-            file_digest(&tgz).expect("digest").to_string(),
-            std::fs::metadata(&tgz).expect("size").len(),
-            String::from_utf8_lossy(&out.stdout).trim().to_string(),
-            files,
-        ));
-        drop(dir);
-    }
+    // The caches are filled one after another, as two hosts would at two
+    // times (npm writes the time into its index, and the check below needs
+    // the two to differ); the builds, each in its own store, run at once.
+    let runs: Vec<_> = (0..2)
+        .map(|_| {
+            let dir = tempfile::tempdir().expect("tempdir");
+            let cache = cache(&home, &tgz, &dir.path().join("fill"));
+            (dir, cache)
+        })
+        .collect();
+    let caches: Vec<String> = runs
+        .iter()
+        .map(|(_, cache)| tree_digest(cache).expect("digest").to_string())
+        .collect();
+    let built: Vec<_> = std::thread::scope(|scope| {
+        let running: Vec<_> = runs
+            .iter()
+            .map(|(dir, cache)| {
+                let (home, app) = (&home, &app);
+                scope.spawn(move || {
+                    let store = dir.path().join("store");
+                    let (bundle, package) = build_node(
+                        &store.display().to_string(),
+                        &home.display().to_string(),
+                        stored(&store, app),
+                        stored(&store, cache),
+                        "build",
+                        &Ctx::new(),
+                    )
+                    .expect("builds");
+                    let handle = Store::open(&store).expect("store");
+                    let records = gaia_step::step_records(&gaia_step::logs_dir(&handle));
+                    let key = records
+                        .iter()
+                        .find(|record| record.step == "gaia.build.node")
+                        .expect("a step record")
+                        .key
+                        .0
+                        .to_string();
+                    let bundle_dir = bundle.object.path_in(&handle).expect("in");
+                    let tgz = package.object.path_in(&handle).expect("in");
+                    let out = Command::new(home.join("bin/node"))
+                        .arg(bundle_dir.join("dist/app.js"))
+                        .output()
+                        .expect("node");
+                    let mut files = Vec::new();
+                    list(&bundle_dir, &bundle_dir, &mut files);
+                    (
+                        key,
+                        (
+                            tree_digest(&bundle_dir).expect("digest").to_string(),
+                            file_digest(&tgz).expect("digest").to_string(),
+                            std::fs::metadata(&tgz).expect("size").len(),
+                            String::from_utf8_lossy(&out.stdout).trim().to_string(),
+                            files,
+                        ),
+                    )
+                })
+            })
+            .collect();
+        running
+            .into_iter()
+            .map(|run| run.join().expect("the build's thread"))
+            .collect()
+    });
+    let (keys, results): (Vec<_>, Vec<_>) = built.into_iter().unzip();
+    drop(runs);
     let (bundle, package, size, ran, files) = &results[0];
     println!("node {}", home.display());
     println!("bundle   {bundle}");
