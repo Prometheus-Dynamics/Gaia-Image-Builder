@@ -2,7 +2,15 @@
 # The check every PR into next must pass. CI runs exactly this.
 set -euo pipefail
 cd "$(dirname "${BASH_SOURCE[0]}")/.."
-export CARGO_INCREMENTAL="${CARGO_INCREMENTAL:-0}"
+# Incremental compilation on a kept target (here: an edit to gaia-store, the
+# workspace's test binaries rebuilt, interleaved 3 and 3 at load 120-149:
+# 127 CPU-s and 20.1 s against 219 CPU-s and 27.6 s). Off on CI, which
+# builds from nothing, where it only writes more.
+if [ -n "${GITHUB_ACTIONS:-}" ]; then
+  export CARGO_INCREMENTAL="${CARGO_INCREMENTAL:-0}"
+else
+  export CARGO_INCREMENTAL="${CARGO_INCREMENTAL:-1}"
+fi
 
 # One target directory, one worktree: refused before cargo runs (see the
 # script for why).
