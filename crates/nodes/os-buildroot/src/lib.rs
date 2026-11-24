@@ -558,7 +558,16 @@ pub fn build_os(
         let identity = dev::identity(&parts);
         Some((PathBuf::from(&host.dev_reuse), identity))
     };
-    let step = Step::new(&store, cx, NAME, key.finish());
+    let key = key.finish();
+    if warm.is_some() {
+        take_clean(
+            &store,
+            &key,
+            &step_key_clean(&prepared, config, host, seed_digest).finish(),
+        )
+        .map_err(StepError::store(NAME))?;
+    }
+    let step = Step::new(&store, cx, NAME, key);
     // The seed's plant, known before the work directory is chosen: the
     // host twice (LLVM's is 2 GB), whatever the last build of another seed
     // used (see `ppd::plant_bytes`).
@@ -608,6 +617,44 @@ pub fn build_os(
     ))
 }
 
+/// A dev build of inputs a clean build has made takes the clean build's
+/// outputs: Buildroot makes the same bytes either way (`--verify` says so),
+/// so the first dev build of an OS the store has clean is a look-up, not a
+/// build from nothing. Recorded under the dev key, so the next dev build of
+/// the same inputs finds it there. Only dev takes from clean: a clean key is
+/// never given a dev build's outputs. The warm directory is untouched; a
+/// later change builds in it as before.
+fn take_clean(
+    store: &Store,
+    dev: &gaia_step::StepKey,
+    clean: &gaia_step::StepKey,
+) -> Result<(), gaia_store::Error> {
+    let complete = |entry: &gaia_store::StepEntry| {
+        entry.outputs.len() == OUTPUTS.len()
+            && OUTPUTS
+                .iter()
+                .all(|(name, _)| entry.outputs.contains_key(*name))
+    };
+    if store
+        .lookup(dev, gaia_step::Check::Digest)?
+        .is_some_and(|entry| complete(&entry))
+    {
+        return Ok(());
+    }
+    let _making = store.making(dev)?;
+    if store.lookup(dev, gaia_step::Check::Present)?.is_some() {
+        return Ok(());
+    }
+    if let Some(entry) = store
+        .lookup(clean, gaia_step::Check::Digest)?
+        .filter(|entry| complete(entry))
+    {
+        store.record(dev, &entry)?;
+        eprintln!("{NAME}: dev build: the store has these inputs built clean; taking that build");
+    }
+    Ok(())
+}
+
 /// The step's key. A dev build's is never a clean build's (see `dev`).
 fn step_key(
     prepared: &Prepared,
@@ -615,14 +662,24 @@ fn step_key(
     host: &BuildrootHost,
     seed: Digest,
 ) -> KeyBuilder {
-    let key = prepared
-        .key(NAME, KEY_VERSION, config, host)
-        .input("seed", seed);
+    let key = step_key_clean(prepared, config, host, seed);
     if host.dev_reuse.is_empty() {
         key
     } else {
         key.config("build", format!("dev-reuse {}", dev::VERSION))
     }
+}
+
+/// The key a clean build of these inputs has, whatever `host` asks for.
+fn step_key_clean(
+    prepared: &Prepared,
+    config: &OsConfig,
+    host: &BuildrootHost,
+    seed: Digest,
+) -> KeyBuilder {
+    prepared
+        .key(NAME, KEY_VERSION, config, host)
+        .input("seed", seed)
 }
 
 fn check(config: &OsConfig, inputs: usize, host: &BuildrootHost) -> Result<(), String> {
@@ -1459,10 +1516,57 @@ mod toolchain_tests {
         let clean = step_key(&prepared, &config, &host, seed).finish();
         host.dev_reuse = "/store/dev-buildroot".into();
         let dev = step_key(&prepared, &config, &host, seed).finish();
+        assert_eq!(
+            clean,
+            step_key_clean(&prepared, &config, &host, seed).finish(),
+            "a dev build knows the clean key it may take from"
+        );
         host.dev_reuse = "/elsewhere/dev-buildroot".into();
         let moved = step_key(&prepared, &config, &host, seed).finish();
         assert_ne!(clean, dev);
         assert_eq!(dev, moved);
+    }
+
+    /// A dev build takes a clean build's complete entry of the same inputs,
+    /// under its own key; with none, or an incomplete one, it takes nothing;
+    /// and the clean key is never given anything.
+    #[test]
+    fn a_dev_build_takes_the_clean_build_of_its_inputs() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let store = Store::open(dir.path().join("store")).expect("store");
+        let file = dir.path().join("made");
+        fs::write(&file, b"an output").expect("write");
+        let object = store.put_file(&file).expect("put");
+        let prepared = prepared_for_test(Vec::new(), Vec::new());
+        let seed = Digest::of_bytes(b"seed");
+        let config = OsConfig::default();
+        let mut host = host_for_test();
+        let clean = step_key(&prepared, &config, &host, seed).finish();
+        host.dev_reuse = "/store/dev-buildroot".into();
+        let dev = step_key(&prepared, &config, &host, seed).finish();
+
+        // Nothing clean: nothing taken.
+        take_clean(&store, &dev, &clean).expect("takes");
+        assert!(store.entry(&dev).expect("reads").is_none());
+
+        // An entry without every output: nothing taken.
+        let mut entry = gaia_store::StepEntry {
+            outputs: OUTPUTS
+                .iter()
+                .skip(1)
+                .map(|(name, _)| ((*name).to_string(), object))
+                .collect(),
+        };
+        store.record(&clean, &entry).expect("record");
+        take_clean(&store, &dev, &clean).expect("takes");
+        assert!(store.entry(&dev).expect("reads").is_none());
+
+        // The whole clean entry: the dev key has it.
+        entry.outputs.insert(OUTPUTS[0].0.to_string(), object);
+        store.record(&clean, &entry).expect("record");
+        take_clean(&store, &dev, &clean).expect("takes");
+        assert_eq!(store.entry(&dev).expect("reads"), Some(entry.clone()));
+        assert_eq!(store.entry(&clean).expect("reads"), Some(entry));
     }
 
     /// A warm directory's identity names the fragments, not their text: a
