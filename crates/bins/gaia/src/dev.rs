@@ -17,7 +17,8 @@
 //!   ([`mark_generators`]), for a tool that writes it into what the board
 //!   carries (a slot's manifest); each output copied
 //!   to `<store>/dev-outputs/<run>/<output>` with `<output>.gaia-build.json`
-//!   beside it, `{"build":"dev-reuse"}`, and that copy is the path printed
+//!   beside it, `{"build":"dev-reuse","rust_profile":...}`, and that copy
+//!   is the path printed
 //!   (a store object may be a clean build's too, so nothing is put beside
 //!   it); and the build's last line on stderr, `DEV BUILD — not for release`.
 //! - **Checked on demand:** `--verify` builds the same product clean after
@@ -189,10 +190,20 @@ const RUST: &str = "gaia.build.rust";
 /// each is given `dev`, the warm root `root` (`<store>/dev-cargo`), and keyed
 /// on it as a dev build. A clean build gives none, and starts from an empty
 /// target as always.
-pub fn mark_rust(doc: &mut GraphDoc, root: &str) {
+///
+/// With `dev_profile`, each also builds with the dev profile (no LTO, 16
+/// codegen units: `gaia-build-rust`'s `warm::dev_profile`). Without it (the
+/// dev side of `--verify`), with the source's own profile, so the
+/// comparison with the clean build checks the reuse alone.
+pub fn mark_rust(doc: &mut GraphDoc, root: &str, dev_profile: bool) {
+    let value = if dev_profile {
+        root.to_string()
+    } else {
+        format!("{}{root}", gaia_build_rust::warm::SOURCE_PROFILE)
+    };
     for node in &mut doc.graph.nodes {
         if node.id == RUST {
-            node.consts.insert("dev".into(), Lit::Str(root.into()));
+            node.consts.insert("dev".into(), Lit::Str(value.clone()));
         }
     }
 }
@@ -256,6 +267,7 @@ pub fn mark_outputs(
     store: &Store,
     run: &Run,
     record: &Path,
+    dev_profile: bool,
 ) -> Result<BTreeMap<String, PathBuf>, Stop> {
     let run_name = record
         .file_stem()
@@ -265,7 +277,8 @@ pub fn mark_outputs(
     let fail = |e: io::Error| Stop::usage(format!("{}: {e}", dir.display()));
     fs::create_dir_all(&dir).map_err(fail)?;
     let marker = format!(
-        "{{\"build\":\"{BUILD}\",\"record\":\"{}\"}}\n",
+        "{{\"build\":\"{BUILD}\",\"rust_profile\":\"{}\",\"record\":\"{}\"}}\n",
+        rust_profile_text(dev_profile),
         record.display()
     );
     let mut copies = BTreeMap::new();
@@ -276,6 +289,19 @@ pub fn mark_outputs(
         copies.insert(port.clone(), copy);
     }
     Ok(copies)
+}
+
+/// The Rust profile a dev build's outputs were made with, in words, for
+/// their marker and the build's last line.
+pub fn rust_profile_text(dev_profile: bool) -> String {
+    if dev_profile {
+        format!(
+            "dev ({}): not the code a clean build ships",
+            gaia_build_rust::warm::DEV_PROFILE_TEXT
+        )
+    } else {
+        "the source's".to_string()
+    }
 }
 
 /// A copy of a file or a tree; on the store's disk, a reflink where the
@@ -473,7 +499,7 @@ mod tests {
             &[],
         );
         check_clean(&d).expect("nothing given");
-        mark_rust(&mut d, "/store/dev-cargo");
+        mark_rust(&mut d, "/store/dev-cargo", true);
         assert_eq!(
             d.graph.nodes[1].consts.get("dev"),
             Some(&Lit::Str("/store/dev-cargo".into()))

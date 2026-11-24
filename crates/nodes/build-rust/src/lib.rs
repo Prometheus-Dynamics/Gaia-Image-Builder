@@ -288,6 +288,21 @@ pub fn build_rust(
     };
     let sandbox = dress(base.clone())?;
     let dev = dev.map(String::as_str).filter(|dev| !dev.is_empty());
+    // `source-profile <root>`: a dev build that keeps the source's profile
+    // (`--dev-reuse --verify`, whose comparison with a clean build checks
+    // the reuse alone). A bare root: the dev profile too.
+    let (dev, dev_profile) = match dev {
+        Some(value) => match value.strip_prefix(warm::SOURCE_PROFILE) {
+            Some(root) => (Some(root), false),
+            None => (Some(value), true),
+        },
+        None => (None, false),
+    };
+    let profile_text = if dev_profile {
+        warm::DEV_PROFILE_TEXT
+    } else {
+        "the source's"
+    };
     // A build with no tools has the key it always had. The dev build's
     // warm directory is named by the same key without the source.
     let keyed = |kind: &str, version: u32, source: bool| {
@@ -314,12 +329,16 @@ pub fn build_rust(
         None => keyed(NAME, RECIPE_VERSION, true).finish(),
         Some(_) => keyed(NAME, RECIPE_VERSION, true)
             .config("build", format!("dev-reuse {}", warm::VERSION))
+            .config("dev-profile", profile_text)
             .finish(),
     };
     let warm = match dev {
         None => None,
         Some(root) => {
-            let identity = keyed(DEV_TARGET, warm::VERSION, false).finish().0.hex();
+            let mut identity = keyed(DEV_TARGET, warm::VERSION, false).finish().0.hex();
+            if !dev_profile {
+                identity.push_str("-source-profile");
+            }
             Some((PathBuf::from(root), identity))
         }
     };
@@ -402,7 +421,15 @@ pub fn build_rust(
                         std::fs::create_dir_all(dir)
                             .map_err(|e| fail(format!("{}: {e}", dir.display())))?;
                     }
-                    let dev = dress(base_with(copy))?.bind(&target, target_dir.clone());
+                    let mut dev = dress(base_with(copy))?.bind(&target, target_dir.clone());
+                    if dev_profile {
+                        for (name, value) in warm::dev_profile(profile) {
+                            dev = dev.env(name, value);
+                        }
+                    }
+                    eprintln!(
+                        "gaia.build.rust: dev profile: `{profile}` with {profile_text} settings (a clean build ships it as the source sets it)"
+                    );
                     cargo_build(work, &dev, &build, &target)
                 }
             }

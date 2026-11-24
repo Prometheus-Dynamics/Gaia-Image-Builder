@@ -615,7 +615,7 @@ fn build_from(
     toolchain: &Tree,
     image: &Tree,
     src: &Path,
-    dev: Option<&Path>,
+    dev: Option<String>,
 ) -> (Vec<(String, u64, String)>, String) {
     let store = root.join("store");
     let logs = || -> Vec<PathBuf> {
@@ -659,7 +659,7 @@ fn build_from(
         None,
         None,
         None,
-        dev.map(|d| d.display().to_string()).as_ref(),
+        dev.as_ref(),
         &Ctx::new(),
     )
     .expect("builds");
@@ -712,8 +712,9 @@ fn a_dev_build_keeps_its_target_and_a_clean_build_never_sees_it() {
     let src = root.join("src");
     workspace(&src);
     let warm = root.join("dev-cargo");
+    let inner = || Some(warm.display().to_string());
     let toolchain = stored_tree(&root.join("store"), &sysroot);
-    let (_, first) = build_from(root, &toolchain, &image, &src, Some(&warm));
+    let (_, first) = build_from(root, &toolchain, &image, &src, inner());
     assert_eq!(compiled(&first), ["app", "shout", "tiny"], "{first}");
     assert_eq!(
         warm.read_dir().expect("warm").count(),
@@ -733,15 +734,37 @@ fn a_dev_build_keeps_its_target_and_a_clean_build_never_sees_it() {
         .expect("open")
         .set_modified(std::time::SystemTime::now() - std::time::Duration::from_secs(3600))
         .expect("set");
-    let (dev, second) = build_from(root, &toolchain, &image, &src, Some(&warm));
+    let (dev, second) = build_from(root, &toolchain, &image, &src, inner());
     assert_eq!(
         compiled(&second),
         ["app", "shout"],
         "the dependency is reused, the changed crate and what uses it are not: {second}"
     );
 
-    // Clean, in the same store: everything compiled, the same bytes.
-    let (clean, third) = build_from(root, &toolchain, &image, &src, None);
+    // With the source's profile (what `--verify` asks for): a warm
+    // directory of its own, and the clean build's bytes.
+    let source = format!(
+        "{}{}",
+        gaia_build_rust::warm::SOURCE_PROFILE,
+        warm.display()
+    );
+    let (verified, third) = build_from(root, &toolchain, &image, &src, Some(source));
     assert_eq!(compiled(&third), ["app", "shout", "tiny"], "{third}");
-    assert_eq!(dev, clean, "the dev build's binary is the clean build's");
+    assert_eq!(
+        warm.read_dir().expect("warm").count(),
+        2,
+        "the source's profile is not the dev profile's target"
+    );
+
+    // Clean, in the same store: everything compiled.
+    let (clean, fourth) = build_from(root, &toolchain, &image, &src, None);
+    assert_eq!(compiled(&fourth), ["app", "shout", "tiny"], "{fourth}");
+    assert_eq!(
+        verified, clean,
+        "the source's profile is the clean build's binary"
+    );
+    assert_ne!(
+        dev, clean,
+        "the dev profile (no LTO, 16 units) is not the code a clean build ships"
+    );
 }

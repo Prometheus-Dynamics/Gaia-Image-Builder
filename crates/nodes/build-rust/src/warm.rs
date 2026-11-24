@@ -28,16 +28,45 @@
 //!   filesystem), and stays there after the build, whether it worked or
 //!   not: cargo keeps its own state of what a failed build left.
 //!
+//! - **The profile:** a dev build also builds with the dev profile
+//!   ([`dev_profile`]): no LTO and 16 codegen units. That is code a clean
+//!   build does not make, so a dev binary is for the inner loop only. The
+//!   landing gate, and any image flashed for a proof or a release, are
+//!   clean builds with the source's own profile.
+//!
 //! `gaia build --dev-reuse --verify` builds the product clean beside it and
-//! compares the outputs; a stale reuse shows there.
+//! compares the outputs; a stale reuse shows there, and with the dev
+//! profile the Rust binaries differ by design.
 use std::fs;
 use std::io::{self, Read};
 use std::os::unix::fs::{MetadataExt, PermissionsExt};
 use std::path::{Path, PathBuf};
 
 /// What a dev build does, as a number in its step key and its warm
-/// directory's identity. Raised when that changes.
-pub const VERSION: u32 = 1;
+/// directory's identity. Raised when that changes. 2: the dev profile.
+pub const VERSION: u32 = 2;
+
+/// The dev profile, in words: what a dev build changes in the package's
+/// cargo profile, and nothing else. It is in the dev step's key, on stderr
+/// for each dev Rust step, and in every dev output's marker.
+pub const DEV_PROFILE_TEXT: &str = "lto off, codegen-units 16";
+
+/// The prefix of a `dev` value that keeps the source's profile:
+/// `source-profile <root>` (`gaia build --dev-reuse --verify`).
+pub const SOURCE_PROFILE: &str = "source-profile ";
+
+/// The dev profile as cargo's environment for profile `profile`: no LTO and
+/// 16 codegen units, so a one-line change recompiles and links one crate in
+/// seconds. Everything else in the profile (opt-level, panic, strip) is the
+/// source's. A clean build, and so every image that is judged, uses the
+/// profile as the source sets it.
+pub fn dev_profile(profile: &str) -> [(String, &'static str); 2] {
+    let name = profile.to_ascii_uppercase().replace('-', "_");
+    [
+        (format!("CARGO_PROFILE_{name}_LTO"), "off"),
+        (format!("CARGO_PROFILE_{name}_CODEGEN_UNITS"), "16"),
+    ]
+}
 /// The lock's file in a warm directory.
 const LOCK: &str = "lock";
 
@@ -260,6 +289,23 @@ mod tests {
             .expect("set");
         assert_eq!(mirror(&src, &copy).expect("third"), 0);
         assert_eq!(mtime(&copy.join("a/changed.rs")), old);
+    }
+
+    /// The dev profile names the package's own profile, as cargo spells
+    /// its environment.
+    #[test]
+    fn the_dev_profile_is_cargos_environment_for_the_named_profile() {
+        assert_eq!(
+            dev_profile("service"),
+            [
+                ("CARGO_PROFILE_SERVICE_LTO".to_string(), "off"),
+                ("CARGO_PROFILE_SERVICE_CODEGEN_UNITS".to_string(), "16"),
+            ]
+        );
+        assert_eq!(
+            dev_profile("small-fast")[0].0,
+            "CARGO_PROFILE_SMALL_FAST_LTO"
+        );
     }
 
     /// One build of an identity at a time.

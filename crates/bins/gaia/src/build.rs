@@ -255,7 +255,7 @@ fn build_one(options: &args::Project) -> Result<Run, Stop> {
     }
     let path = run.write(&store)?;
     if options.dev_reuse {
-        for (port, copy) in crate::dev::mark_outputs(&store, &run, &path)? {
+        for (port, copy) in crate::dev::mark_outputs(&store, &run, &path, !options.verify)? {
             println!("{port}  {}", copy.display());
         }
     } else {
@@ -291,7 +291,10 @@ fn build_one(options: &args::Project) -> Result<Run, Stop> {
         path.display()
     );
     if options.dev_reuse {
-        eprintln!("DEV BUILD — not for release (gaia build --dev-reuse; the record says so)");
+        eprintln!(
+            "DEV BUILD — not for release (gaia build --dev-reuse; the record says so; Rust profile: {})",
+            crate::dev::rust_profile_text(!options.verify)
+        );
     }
     stop.map_or(Ok(run), Err)
 }
