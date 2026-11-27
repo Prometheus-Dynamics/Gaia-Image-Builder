@@ -469,16 +469,50 @@ fn copy_with_libraries(program: &str, root: &Path, ldd: &str) {
     }
 }
 
-/// Removes the image when the test ends.
-struct Image<'a> {
-    podman: &'a str,
-    reference: String,
+/// Podman with a store of its own under `dir`, never the user's: the
+/// user's store can sit on a disk other work keeps busy, and then this
+/// case's time was that disk's (5-39 s against about 1 s). Podman's tmp
+/// dir, which holds the rootless pause process, stays the user's.
+struct Podman {
+    program: String,
+    root: PathBuf,
+    runroot: PathBuf,
 }
 
-impl Drop for Image<'_> {
+impl Podman {
+    fn new(program: &str, dir: &Path) -> Podman {
+        Podman {
+            program: program.to_string(),
+            root: dir.join("root"),
+            runroot: dir.join("run"),
+        }
+    }
+
+    fn command(&self) -> Command {
+        let mut command = Command::new(&self.program);
+        command
+            .arg("--root")
+            .arg(&self.root)
+            .arg("--runroot")
+            .arg(&self.runroot);
+        command
+    }
+}
+
+/// When the test ends, passed or failed: the image is removed, then the
+/// store. A rootless store can hold files that only podman's user
+/// namespace may remove, so they go through `podman unshare` before the
+/// tempdir does.
+impl Drop for Podman {
     fn drop(&mut self) {
-        let _ = Command::new(self.podman)
-            .args(["rmi", "-f", &self.reference])
+        let _ = self.command().args(["image", "prune", "-a", "-f"]).output();
+        let _ = self
+            .command()
+            .arg("unshare")
+            .arg("rm")
+            .arg("-rf")
+            .arg(&self.root)
+            .arg(&self.runroot)
             .output();
     }
 }
@@ -537,12 +571,11 @@ fn podman_loads_the_oci_archive_and_runs_its_entrypoint() {
     )
     .expect("builds");
     let archive = artifact.object.path_in(&store).expect("in store");
-    let _cleanup = Image {
-        podman,
-        reference: reference.clone(),
-    };
+    // Declared after `dir`, so it is dropped first.
+    let podman = Podman::new(podman, &dir.path().join("podman"));
 
-    let load = Command::new(podman)
+    let load = podman
+        .command()
         .arg("load")
         .arg("-i")
         .arg(&archive)
@@ -553,7 +586,8 @@ fn podman_loads_the_oci_archive_and_runs_its_entrypoint() {
         "podman load: {}",
         String::from_utf8_lossy(&load.stderr)
     );
-    let run = Command::new(podman)
+    let run = podman
+        .command()
         .args(["run", "--rm", &reference])
         .output()
         .expect("podman run");
@@ -562,7 +596,8 @@ fn podman_loads_the_oci_archive_and_runs_its_entrypoint() {
         "podman run: {}",
         String::from_utf8_lossy(&run.stderr)
     );
-    let inspect = Command::new(podman)
+    let inspect = podman
+        .command()
         .args([
             "image",
             "inspect",
