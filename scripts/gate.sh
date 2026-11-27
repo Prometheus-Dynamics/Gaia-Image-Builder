@@ -70,38 +70,11 @@ lock() {
   fi
 }
 
-# The tests: every test binary's cases at once under cargo-nextest (each case
-# its own process), then the doc tests, which nextest does not run. Without
-# nextest the gate fails, saying so, unless GAIA_GATE_UNBOUNDED=1: cargo test
-# would run the same cases with no bound on any of them.
-tests() {
-  if cargo nextest --version > /dev/null 2>&1; then
-    # Both run and both statuses count: the step fails if either fails,
-    # whether or not errexit applies where the step is called.
-    local cases=0 docs=0
-    # Each case runs through scripts/test-bound.py (cargo's runner for the
-    # host's own target): a case that hangs is stopped at its bound and
-    # fails by name, and the bound counts the time the case could use, not
-    # the time it waited for a CPU on a busy machine (see the script).
-    # Only here: under plain cargo test a process is a whole binary, and
-    # the bound is one case's.
-    local host runner
-    host=$(rustc -vV | sed -n 's/^host: //p')
-    runner="CARGO_TARGET_$(printf '%s' "$host" | tr 'a-z-' 'A-Z_')_RUNNER"
-    # On a CI runner every case runs to its end: one red run names every
-    # case that fails there, not just the first.
-    local all=()
-    if [ -n "${GITHUB_ACTIONS:-}" ]; then all=(--no-fail-fast); fi
-    env "$runner=$PWD/scripts/test-bound.py" \
-      cargo nextest run --locked "${packages[@]}" "${all[@]}" --all-features || cases=$?
-    if [ "${#doc_packages[@]}" -gt 0 ]; then
-      cargo test --locked "${doc_packages[@]}" --all-features --doc || docs=$?
-    fi
-    if [ "$cases" -ne 0 ] || [ "$docs" -ne 0 ]; then
-      echo "tests failed: nextest exit $cases, doc tests exit $docs" >&2
-      return 1
-    fi
-  elif [ "${GAIA_GATE_UNBOUNDED:-}" = 1 ]; then
+# Without nextest the gate fails, saying so, unless GAIA_GATE_UNBOUNDED=1:
+# cargo test would run the same cases with no bound on any of them. Then the
+# steps run one after another.
+unbounded_tests() {
+  if [ "${GAIA_GATE_UNBOUNDED:-}" = 1 ]; then
     # Asked for by name: without nextest a process is a whole test binary,
     # so no case has a bound and a hung one holds this run.
     echo "cargo-nextest is not installed, and GAIA_GATE_UNBOUNDED=1: the tests run under plain cargo test, WITH NO BOUND on any test" >&2
@@ -112,25 +85,6 @@ tests() {
     return 1
   fi
 }
-
-if compgen -G "crates/*/*/Cargo.toml" > /dev/null; then
-  step lock lock
-  step format cargo fmt --all --check
-  step clippy cargo clippy --locked --workspace --all-targets --all-features -- -D warnings
-  step tests tests
-else
-  echo "no crates yet"
-fi
-
-# Gaia's code names no board, product or camera. Those live in descriptions.
-# The names are in scripts/product-names; scripts/check.sh reads the same file.
-if compgen -G "crates/*/*/src" > /dev/null; then
-  step "no product names in code" bash -c '! grep -rn -i -E -f scripts/product-names crates/*/*/src'
-fi
-
-if [ -x scripts/check-boundaries.sh ]; then
-  step boundaries scripts/check-boundaries.sh
-fi
 
 # `gaia store verify` on a small store this step makes in its own temp
 # directory: two file objects, each named by its sha256 as the store lays
@@ -166,8 +120,171 @@ store_verify() {
   fi
 }
 
+# The steps after `lock`, side by side, as three lines of work:
+#   format, which takes no cargo lock;
+#   the test build, then the cases under cargo-nextest (each case its own
+#   process);
+#   clippy, then the doc tests (which nextest does not run), then the store
+#   check: started once nextest's own cargo is done and its cases run.
+# cargo takes one lock per target directory, so its commands still go one
+# at a time; what overlaps is the case run and format with them. Measured at
+# load 104-128 on a gaia-store edit, 3 alternated pairs: 107.3/69.8/59.3 s
+# one after another, 65.8/56.8/42.5 s side by side, at the same CPU-s.
+#
+# Each step writes its output to a log of its own and its exit status to a
+# file; the gate waits for every PID it started and reads every status
+# itself (errexit does not see a background job's). The logs are printed in
+# step order, and each failed step is named with its exit status. Locally
+# the first failure stops the other lines of work: each runs in a process
+# group of its own, and the gate signals those groups by the PIDs it
+# recorded. On a CI runner every step runs to its end, so one red run
+# names every step that fails there.
+logs=""
+on_ci() { [ -n "${GITHUB_ACTIONS:-}" ]; }
+
+# run_step LABEL COMMAND...: COMMAND's output to LABEL's log, its exit status
+# to LABEL's status file; returns that status.
+run_step() {
+  local label="$1" start rc=0
+  shift
+  start=$SECONDS
+  {
+    echo "==> $label"
+    "$@" || rc=$?
+    if [ "$rc" -eq 0 ]; then
+      echo "    $label: $((SECONDS - start)) s"
+    else
+      echo "    $label: failed, exit $rc, after $((SECONDS - start)) s"
+    fi
+  } > "$logs/$label.log" 2>&1
+  echo "$rc" > "$logs/$label.status"
+  return "$rc"
+}
+
+# Each case runs through scripts/test-bound.py (cargo's runner for the host's
+# own target): a case that hangs is stopped at its bound and fails by name,
+# and the bound counts the time the case could use, not the time it waited
+# for a CPU on a busy machine (see the script). On a CI runner every case
+# runs to its end.
+cases() {
+  local host runner all=()
+  host=$(rustc -vV | sed -n 's/^host: //p')
+  runner="CARGO_TARGET_$(printf '%s' "$host" | tr 'a-z-' 'A-Z_')_RUNNER"
+  if on_ci; then all=(--no-fail-fast); fi
+  env "$runner=$PWD/scripts/test-bound.py" \
+    cargo nextest run --locked "${packages[@]}" "${all[@]}" --all-features
+}
+
+doc_tests() {
+  if [ "${#doc_packages[@]}" -gt 0 ]; then
+    cargo test --locked "${doc_packages[@]}" --all-features --doc
+  else
+    echo "no library in the plan: no doc tests"
+  fi
+}
+
+# The test build, then the cases: the same packages and features as the
+# case run, so nextest's own cargo finds everything built.
+test_line() {
+  run_step "test build" cargo test --no-run --locked "${packages[@]}" --all-features || return
+  run_step tests cases
+}
+
+# clippy, the doc tests and the store check, once the case run has begun
+# (or ended, or its line stopped before it). Locally the line stops at its
+# first failure; on CI each step runs.
+cases_begun() {
+  grep -qE 'Starting [0-9]+ tests' "$logs/tests.log" 2> /dev/null && return 0
+  [ -e "$logs/tests.status" ] && return 0
+  [ -e "$logs/test build.status" ] && [ "$(cat "$logs/test build.status")" != 0 ]
+}
+
+check_line() {
+  local rc=0
+  until cases_begun; do
+    sleep 0.2
+  done
+  run_step clippy cargo clippy --locked --workspace --all-targets --all-features -- -D warnings || { rc=1; on_ci || return 1; }
+  run_step "doc tests" doc_tests || { rc=1; on_ci || return 1; }
+  run_step "store verify" store_verify || rc=1
+  return "$rc"
+}
+
+# The lines of work by PID; signalled as groups if the gate is stopped.
+declare -A line=()
+stop_lines() {
+  local pid
+  for pid in "${!line[@]}"; do
+    kill -TERM -- "-$pid" 2> /dev/null || true
+  done
+}
+
+side_by_side() {
+  local pid rc failed=0 label
+  logs=$(mktemp -d "${TMPDIR:-/tmp}/gate-steps.XXXXXX")
+  trap 'stop_lines; exit 130' INT TERM
+  set -m
+  run_step format cargo fmt --all --check &
+  line[$!]=format
+  test_line &
+  line[$!]="test line"
+  check_line &
+  line[$!]="check line"
+  set +m
+  while [ "${#line[@]}" -gt 0 ]; do
+    rc=0
+    wait -n -p pid "${!line[@]}" || rc=$?
+    [ -n "${pid:-}" ] || break
+    unset "line[$pid]"
+    if [ "$rc" -ne 0 ] && [ "$failed" -eq 0 ]; then
+      failed=1
+      on_ci || stop_lines
+    fi
+  done
+  trap - INT TERM
+  for label in format "test build" tests clippy "doc tests" "store verify"; do
+    if [ -e "$logs/$label.log" ]; then
+      cat "$logs/$label.log"
+    fi
+  done
+  for label in format "test build" tests clippy "doc tests" "store verify"; do
+    if [ -e "$logs/$label.status" ] && [ "$(cat "$logs/$label.status")" != 0 ]; then
+      echo "gate failed: step '$label', exit $(cat "$logs/$label.status") (its log is above)" >&2
+      failed=1
+    elif [ ! -e "$logs/$label.status" ] && [ -e "$logs/$label.log" ]; then
+      echo "gate failed: step '$label' was stopped before it ended, after another step failed" >&2
+      failed=1
+    fi
+  done
+  rm -rf -- "$logs"
+  return "$failed"
+}
+
 if compgen -G "crates/*/*/Cargo.toml" > /dev/null; then
-  step "store verify" store_verify
+  step lock lock
+  if cargo nextest --version > /dev/null 2>&1; then
+    side_by_side
+  else
+    step format cargo fmt --all --check
+    step clippy cargo clippy --locked --workspace --all-targets --all-features -- -D warnings
+    step tests unbounded_tests
+    if [ "${#doc_packages[@]}" -gt 0 ]; then
+      step "doc tests" cargo test --locked "${doc_packages[@]}" --all-features --doc
+    fi
+    step "store verify" store_verify
+  fi
+else
+  echo "no crates yet"
+fi
+
+# Gaia's code names no board, product or camera. Those live in descriptions.
+# The names are in scripts/product-names; scripts/check.sh reads the same file.
+if compgen -G "crates/*/*/src" > /dev/null; then
+  step "no product names in code" bash -c '! grep -rn -i -E -f scripts/product-names crates/*/*/src'
+fi
+
+if [ -x scripts/check-boundaries.sh ]; then
+  step boundaries scripts/check-boundaries.sh
 fi
 
 scripts/gate-lanes.py passed
