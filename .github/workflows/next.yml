@@ -25,6 +25,28 @@ jobs:
       # rust-toolchain.toml selects the toolchain and its components.
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
+      # The build-rust tests' pinned Rust release, laid out as a sysroot,
+      # and the seed store their pinned image is pulled into, both under
+      # target/tmp: rust-cache keeps that directory's tree but none of its
+      # files, so they are kept here instead. Each is keyed on what makes
+      # it: the pins in the test, and the code that lays the release out or
+      # writes the store. The tests still trust either only with its made
+      # mark. (These steps come after rust-cache, so they save before it
+      # strips target.)
+      - id: pins
+        run: echo "pins=$(grep -oE '[0-9a-f]{64}|const RELEASE[^;]*' crates/nodes/build-rust/tests/build_rust.rs | sha256sum | cut -c1-16)" >> "$GITHUB_OUTPUT"
+      - uses: actions/cache@v4
+        with:
+          path: |
+            target/tmp/rust-*/sysroot
+            target/tmp/rust-*/sysroot.made
+          key: build-rust-sysroot-${{ runner.os }}-${{ steps.pins.outputs.pins }}-${{ hashFiles('crates/nodes/build-rust/src/toolchain.rs') }}
+      - uses: actions/cache@v4
+        with:
+          path: |
+            target/tmp/oci-seed/store
+            target/tmp/oci-seed/store.made
+          key: build-rust-oci-seed-${{ runner.os }}-${{ steps.pins.outputs.pins }}-${{ hashFiles('crates/core/store/src/**', 'crates/nodes/source-oci/src/**') }}
       # The sandbox tests need bubblewrap and unprivileged user namespaces,
       # and the filesystem, initramfs, strip and verity tests their tools; all
       # must run here rather than skip. The runner image also lists
