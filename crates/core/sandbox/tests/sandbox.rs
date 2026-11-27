@@ -264,9 +264,27 @@ fn host_cpu_ns(script: &str) -> u64 {
 }
 
 /// The host processes whose command line holds `marker`.
+///
+/// Only this user's `sleep` processes are read: reading a process's
+/// `cmdline` takes that process's memory-map lock, and another process on
+/// the host can hold it for seconds (a model server here held it for up to
+/// 34 s, and this case took 29 s). The owner (a stat of `/proc/<pid>`) and
+/// `comm` take no such lock.
 fn holding(marker: &str) -> Vec<String> {
+    use std::os::unix::fs::MetadataExt;
+    let uid = std::fs::metadata("/proc/self").expect("/proc/self").uid();
     let mut found = Vec::new();
     for entry in std::fs::read_dir("/proc").expect("/proc").flatten() {
+        if !entry
+            .metadata()
+            .is_ok_and(|meta| meta.is_dir() && meta.uid() == uid)
+        {
+            continue;
+        }
+        let comm = std::fs::read_to_string(entry.path().join("comm")).unwrap_or_default();
+        if comm.trim_end() != "sleep" {
+            continue;
+        }
         let cmdline = std::fs::read(entry.path().join("cmdline")).unwrap_or_default();
         if String::from_utf8_lossy(&cmdline).contains(marker) {
             found.push(entry.file_name().to_string_lossy().into_owned());
