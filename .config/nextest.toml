@@ -1,8 +1,9 @@
 # The gate's wall time is its longest case's end. Under load a case that
 # takes 20 s alone takes 40-70 s, and one started last ends last: the heavy
-# cases (each builds a toolchain's project, boots a guest or encodes
-# hundreds of megabytes) start first, the hundreds of small ones fill in
-# around them. Order only: every case still runs, each bounded as before.
+# cases (each builds a toolchain's project, boots a guest, encodes
+# hundreds of megabytes, runs a container or crashes a commit) start first,
+# the hundreds of small ones fill in around them. Order only: every case
+# still runs, each bounded as before.
 # Folded tests (tests/all/) are named by their module: `disk::...`.
 [[profile.default.overrides]]
 filter = '''
@@ -12,5 +13,7 @@ binary(build_go) | binary(build_node) | binary(build_python)
 | (package(gaia-flash-image) & test(/^tests::the_stream/))
 | (package(gaia-os-buildroot) & test(/^jobs::tests::a_yielding_build_(gets|leaves)/))
 | test(/^qemu_board_sysfs::collect_(gives_up|keeps)/)
+| (package(gaia-package) & test(=package::podman_loads_the_oci_archive_and_runs_its_entrypoint))
+| (package(gaia-store) & binary(crash) & test(=a_crash_mid_commit_leaves_no_partial_entry))
 '''
 priority = 50
