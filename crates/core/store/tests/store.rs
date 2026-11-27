@@ -4,6 +4,41 @@ use std::os::unix::fs::{PermissionsExt, symlink};
 use std::path::Path;
 use std::time::{Duration, SystemTime};
 
+/// A temporary directory removed even when a case leaves a read-only
+/// directory in it: on drop its directories get their owner's write back
+/// first (`tempfile::TempDir` alone leaves such a tree behind, silently).
+struct TestDir(Option<tempfile::TempDir>);
+
+impl TestDir {
+    fn new() -> TestDir {
+        TestDir(Some(tempfile::tempdir().expect("tempdir")))
+    }
+
+    fn path(&self) -> &Path {
+        self.0.as_ref().expect("the directory").path()
+    }
+}
+
+impl Drop for TestDir {
+    fn drop(&mut self) {
+        let Some(dir) = self.0.take() else { return };
+        let mut stack = vec![dir.path().to_path_buf()];
+        while let Some(path) = stack.pop() {
+            let Ok(meta) = fs::symlink_metadata(&path) else {
+                continue;
+            };
+            if meta.is_dir() {
+                let mode = meta.permissions().mode();
+                let _ = fs::set_permissions(&path, fs::Permissions::from_mode(mode | 0o700));
+                if let Ok(entries) = fs::read_dir(&path) {
+                    stack.extend(entries.flatten().map(|entry| entry.path()));
+                }
+            }
+        }
+        let _ = dir.close();
+    }
+}
+
 fn chmod(path: &Path, mode: u32) {
     fs::set_permissions(path, fs::Permissions::from_mode(mode)).expect("chmod");
 }
@@ -45,7 +80,7 @@ fn sample_tree(root: &Path, reverse: bool, stamp: u64) {
 
 #[test]
 fn a_file_digest_is_its_sha256() {
-    let dir = tempfile::tempdir().expect("tempdir");
+    let dir = TestDir::new();
     let path = dir.path().join("a");
     fs::write(&path, b"a").expect("write");
     assert_eq!(
@@ -62,8 +97,8 @@ fn a_file_digest_is_its_sha256() {
 fn the_same_tree_has_the_same_digest_in_two_layouts() {
     // Two "machines": different directories, write order, mtimes and root
     // modes, and two stores at different paths.
-    let one = tempfile::tempdir().expect("tempdir");
-    let two = tempfile::tempdir().expect("tempdir");
+    let one = TestDir::new();
+    let two = TestDir::new();
     let a = one.path().join("build/out/rootfs");
     let b = two.path().join("elsewhere/x");
     sample_tree(&a, false, 1_000);
@@ -93,7 +128,7 @@ fn the_same_tree_has_the_same_digest_in_two_layouts() {
 
 #[test]
 fn names_modes_links_and_content_change_a_tree_digest() {
-    let dir = tempfile::tempdir().expect("tempdir");
+    let dir = TestDir::new();
     let root = dir.path().join("t");
     sample_tree(&root, false, 1);
     let base = tree_digest(&root).expect("digest");
@@ -145,7 +180,7 @@ fn names_modes_links_and_content_change_a_tree_digest() {
 
 #[test]
 fn a_committed_step_is_found_and_a_missing_or_changed_output_is_not() {
-    let dir = tempfile::tempdir().expect("tempdir");
+    let dir = TestDir::new();
     let store = Store::open(dir.path()).expect("store");
     let key = StepKey(Digest::of_bytes(b"step"));
     assert!(
@@ -197,7 +232,7 @@ fn a_committed_step_is_found_and_a_missing_or_changed_output_is_not() {
 
 #[test]
 fn a_dropped_scratch_leaves_nothing() {
-    let dir = tempfile::tempdir().expect("tempdir");
+    let dir = TestDir::new();
     let store = Store::open(dir.path()).expect("store");
     {
         let scratch = store.scratch().expect("scratch");
@@ -218,7 +253,7 @@ fn a_dropped_scratch_leaves_nothing() {
 
 #[test]
 fn read_only_trees_commit_and_are_removed_by_retention() {
-    let dir = tempfile::tempdir().expect("tempdir");
+    let dir = TestDir::new();
     let store = Store::open(dir.path()).expect("store");
     let scratch = store.scratch().expect("scratch");
     let out = scratch.path().join("cache");
@@ -238,7 +273,7 @@ fn read_only_trees_commit_and_are_removed_by_retention() {
 
 #[test]
 fn bad_outputs_are_refused() {
-    let dir = tempfile::tempdir().expect("tempdir");
+    let dir = TestDir::new();
     let store = Store::open(dir.path()).expect("store");
     for outputs in [
         vec![("up", Path::new("../x"))],
@@ -261,7 +296,7 @@ fn bad_outputs_are_refused() {
 
 #[test]
 fn retention_keeps_what_is_referenced() {
-    let dir = tempfile::tempdir().expect("tempdir");
+    let dir = TestDir::new();
     let store = Store::open(dir.path()).expect("store");
     let commit = |name: &str| {
         let key = StepKey(Digest::of_bytes(name.as_bytes()));
@@ -332,7 +367,7 @@ fn stored(store: &Store, dir: &Path) -> ObjectRef {
 
 #[test]
 fn a_verified_object_is_not_read_again_until_it_is_touched() {
-    let dir = tempfile::tempdir().expect("tempdir");
+    let dir = TestDir::new();
     let store = Store::open(dir.path().join("store")).expect("open");
     let tree = stored(&store, dir.path());
     let record = dir
@@ -388,7 +423,7 @@ fn a_verified_object_is_not_read_again_until_it_is_touched() {
 
 #[test]
 fn a_changed_size_mode_or_entry_is_read_again() {
-    let dir = tempfile::tempdir().expect("tempdir");
+    let dir = TestDir::new();
     let store = Store::open(dir.path().join("store")).expect("open");
 
     // A new entry.
@@ -409,7 +444,7 @@ fn a_changed_size_mode_or_entry_is_read_again() {
 
 #[test]
 fn without_its_record_an_object_is_read_in_full() {
-    let dir = tempfile::tempdir().expect("tempdir");
+    let dir = TestDir::new();
     let store = Store::open(dir.path().join("store")).expect("open");
     let tree = stored(&store, dir.path());
     assert!(store.check(&tree, Check::Digest));

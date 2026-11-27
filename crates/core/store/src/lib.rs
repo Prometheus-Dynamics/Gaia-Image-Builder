@@ -55,6 +55,9 @@ mod scratch;
 mod verified;
 mod verify;
 
+#[cfg(test)]
+mod testdir;
+
 pub use digest::{Digest, file_digest, tree_digest};
 pub use entry::{StepEntry, StepKey};
 pub use fsutil::{copy_file, used_bytes};

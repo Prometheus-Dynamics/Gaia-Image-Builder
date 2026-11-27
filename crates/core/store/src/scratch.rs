@@ -238,7 +238,7 @@ mod tests {
 
     #[test]
     fn a_cross_device_commit_copies_the_tree_and_keeps_its_digest() {
-        let base = tempfile::tempdir().expect("tempdir");
+        let base = crate::testdir::TestDir::new();
         let (store, shm) = store_in(base.path());
         let budget = budget();
         let scratch = ram_scratch(&store, &shm, budget);
@@ -267,7 +267,7 @@ mod tests {
 
     #[test]
     fn a_cross_device_file_commit_is_copied_too() {
-        let base = tempfile::tempdir().expect("tempdir");
+        let base = crate::testdir::TestDir::new();
         let (store, shm) = store_in(base.path());
         let budget = budget();
         let scratch = ram_scratch(&store, &shm, budget);
@@ -284,7 +284,7 @@ mod tests {
 
     #[test]
     fn a_ram_scratch_is_gone_after_a_successful_commit() {
-        let base = tempfile::tempdir().expect("tempdir");
+        let base = crate::testdir::TestDir::new();
         let (store, shm) = store_in(base.path());
         let budget = budget();
         let scratch = ram_scratch(&store, &shm, budget);
@@ -304,7 +304,7 @@ mod tests {
 
     #[test]
     fn a_ram_scratch_is_gone_after_a_failed_step() {
-        let base = tempfile::tempdir().expect("tempdir");
+        let base = crate::testdir::TestDir::new();
         let (store, shm) = store_in(base.path());
         let budget = budget();
         let scratch = ram_scratch(&store, &shm, budget);
@@ -317,7 +317,7 @@ mod tests {
 
     #[test]
     fn a_ram_scratch_is_gone_after_a_refused_commit() {
-        let base = tempfile::tempdir().expect("tempdir");
+        let base = crate::testdir::TestDir::new();
         let (store, shm) = store_in(base.path());
         let budget = budget();
         let scratch = ram_scratch(&store, &shm, budget);
@@ -331,7 +331,7 @@ mod tests {
 
     #[test]
     fn enough_room_puts_an_auto_step_in_ram() {
-        let base = tempfile::tempdir().expect("tempdir");
+        let base = crate::testdir::TestDir::new();
         let (store, shm) = store_in(base.path());
         let scratch = store
             .scratch_with(
@@ -348,7 +348,7 @@ mod tests {
 
     #[test]
     fn too_little_memory_puts_an_auto_step_on_the_disk() {
-        let base = tempfile::tempdir().expect("tempdir");
+        let base = crate::testdir::TestDir::new();
         let (store, shm) = store_in(base.path());
         let tight = Room {
             mem_available: Some(20 * GIB),
@@ -370,7 +370,7 @@ mod tests {
 
     #[test]
     fn disk_mode_is_always_the_disk() {
-        let base = tempfile::tempdir().expect("tempdir");
+        let base = crate::testdir::TestDir::new();
         let (store, shm) = store_in(base.path());
         let scratch = store
             .scratch_with(
@@ -387,7 +387,7 @@ mod tests {
 
     #[test]
     fn ram_mode_is_ram_even_when_memory_looks_short() {
-        let base = tempfile::tempdir().expect("tempdir");
+        let base = crate::testdir::TestDir::new();
         let (store, shm) = store_in(base.path());
         let tight = Room {
             mem_available: Some(GIB),
@@ -408,7 +408,7 @@ mod tests {
 
     #[test]
     fn concurrent_ram_steps_count_against_the_cap() {
-        let base = tempfile::tempdir().expect("tempdir");
+        let base = crate::testdir::TestDir::new();
         let (store, shm) = store_in(base.path());
         let budget = budget();
         let cap = settings(Mode::Auto, 10 * GIB);
@@ -434,7 +434,7 @@ mod tests {
 
     #[test]
     fn a_step_over_the_cap_takes_the_disk() {
-        let base = tempfile::tempdir().expect("tempdir");
+        let base = crate::testdir::TestDir::new();
         let (store, shm) = store_in(base.path());
         let budget = budget();
         let big = store
@@ -452,7 +452,7 @@ mod tests {
 
     #[test]
     fn a_dropped_disk_scratch_goes_to_the_trash() {
-        let base = tempfile::tempdir().expect("tempdir");
+        let base = crate::testdir::TestDir::new();
         let (store, _) = store_in(base.path());
         let scratch = store.scratch().expect("scratch");
         let dir = scratch.path().to_path_buf();
@@ -467,7 +467,7 @@ mod tests {
 
     #[test]
     fn a_commit_of_an_object_already_there_leaves_its_copy_to_the_drop() {
-        let base = tempfile::tempdir().expect("tempdir");
+        let base = crate::testdir::TestDir::new();
         let (store, _) = store_in(base.path());
         let first = store.scratch().expect("scratch");
         output_tree(&first.path().join("out"));
@@ -482,7 +482,7 @@ mod tests {
 
     #[test]
     fn a_new_store_is_a_subvolume_where_its_parent_is_btrfs() {
-        let base = tempfile::tempdir().expect("tempdir");
+        let base = crate::testdir::TestDir::new();
         let (store, _) = store_in(base.path());
         assert_eq!(
             fsutil::is_subvolume(store.root()),
@@ -500,7 +500,7 @@ mod tests {
     #[test]
     fn a_store_on_a_file_system_without_subvolumes_is_a_directory() {
         // /dev/shm is tmpfs: never btrfs.
-        let Ok(shm) = tempfile::Builder::new().tempdir_in("/dev/shm") else {
+        let Some(shm) = crate::testdir::TestDir::new_in("/dev/shm") else {
             return;
         };
         let store = Store::open(shm.path().join("store")).expect("store");
@@ -515,7 +515,7 @@ mod tests {
     /// gone with the last one, whether its step committed or failed.
     #[test]
     fn the_ram_root_goes_with_its_last_work_directory() {
-        let base = tempfile::tempdir().expect("tempdir");
+        let base = crate::testdir::TestDir::new();
         let (store, shm) = store_in(base.path());
         let budget = budget();
         let root = placement::ram_root(store.root(), &shm);
@@ -540,7 +540,7 @@ mod tests {
     /// anything not named as a RAM root, stay.
     #[test]
     fn a_killed_runs_ram_directories_go_with_the_next_runs_first() {
-        let base = tempfile::tempdir().expect("tempdir");
+        let base = crate::testdir::TestDir::new();
         let (store, shm) = store_in(base.path());
         // A pid no process has (above the kernel's pid limit).
         let killed = placement::ram_root(Path::new("/killed/store"), &shm).join("999999999-0-1");
@@ -595,7 +595,7 @@ mod tests {
 
     #[test]
     fn a_dead_process_scratch_is_swept_to_the_trash_and_emptied() {
-        let base = tempfile::tempdir().expect("tempdir");
+        let base = crate::testdir::TestDir::new();
         let (store, _) = store_in(base.path());
         // A pid no process has (above the kernel's pid limit).
         let dead = store.root().join("scratch").join("999999999-0-1");
@@ -612,7 +612,7 @@ mod tests {
 
     #[test]
     fn a_disk_scratch_is_still_removed_after_commit() {
-        let base = tempfile::tempdir().expect("tempdir");
+        let base = crate::testdir::TestDir::new();
         let (store, _) = store_in(base.path());
         let scratch = store.scratch().expect("scratch");
         let dir = scratch.path().to_path_buf();

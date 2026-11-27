@@ -373,8 +373,8 @@ mod tests {
 
     /// A directory on the file system the tests run on: the temp dir, which
     /// is btrfs where `TMPDIR` says so.
-    fn base() -> tempfile::TempDir {
-        tempfile::tempdir().expect("tempdir")
+    fn base() -> crate::testdir::TestDir {
+        crate::testdir::TestDir::new()
     }
 
     #[test]
@@ -514,7 +514,7 @@ mod tests {
     #[test]
     fn a_copy_across_file_systems_falls_back_to_bytes() {
         // A clone cannot cross file systems, and /dev/shm is tmpfs.
-        let Ok(shm) = tempfile::Builder::new().tempdir_in("/dev/shm") else {
+        let Some(shm) = crate::testdir::TestDir::new_in("/dev/shm") else {
             return;
         };
         let base = base();
