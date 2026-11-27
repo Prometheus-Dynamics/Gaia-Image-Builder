@@ -205,8 +205,8 @@ fn a_package_is_built_from_component_files_with_its_control_fed() {
 }
 
 /// The commit part of a `gaia <version> (<commit>)` line, or `None` when the
-/// line is not that shape: a 40-hex commit with an optional `-dirty`, or
-/// `unknown`.
+/// line is not that shape: a 40-hex commit with an optional `-dirty`,
+/// `unknown`, or `gate` (what the gate builds with).
 fn version_commit(line: &str) -> Option<&str> {
     let rest = line.strip_prefix("gaia ")?;
     let (version, rest) = rest.split_once(" (")?;
@@ -214,7 +214,7 @@ fn version_commit(line: &str) -> Option<&str> {
         return None;
     }
     let commit = rest.strip_suffix(')')?;
-    if commit == "unknown" {
+    if commit == "unknown" || commit == "gate" {
         return Some(commit);
     }
     let hex = commit.strip_suffix("-dirty").unwrap_or(commit);
@@ -240,32 +240,62 @@ fn version_prints_one_line_with_the_build_commit() {
     }
 }
 
+/// The build script, as a module: what it records for a build.
+#[allow(dead_code)]
+#[path = "../../build.rs"]
+mod build_script;
+
 #[test]
-fn version_commit_is_the_head_the_binary_was_built_from() {
-    let manifest = Path::new(env!("CARGO_MANIFEST_DIR"));
-    let head = Command::new("git")
-        .args(["rev-parse", "HEAD"])
-        .current_dir(manifest)
-        .output()
-        .ok()
-        .filter(|out| out.status.success())
-        .map(|out| String::from_utf8_lossy(&out.stdout).trim().to_string());
-    let Some(head) = head else {
-        println!(
-            "git is not available in {}; commit not compared",
-            manifest.display()
-        );
-        return;
-    };
+fn version_commit_is_what_the_build_script_recorded() {
+    // The test binary and `gaia` come from one build of this package: the
+    // same build script run, the same recorded commit.
     let out = Command::new(env!("CARGO_BIN_EXE_gaia"))
         .arg("--version")
         .output()
         .expect("runs");
     let text = String::from_utf8(out.stdout).expect("utf-8");
     let line = text.strip_suffix('\n').expect("ends with a newline");
-    let commit = version_commit(line).expect("version line");
-    let commit = commit.strip_suffix("-dirty").unwrap_or(commit);
-    assert_eq!(commit, head, "built from another commit: {line}");
+    assert_eq!(
+        version_commit(line).expect("version line"),
+        env!("GAIA_COMMIT"),
+        "{line}"
+    );
+}
+
+#[test]
+fn a_build_outside_the_gate_records_the_head_it_is_built_from() {
+    // Without GAIA_COMMIT (a shipped or a release build, `cargo install`):
+    // the checkout's HEAD, `-dirty` when a tracked file is changed. With
+    // the gate's value: that value.
+    let manifest = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let git = |args: &[&str]| {
+        Command::new("git")
+            .args(args)
+            .current_dir(manifest)
+            .output()
+            .ok()
+            .filter(|out| out.status.success())
+            .map(|out| String::from_utf8_lossy(&out.stdout).trim().to_string())
+    };
+    let Some(head) = git(&["rev-parse", "HEAD"]) else {
+        println!(
+            "git is not available in {}; commit not compared",
+            manifest.display()
+        );
+        return;
+    };
+    let dirty = !git(&["status", "--porcelain", "--untracked-files=no"])
+        .expect("status")
+        .is_empty();
+    let real = if dirty { format!("{head}-dirty") } else { head };
+    for given in [None, Some(String::new())] {
+        assert_eq!(
+            build_script::commit(manifest, given.clone()),
+            real,
+            "{given:?}"
+        );
+    }
+    assert_eq!(build_script::commit(manifest, Some("gate".into())), "gate");
 }
 
 /// The tarball recipe with a compression stage: `level` has no default,

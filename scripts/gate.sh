@@ -14,6 +14,13 @@ else
   export CARGO_INCREMENTAL="${CARGO_INCREMENTAL:-1}"
 fi
 
+# The commit gate-built binaries carry in `gaia --version`: plainly not a
+# commit. The real HEAD (with -dirty) differs with every commit and edit,
+# and as a string in the binary it moves the loaded code of every case that
+# runs gaia, so those cases ran again whatever changed (gaia-verdict keys on
+# that code). Builds outside the gate embed the real HEAD (build.rs).
+export GAIA_COMMIT=gate
+
 # One target directory, one worktree: refused before cargo runs (see the
 # script for why).
 scripts/gate-target.sh

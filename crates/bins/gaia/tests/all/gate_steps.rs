@@ -32,11 +32,11 @@ fn git(dir: &Path, args: &[&str]) {
     assert!(out.status.success(), "git {args:?}: {out:?}");
 }
 
-/// `cargo`: logs its arguments, fails when they contain `$GATE_FAIL`, and
+/// `cargo`: logs its arguments and the commit it would record, fails when they contain `$GATE_FAIL`, and
 /// for `build -p gaia` writes a `gaia` whose `store verify` checks each
 /// file object against its name, as the real one does.
 const CARGO: &str = r#"#!/bin/sh
-echo "$*" >> "$GATE_LOG"
+echo "$* [commit=${GAIA_COMMIT:-}]" >> "$GATE_LOG"
 case " $* " in *" $GATE_FAIL "*) echo "planted failure: cargo $*" >&2; exit 101 ;; esac
 case "$1" in
   nextest) [ "$2" = --version ] && echo "cargo-nextest 0.9.0" ;;
@@ -110,6 +110,7 @@ fn gate(dir: &Path, fail: &str) -> Run {
         .env("PATH", path)
         .env("GATE_FAIL", fail)
         .env("GATE_LOG", &log)
+        .env("GAIA_COMMIT", "from-the-caller")
         .env("GAIA_GATE_RECORDS", &records)
         .env("CARGO_TARGET_DIR", dir.join("target"))
         .env("TMPDIR", dir)
@@ -139,6 +140,11 @@ fn a_gate_with_every_step_green_passes_and_records_it() {
     // store check last.
     for step in ["metadata", "fmt", "clippy", "nextest run", "--doc", "build"] {
         assert!(run.cargo.contains(step), "{step} ran: {}", run.cargo);
+    }
+    // Every build in the gate records `gate` as its commit, whatever the
+    // caller set: no binary it tests carries a HEAD.
+    for line in run.cargo.lines() {
+        assert!(line.ends_with(" [commit=gate]"), "{line}");
     }
 }
 

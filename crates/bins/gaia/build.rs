@@ -13,11 +13,18 @@ fn main() {
     let manifest = std::env::var_os("CARGO_MANIFEST_DIR")
         .map(PathBuf::from)
         .unwrap_or_else(|| PathBuf::from("."));
-    let commit = match std::env::var("GAIA_COMMIT") {
-        Ok(value) if !value.is_empty() => value,
-        _ => git_commit(&manifest).unwrap_or_else(|| "unknown".to_string()),
-    };
+    watch_git_files(&manifest);
+    let commit = commit(&manifest, std::env::var("GAIA_COMMIT").ok());
     println!("cargo:rustc-env=GAIA_COMMIT={commit}");
+}
+
+/// The commit recorded for a build in `dir`, with `GAIA_COMMIT` as `given`.
+/// The gate gives `gate`; a build without it records the checkout's HEAD.
+pub(crate) fn commit(dir: &Path, given: Option<String>) -> String {
+    match given {
+        Some(value) if !value.is_empty() => value,
+        _ => git_commit(dir).unwrap_or_else(|| "unknown".to_string()),
+    }
 }
 
 /// Runs git in `dir` and returns its trimmed stdout, or `None` when git is
@@ -34,7 +41,6 @@ fn git(dir: &Path, args: &[&str]) -> Option<String> {
 }
 
 fn git_commit(dir: &Path) -> Option<String> {
-    watch_git_files(dir);
     let head = git(dir, &["rev-parse", "HEAD"])?;
     if !is_full_hex(&head) {
         return None;
