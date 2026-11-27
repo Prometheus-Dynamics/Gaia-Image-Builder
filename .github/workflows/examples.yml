@@ -43,8 +43,25 @@ jobs:
           printf '%s\n' "${planned[@]}" | jq -R -s -c 'split("\n") | map(select(length > 0))' > products.json
           echo "products=$(cat products.json)" >> "$GITHUB_OUTPUT"
 
+  # gaia, built once in the shipped release profile from the committed
+  # Cargo.lock, beside the listing; every plan job takes this binary.
+  gaia:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      # rust-toolchain.toml selects the toolchain.
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo build --release --locked -p gaia --bin gaia
+      - uses: actions/upload-artifact@v4
+        with:
+          name: gaia
+          path: target/release/gaia
+          retention-days: 1
+          if-no-files-found: error
+
   plan:
-    needs: list
+    needs: [list, gaia]
     if: needs.list.outputs.products != '[]'
     runs-on: ubuntu-latest
     strategy:
@@ -56,9 +73,14 @@ jobs:
       # A plan runs no tool, but a step's tool input must resolve to a path.
       - name: Install the tools the recipes name
         run: sudo apt-get update && sudo apt-get install -y --no-install-recommends erofs-utils cryptsetup-bin bubblewrap
+      - uses: actions/download-artifact@v4
+        with:
+          name: gaia
+          path: ${{ runner.temp }}/gaia
       - name: Plan ${{ matrix.product }}
         uses: ./
         with:
+          gaia-bin: ${{ runner.temp }}/gaia/gaia
           product: ${{ matrix.product }}
           command: plan
           args: --recipes ${{ github.workspace }}/recipes

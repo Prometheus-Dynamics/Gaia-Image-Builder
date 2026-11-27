@@ -32,6 +32,12 @@ inputs:
       A git ref of Gaia to install instead of this action's own copy (for
       example a tag). Empty builds the copy the action was checked out at.
     default: ""
+  gaia-bin:
+    description: >-
+      A gaia binary already built, such as one an earlier job of the
+      workflow built and passed on as an artifact. When set it is used as
+      it is, and the action neither restores nor builds one.
+    default: ""
   store:
     description: The content store directory, absolute or relative to working-directory.
     default: ~/.cache/gaia/store
@@ -74,15 +80,26 @@ runs:
         fi
         echo "gaia-key=$key" >> "$GITHUB_OUTPUT"
 
+    - name: Use the given gaia binary
+      if: inputs.gaia-bin != ''
+      shell: bash
+      env:
+        GAIA_BIN: ${{ inputs.gaia-bin }}
+      run: |
+        set -euo pipefail
+        # An artifact keeps no file mode, so the binary is made executable.
+        install -D -m 0755 "$GAIA_BIN" "$HOME/.cargo/bin/gaia"
+
     - name: Restore the gaia binary
       id: gaia-bin
+      if: inputs.gaia-bin == ''
       uses: actions/cache@v4
       with:
         path: ~/.cargo/bin/gaia
         key: gaia-bin-${{ runner.os }}-${{ runner.arch }}-${{ steps.paths.outputs.gaia-key }}
 
     - name: Install gaia
-      if: steps.gaia-bin.outputs.cache-hit != 'true'
+      if: inputs.gaia-bin == '' && steps.gaia-bin.outputs.cache-hit != 'true'
       shell: bash
       env:
         ACTION_PATH: ${{ github.action_path }}
