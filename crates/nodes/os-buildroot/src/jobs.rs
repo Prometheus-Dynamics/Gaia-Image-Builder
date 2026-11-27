@@ -1369,8 +1369,8 @@ a% b%:
     }
 
     /// Two burners contending for one processor, one [`NICE_STEP`] nicer:
-    /// the other gets about [`SPLIT`]. Prints the split at +5 and +7 too,
-    /// the measurement the step was chosen by.
+    /// the other gets about [`SPLIT`]. Only the step in use is measured; the
+    /// splits at +5 and +7 it was chosen by are at [`NICE_STEP`].
     #[test]
     fn a_yielding_build_gets_about_a_fifth_of_a_contended_processor() {
         if let Err(why) = yield_size(10) {
@@ -1383,15 +1383,9 @@ a% b%:
         };
         let cpu = cpus.split(',').next().expect("a cpu");
         let window = Duration::from_secs(3);
-        for step in [5, 7] {
-            let (main, side) = burn_pair(cpu, step, window);
-            eprintln!(
-                "measured: +{step}: {main} against {side} iterations, {:.1} : 1",
-                main as f64 / side.max(1) as f64
-            );
-        }
         let (main, side) = burn_pair(cpu, NICE_STEP, window);
         let split = main as f64 / side.max(1) as f64;
+        eprintln!("measured: +{NICE_STEP}: {main} against {side} iterations, {split:.1} : 1");
         assert!(
             (3.5..8.0).contains(&split),
             "+{NICE_STEP}: {main} against {side} iterations, {split:.1} : 1"

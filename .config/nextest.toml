@@ -10,5 +10,7 @@ binary(build_go) | binary(build_node) | binary(build_python)
 | binary(build_java) | binary(build_rust)
 | test(/^(qemu_runner|compress|test_bound|disk|flash)::/)
 | (package(gaia-flash-image) & test(/^tests::the_stream/))
+| (package(gaia-os-buildroot) & test(/^jobs::tests::a_yielding_build_(gets|leaves)/))
+| test(/^qemu_board_sysfs::collect_(gives_up|keeps)/)
 '''
 priority = 50
