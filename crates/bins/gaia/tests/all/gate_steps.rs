@@ -33,8 +33,10 @@ fn git(dir: &Path, args: &[&str]) {
 }
 
 /// `cargo`: logs its arguments and the commit it would record, fails when
-/// they contain `$GATE_FAIL`; `nextest run` says its cases started and runs
-/// them until clippy has run (10 s at most), then logs `cases ended`; and
+/// they contain `$GATE_FAIL`; a clippy that passes logs `clippy ended`;
+/// `nextest run` says its cases started and runs them until clippy has
+/// passed (10 s at most), then logs `cases ended`, so beside a failing
+/// clippy the cases are still running when the gate stops them; and
 /// for `build -p gaia` writes a `gaia` whose `store verify` checks each
 /// file object against its name, as the real one does.
 const CARGO: &str = r#"#!/bin/sh
@@ -47,7 +49,7 @@ case "$1" in
       run)
         echo "    Starting 1 tests across 1 binary" >&2
         i=0
-        while [ $i -lt 50 ] && ! grep -q '^clippy' "$GATE_LOG"; do sleep 0.2; i=$((i + 1)); done
+        while [ $i -lt 50 ] && ! grep -q '^clippy ended' "$GATE_LOG"; do sleep 0.2; i=$((i + 1)); done
         echo "cases ended [commit=${GAIA_COMMIT:-}]" >> "$GATE_LOG" ;;
     esac ;;
   metadata) echo '{"packages":[],"workspace_members":[],"resolve":null}' ;;
@@ -60,6 +62,7 @@ for f in "$4"/objects/file/*/*; do
 done
 EOF
     chmod +x "$CARGO_TARGET_DIR/debug/gaia" ;;
+  clippy) echo "clippy ended [commit=${GAIA_COMMIT:-}]" >> "$GATE_LOG" ;;
 esac
 exit 0
 "#;
