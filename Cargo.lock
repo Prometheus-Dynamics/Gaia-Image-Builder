@@ -1006,6 +1006,7 @@ dependencies = [
  "gaia-step",
  "gaia-store",
  "gaia-types",
+ "gaia-verdict",
  "rustix",
  "serde",
  "serde_json",

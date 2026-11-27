@@ -561,6 +561,22 @@ mod tests {
     #[test]
     fn the_stream_from_its_blocks_is_the_whole_encoders() {
         let dir = tempfile::tempdir().expect("tempdir");
+        // Kept under this test binary (the encoder is compiled in) and the
+        // file system its images are on, which reports the holes (CI runs
+        // it every time; see gaia-verdict).
+        let file_system = gaia_verdict::identity(
+            Path::new("stat"),
+            &["-f", "-c", "%T", dir.path().to_str().expect("utf-8")],
+        );
+        let Some(_pass) = gaia_verdict::Verdict::new(
+            "flash_image::blocks-are-whole",
+            env!("CARGO_MANIFEST_DIR"),
+            &[("file system", file_system)],
+            &[],
+        )
+        .begin() else {
+            return;
+        };
         for (name, raw) in [
             ("sparse", sparse()),
             ("holes", sparse()),

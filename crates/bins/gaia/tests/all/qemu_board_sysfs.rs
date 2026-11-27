@@ -181,8 +181,27 @@ fn fake_console(
     })
 }
 
+/// A collect case: `None` when it passed before with the same test binary,
+/// python and script (CI runs it every time; see gaia-verdict). It talks to
+/// a console this binary plays, and waits as the script waits for a guest.
+fn begin(case: &str) -> Option<gaia_verdict::Pass> {
+    gaia_verdict::Verdict::new(
+        &format!("qemu_board_sysfs::{case}"),
+        env!("CARGO_MANIFEST_DIR"),
+        &[(
+            "python3",
+            gaia_verdict::identity(Path::new("python3"), &["--version"]),
+        )],
+        &["scripts/qemu-board-sysfs.py"],
+    )
+    .begin()
+}
+
 #[test]
 fn collect_keeps_what_the_guest_printed_between_the_markers() {
+    let Some(_pass) = begin("collect_keeps_what_the_guest_printed_between_the_markers") else {
+        return;
+    };
     let dir = tempfile::tempdir().expect("tempdir");
     let console = fake_console(
         dir.path(),
@@ -230,6 +249,9 @@ fn collect_refuses_a_console_that_asks_for_a_password() {
 
 #[test]
 fn collect_gives_up_on_a_console_that_shows_no_prompt() {
+    let Some(_pass) = begin("collect_gives_up_on_a_console_that_shows_no_prompt") else {
+        return;
+    };
     let dir = tempfile::tempdir().expect("tempdir");
     let listener = UnixListener::bind(dir.path().join("console.sock")).expect("bind");
     // A guest still booting: its log has "# " and "login:" in lines, but

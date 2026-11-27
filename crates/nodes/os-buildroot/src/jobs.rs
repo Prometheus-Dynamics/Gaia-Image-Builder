@@ -1295,6 +1295,34 @@ a% b%:
     /// beside a yielding build on the same two CPUs the main build runs much
     /// faster than beside an equal one, and the yielding build still
     /// finishes.
+    /// A yielding case: `None` when it passed before with the same test
+    /// binary, kernel, tools and niceness (CI runs it every time; see
+    /// gaia-verdict). It measures the kernel's scheduler on this host, so
+    /// the kernel and what decides whether niceness applies are its inputs;
+    /// the load it ran at is not.
+    fn begin(case: &str) -> Option<gaia_verdict::Pass> {
+        use gaia_verdict::identity;
+        use std::path::Path;
+        let own = rustix::process::getpriority_process(None).expect("own niceness");
+        let autogroup =
+            std::fs::read_to_string("/proc/sys/kernel/sched_autogroup_enabled").unwrap_or_default();
+        gaia_verdict::Verdict::new(
+            &format!("os_buildroot::{case}"),
+            env!("CARGO_MANIFEST_DIR"),
+            &[
+                ("kernel", identity(Path::new("uname"), &["-r", "-v"])),
+                ("make", identity(Path::new("make"), &["--version"])),
+                ("bash", identity(Path::new("bash"), &["--version"])),
+                ("taskset", identity(Path::new("taskset"), &["--version"])),
+                ("niceness", own.to_string()),
+                ("autogroup", autogroup),
+                ("niceness applies", yield_size(10).is_ok().to_string()),
+            ],
+            &[],
+        )
+        .begin()
+    }
+
     #[test]
     fn a_yielding_build_leaves_the_processor_to_the_main_build() {
         let Some(pool) = fifo_pool(13) else { return };
@@ -1307,6 +1335,9 @@ a% b%:
         let pool = pool.sized(Ok);
         let Some(cpus) = two_cpus() else {
             eprintln!("skipped: fewer than two CPUs");
+            return;
+        };
+        let Some(_pass) = begin("a_yielding_build_leaves_the_processor_to_the_main_build") else {
             return;
         };
         let equal = pair(&pool, &cpus, false);
@@ -1379,6 +1410,10 @@ a% b%:
         }
         let Some(cpus) = two_cpus() else {
             eprintln!("skipped: fewer than two CPUs");
+            return;
+        };
+        let Some(_pass) = begin("a_yielding_build_gets_about_a_fifth_of_a_contended_processor")
+        else {
             return;
         };
         let cpu = cpus.split(',').next().expect("a cpu");

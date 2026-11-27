@@ -177,3 +177,18 @@ fn a_begun_case_records_its_pass_when_it_returns_and_not_when_it_panics() {
         "returned: passed, and the next run reuses it"
     );
 }
+
+#[test]
+fn a_binary_rewritten_in_the_same_process_is_hashed_again() {
+    // The binary's hash is kept for the process; a rewrite of the same size
+    // must still move the key, and the same bytes written again must not.
+    let dir = tempfile::tempdir().expect("tempdir");
+    let place = place(dir.path());
+    let first = key(&place, "t");
+    for round in 0..20 {
+        write(&place.exe, "binary one\n");
+        assert_eq!(key(&place, "t"), first, "round {round}: the same bytes");
+        write(&place.exe, "binary 2ne\n");
+        assert_ne!(key(&place, "t"), first, "round {round}: other bytes");
+    }
+}

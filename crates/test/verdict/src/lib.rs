@@ -117,7 +117,7 @@ impl Verdict {
         };
         part("verdict v1", b"");
         part("case", case.as_bytes());
-        part("binary", content_hash(&place.exe).as_bytes());
+        part("binary", binary_hash(&place.exe).as_bytes());
         let mut tools: Vec<_> = tools.to_vec();
         tools.sort();
         for (name, identity) in &tools {
@@ -262,6 +262,37 @@ pub fn identity(program: &Path, args: &[&str]) -> String {
             content_hash(&resolved)
         )
     }
+}
+
+/// [`content_hash`] of a test binary, once per process for each version of
+/// the file: every keyed case in one binary hashes the same tens of
+/// megabytes. The file's device, inode, size and change time name the
+/// version; a file written again gets a new change time and is hashed again.
+fn binary_hash(path: &Path) -> String {
+    use std::collections::HashMap;
+    use std::os::unix::fs::MetadataExt;
+    use std::sync::{Mutex, OnceLock};
+    /// The path, device, inode, size and change time (s, ns).
+    type Version = (PathBuf, u64, u64, u64, i64, i64);
+    static HASHES: OnceLock<Mutex<HashMap<Version, String>>> = OnceLock::new();
+    let Ok(meta) = std::fs::metadata(path) else {
+        return content_hash(path);
+    };
+    let version = (
+        path.to_path_buf(),
+        meta.dev(),
+        meta.ino(),
+        meta.size(),
+        meta.ctime(),
+        meta.ctime_nsec(),
+    );
+    let hashes = HASHES.get_or_init(Default::default);
+    if let Some(hash) = hashes.lock().expect("hashes").get(&version) {
+        return hash.clone();
+    }
+    let hash = content_hash(path);
+    hashes.lock().expect("hashes").insert(version, hash.clone());
+    hash
 }
 
 /// sha256 of a file's bytes, or of a directory's sorted entries (name, kind,
