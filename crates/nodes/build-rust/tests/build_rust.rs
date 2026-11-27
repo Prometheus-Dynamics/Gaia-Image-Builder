@@ -159,11 +159,13 @@ fn sysroot() -> Option<PathBuf> {
     std::fs::create_dir_all(&dir).expect("mkdir");
     let held = std::fs::File::create(dir.join("lock")).expect("lock file");
     held.lock().expect("lock");
-    if sysroot.is_dir() {
+    let made = dir.join("sysroot.made");
+    if made.is_file() && sysroot.is_dir() {
         return Some(sysroot);
     }
+    remove_stale(&sysroot);
     let making = dir.join("sysroot.new");
-    let _ = std::fs::remove_dir_all(&making);
+    remove_stale(&making);
     std::fs::create_dir(&making).expect("mkdir");
     for (name, sha) in PIECES {
         let file = dir.join(format!("{name}.tar.xz"));
@@ -197,7 +199,35 @@ fn sysroot() -> Option<PathBuf> {
         std::fs::remove_dir_all(&unpacked).expect("rm");
     }
     std::fs::rename(&making, &sysroot).expect("rename");
+    std::fs::write(&made, "made\n").expect("the made mark");
     Some(sysroot)
+}
+
+/// Removes a tree a run left unfinished, or that a cache kept only part of:
+/// CI's Rust cache keeps the directories under `target/` that are no build
+/// profile, but removes every file in them, and a store's objects are read
+/// only. Both caches here are trusted only with the mark written after
+/// they were made, which such a cache removes too.
+fn remove_stale(path: &Path) {
+    use std::os::unix::fs::PermissionsExt;
+    let mut stack = vec![path.to_path_buf()];
+    while let Some(dir) = stack.pop() {
+        let Ok(meta) = std::fs::symlink_metadata(&dir) else {
+            continue;
+        };
+        if meta.is_dir() {
+            let mode = meta.permissions().mode() | 0o700;
+            let _ = std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(mode));
+            if let Ok(entries) = std::fs::read_dir(&dir) {
+                stack.extend(entries.flatten().map(|entry| entry.path()));
+            }
+        }
+    }
+    match std::fs::remove_dir_all(path) {
+        Ok(()) => {}
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+        Err(error) => panic!("{}: {error}", path.display()),
+    }
 }
 
 /// A tree that is no toolchain, for the steps that refuse before one runs.
@@ -217,6 +247,10 @@ fn pull(store: &Path) -> Option<Tree> {
     let held = std::fs::File::create(seed_dir.join("lock")).expect("lock file");
     held.lock().expect("lock");
     let seed = seed_dir.join("store");
+    let made = seed_dir.join("store.made");
+    if !made.is_file() {
+        remove_stale(&seed);
+    }
     match source(
         &seed.display().to_string(),
         CURL,
@@ -227,8 +261,10 @@ fn pull(store: &Path) -> Option<Tree> {
         &Ctx::new(),
     ) {
         Ok((tree, _)) => {
+            let image = image_in(store, &seed, &tree);
+            std::fs::write(&made, "made\n").expect("the made mark");
             drop(held);
-            Some(image_in(store, &seed, &tree))
+            Some(image)
         }
         Err(error) => {
             assert!(
