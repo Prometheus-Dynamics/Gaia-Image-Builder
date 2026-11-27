@@ -25,6 +25,26 @@ jobs:
       # rust-toolchain.toml selects the toolchain and its components.
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
+      # The build-rust tests' pinned Rust release, laid out as a sysroot
+      # under target/tmp: rust-cache keeps that directory's tree but none of
+      # its files, so it is kept here instead, keyed on what makes it: the
+      # pins in the test and toolchain.rs, which lays the release out. The
+      # tests use it only with its made mark and while it matches the
+      # listing written with it, else make it again. (This step comes after
+      # rust-cache, so it saves before rust-cache strips target.) The seed
+      # store of their pulled image is not kept: actions/cache restores as
+      # an ordinary user, which drops the image's sticky and setgid bits,
+      # and the store's tree digest covers them (Next went red on it,
+      # 8179090e).
+      - id: pins
+        run: echo "pins=$(grep -oE '[0-9a-f]{64}|const RELEASE[^;]*' crates/nodes/build-rust/tests/build_rust.rs | sha256sum | cut -c1-16)" >> "$GITHUB_OUTPUT"
+      - uses: actions/cache@v4
+        with:
+          path: |
+            target/tmp/rust-*/sysroot
+            target/tmp/rust-*/sysroot.list
+            target/tmp/rust-*/sysroot.made
+          key: build-rust-sysroot-listed-${{ runner.os }}-${{ steps.pins.outputs.pins }}-${{ hashFiles('crates/nodes/build-rust/src/toolchain.rs') }}
       # The sandbox tests need bubblewrap and unprivileged user namespaces,
       # and the filesystem, initramfs, strip and verity tests their tools; all
       # must run here rather than skip. The runner image also lists

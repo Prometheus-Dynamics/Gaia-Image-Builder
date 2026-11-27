@@ -142,6 +142,13 @@ const PIECES: &[(&str, &str)] = &[
 /// The release's sysroot, made once per target directory (the tests run as
 /// separate processes, so one holds a lock while it makes it). Not on an
 /// x86_64 host, or missing the network, a skip unless required.
+///
+/// A sysroot found made is used only when it still matches the listing
+/// written with it (every path, mode and content: [`listing`]); else it is
+/// made again, and the reason printed. The made mark tells a finished
+/// sysroot from a partial one; the listing tells one that is the same from
+/// one a cache gave back changed (CI keeps it in actions/cache, which
+/// restores as an ordinary user and drops the bits such a user cannot set).
 fn sysroot() -> Option<PathBuf> {
     let skip = |why: String| {
         assert!(
@@ -160,9 +167,32 @@ fn sysroot() -> Option<PathBuf> {
     let held = std::fs::File::create(dir.join("lock")).expect("lock file");
     held.lock().expect("lock");
     let made = dir.join("sysroot.made");
+    let listed = dir.join("sysroot.list");
     if made.is_file() && sysroot.is_dir() {
-        return Some(sysroot);
+        match std::fs::read_to_string(&listed) {
+            Ok(was) => {
+                let now = listing(&sysroot);
+                if now == was {
+                    return Some(sysroot);
+                }
+                let changed = was
+                    .lines()
+                    .zip(now.lines())
+                    .find(|(was, now)| was != now)
+                    .map_or_else(
+                        || "entries added or missing".to_string(),
+                        |(was, now)| format!("{was:?} is now {now:?}"),
+                    );
+                println!("the sysroot is not as it was made ({changed}): making it again");
+            }
+            Err(error) => {
+                println!("the sysroot has no listing ({error}): making it again");
+            }
+        }
     }
+    // Unmarked before it is removed, so a run stopped while it is made
+    // again finds no mark.
+    let _ = std::fs::remove_file(&made);
     remove_stale(&sysroot);
     let making = dir.join("sysroot.new");
     remove_stale(&making);
@@ -199,8 +229,44 @@ fn sysroot() -> Option<PathBuf> {
         std::fs::remove_dir_all(&unpacked).expect("rm");
     }
     std::fs::rename(&making, &sysroot).expect("rename");
+    std::fs::write(&listed, listing(&sysroot)).expect("the listing");
     std::fs::write(&made, "made\n").expect("the made mark");
     Some(sysroot)
+}
+
+/// Every entry under `root`, one line each in path order: its mode (type
+/// and permission bits), then a file's size and content digest, a link's
+/// target, or `-` for a directory (whose size is the filesystem's, not the
+/// tree's), then its path.
+fn listing(root: &Path) -> String {
+    use std::os::unix::fs::MetadataExt;
+    let mut lines = Vec::new();
+    let mut stack = vec![root.to_path_buf()];
+    while let Some(path) = stack.pop() {
+        let meta = std::fs::symlink_metadata(&path).expect("metadata");
+        let what = if meta.is_dir() {
+            stack.extend(
+                std::fs::read_dir(&path)
+                    .expect("read_dir")
+                    .map(|entry| entry.expect("entry").path()),
+            );
+            "-".to_string()
+        } else if meta.is_symlink() {
+            format!("-> {}", std::fs::read_link(&path).expect("link").display())
+        } else {
+            format!("{} {}", meta.len(), file_digest(&path).expect("digest"))
+        };
+        let name = path
+            .strip_prefix(root)
+            .expect("under the root")
+            .to_path_buf();
+        lines.push((name, format!("{:o} {what}", meta.mode())));
+    }
+    lines.sort();
+    lines
+        .iter()
+        .map(|(name, line)| format!("{line} {}\n", name.display()))
+        .collect()
 }
 
 /// Removes a tree a run left unfinished, or that a cache kept only part of:
