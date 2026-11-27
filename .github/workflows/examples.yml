@@ -71,8 +71,14 @@ jobs:
     steps:
       - uses: actions/checkout@v5
       # A plan runs no tool, but a step's tool input must resolve to a path.
+      # Microsoft's package repository, which the runner image lists and
+      # nothing here installs from, is dropped first: when it refuses (403
+      # Forbidden) apt-get update fails the job.
       - name: Install the tools the recipes name
-        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends erofs-utils cryptsetup-bin bubblewrap
+        run: |
+          sudo rm -f $(grep -l packages.microsoft.com /etc/apt/sources.list.d/* 2>/dev/null)
+          sudo apt-get -o Acquire::Retries=5 update -q
+          sudo apt-get -o Acquire::Retries=5 install -y -q --no-install-recommends erofs-utils cryptsetup-bin bubblewrap
       - uses: actions/download-artifact@v4
         with:
           name: gaia

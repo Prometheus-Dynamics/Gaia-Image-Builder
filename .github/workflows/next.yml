@@ -27,8 +27,12 @@ jobs:
       - uses: Swatinem/rust-cache@v2
       # The sandbox tests need bubblewrap and unprivileged user namespaces,
       # and the filesystem, initramfs, strip and verity tests their tools; all
-      # must run here rather than skip.
+      # must run here rather than skip. The runner image also lists
+      # Microsoft's package repository, which nothing here installs from;
+      # when it refuses (403 Forbidden) apt-get update fails the job, so it
+      # is dropped first.
       - run: |
+          sudo rm -f $(grep -l packages.microsoft.com /etc/apt/sources.list.d/* 2>/dev/null)
           sudo apt-get -o Acquire::Retries=5 update -q
           sudo apt-get -o Acquire::Retries=5 install -y -q bubblewrap e2fsprogs erofs-utils mtools dosfstools cpio qemu-user cryptsetup-bin python3-pip python3-setuptools device-tree-compiler attr
           sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
