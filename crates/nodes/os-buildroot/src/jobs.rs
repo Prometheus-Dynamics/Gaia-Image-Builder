@@ -1295,6 +1295,19 @@ a% b%:
     /// beside a yielding build on the same two CPUs the main build runs much
     /// faster than beside an equal one, and the yielding build still
     /// finishes.
+    ///
+    /// The case measures the fifo and the niceness together: its equal
+    /// side shares the main fifo, its yielding side has a fifo of its own
+    /// and runs nicer. It has no teeth for the niceness alone. Measured
+    /// (2026-11-27): a side that yields but keeps the main build's niceness
+    /// still passed it 3 of 3 (0.52-0.65 against the 0.7 bound), since most
+    /// of the gain is the fifo's. With both sides on their own fifo, so that
+    /// only the niceness differs, the medians were 0.42-0.78 on a shared
+    /// host and 0.56-0.71 with dash on 4 CPUs, against 0.91-1.14 for the
+    /// side at the main build's niceness: no bound with room on both sides.
+    /// The niceness is checked directly instead, by
+    /// `a_yielding_builds_make_and_recipes_run_at_the_yielding_niceness`;
+    /// the fifo by `a_yielding_build_has_a_fifo_of_its_own_and_the_lowest_priority`.
     /// A yielding case: `None` when it passed before with the same test
     /// binary, kernel, tools and niceness (CI runs it every time; see
     /// gaia-verdict). It measures the kernel's scheduler on this host, so
@@ -1350,6 +1363,77 @@ a% b%:
         assert!(
             yielded * 10 < equal * 7,
             "beside a yielding build the main build took {yielded} ns, beside an equal one {equal} ns"
+        );
+    }
+
+    /// A yielding build's make, and every recipe it runs, is at the
+    /// yielding niceness, Gaia's own and [`NICE_STEP`]; a main build's at
+    /// Gaia's own. Read from `/proc/<pid>/stat` (field 19) while each runs,
+    /// the make started as a build starts it ([`crate::make_tool`], run by
+    /// a step): the niceness itself, with no timing for load to tip.
+    #[test]
+    fn a_yielding_builds_make_and_recipes_run_at_the_yielding_niceness() {
+        let Some(pool) = fifo_pool(4) else { return };
+        let pool = pool.sized(Ok);
+        let own = rustix::process::getpriority_process(None).expect("own niceness");
+        let nicer = yielding_niceness();
+        if nicer == own {
+            eprintln!("skipped: Gaia runs at niceness {own}, the lowest priority");
+            return;
+        }
+        assert_eq!(nicer, (own + NICE_STEP).min(19));
+        let dir = tempfile::tempdir().expect("a directory");
+        let src = dir.path().join("src");
+        std::fs::create_dir(&src).expect("src");
+        // Each recipe prints its shell's niceness and its make's.
+        std::fs::write(
+            src.join("Makefile"),
+            "all: r1 r2 r3\nr%:\n\t@echo $@ $$(cut -d' ' -f19 /proc/$$$$/stat) $$(cut -d' ' -f19 /proc/$$PPID/stat)\n",
+        )
+        .expect("the Makefile");
+        let host = gaia_types::BuildrootHost {
+            make: "/usr/bin/make".into(),
+            taskset: String::new(),
+            cpus: String::new(),
+            jobs: 4,
+            download_dir: String::new(),
+            download_pool: String::new(),
+            ccache_dir: String::new(),
+            mirror: String::new(),
+            config_only: false,
+            dev_reuse: String::new(),
+            bwrap: String::new(),
+        };
+        let store = gaia_step::Store::open(dir.path().join("store")).expect("store");
+        let cx = gaia_step::Ctx::new();
+        let key = gaia_step::KeyBuilder::new("test.yielding-niceness", 1).finish();
+        let mut printed = Vec::new();
+        gaia_step::Step::new(&store, &cx, "test.yielding-niceness", key)
+            .look_up_or_make(&[("out", std::path::Path::new("out"))], |work| {
+                for (yields, label) in [(false, "main"), (true, "beside")] {
+                    let slot = pool.admit_as(&|| false, yields, label).expect("a slot");
+                    let out = work.dir().join(label);
+                    std::fs::create_dir(&out).expect("out");
+                    let tool = crate::make_tool(&host, &src, &out, &[], &[], &slot);
+                    let mut lines = work.run(&tool)?.stdout_tail;
+                    lines.sort();
+                    printed.push((label, slot.nice(), lines));
+                }
+                std::fs::write(work.dir().join("out"), "x")
+                    .map_err(|e| gaia_step::StepError::body("t", e))
+            })
+            .expect("made");
+        let at = |nice: i32| -> Vec<String> {
+            ["r1", "r2", "r3"]
+                .iter()
+                .map(|recipe| format!("{recipe} {nice} {nice}"))
+                .collect()
+        };
+        assert_eq!(printed[0], ("main", None, at(own)), "{printed:?}");
+        assert_eq!(
+            printed[1],
+            ("beside", Some(nicer), at(nicer)),
+            "{printed:?}"
         );
     }
 
