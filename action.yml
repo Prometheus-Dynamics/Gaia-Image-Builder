@@ -7,7 +7,7 @@
 #       product: examples/products/zero-3e-demo/product.toml
 #       command: plan
 #
-# See docs/ci.md for runners, caching and secrets.
+# The inputs below say what each one does.
 name: Gaia
 description: Install gaia, restore its content store, plan or build a product and keep the store.
 branding:
@@ -71,8 +71,9 @@ runs:
         store="${STORE/#\~/$HOME}"
         echo "store=$(realpath -m "$store")" >> "$GITHUB_OUTPUT"
         # The binary cache key: the ref asked for, or the content of this
-        # action's own copy. The repository keeps no Cargo.lock (it is
-        # ignored), so the manifests and sources stand for the build.
+        # action's own copy. `cargo install` below resolves the dependencies
+        # again and does not read the repository's Cargo.lock, so the
+        # manifests and sources stand for the build.
         if [[ -n "$GAIA_REF" ]]; then
           key="ref-$GAIA_REF"
         else
