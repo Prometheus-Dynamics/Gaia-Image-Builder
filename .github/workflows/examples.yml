@@ -3,6 +3,10 @@ name: Examples
 # Plans every example product on each push and pull request into next. Plans
 # only: no image is built here. A product with no committed gaia.lock cannot
 # be planned (`gaia lock` writes it), so it gets a warning instead of a plan.
+#
+# One job: gaia is built once, in the shipped release profile from the
+# committed Cargo.lock, while the recipes' tools install beside it; then
+# each product is planned in a step of its own, named after it.
 
 on:
   push:
@@ -23,71 +27,108 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  list:
+  plan:
     runs-on: ubuntu-latest
-    outputs:
-      products: ${{ steps.find.outputs.products }}
     steps:
       - uses: actions/checkout@v5
-      - id: find
+      # A plan runs no tool, but a step's tool input must resolve to a path.
+      # The tools install in the background while gaia builds, and the
+      # plans wait for them (Wait for the tools). Microsoft's package
+      # repository, which the runner image lists and nothing here installs
+      # from, is dropped first: when it refuses (403 Forbidden) apt-get
+      # update fails.
+      - name: Start installing the tools the recipes name
+        run: |
+          # The status is written however the install ends. The commands
+          # are chained with &&: in an if's test bash ignores set -e, and
+          # the step's -e must not end the background shell before it
+          # writes the status.
+          (
+            if {
+              sudo rm -f $(grep -l packages.microsoft.com /etc/apt/sources.list.d/* 2>/dev/null) &&
+                sudo apt-get -o Acquire::Retries=5 update -q &&
+                sudo apt-get -o Acquire::Retries=5 install -y -q --no-install-recommends erofs-utils cryptsetup-bin bubblewrap
+            } > "$RUNNER_TEMP/apt.log" 2>&1; then
+              echo 0 > "$RUNNER_TEMP/apt.status"
+            else
+              echo $? > "$RUNNER_TEMP/apt.status"
+            fi
+          ) < /dev/null > /dev/null 2>&1 &
+      # rust-toolchain.toml selects the toolchain.
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - id: build
+        name: Build gaia
+        run: cargo build --release --locked -p gaia --bin gaia
+      - id: tools
+        name: Wait for the tools
+        timeout-minutes: 5
+        run: |
+          while [[ ! -s "$RUNNER_TEMP/apt.status" ]]; do sleep 1; done
+          cat "$RUNNER_TEMP/apt.log"
+          exit "$(cat "$RUNNER_TEMP/apt.status")"
+      - name: Plan k230d-ai-cam
+        if: ${{ !cancelled() && steps.build.outcome == 'success' && steps.tools.outcome == 'success' }}
+        uses: ./
+        with:
+          gaia-bin: ${{ github.workspace }}/target/release/gaia
+          product: examples/products/k230d-ai-cam/product.toml
+          command: plan
+          args: --recipes ${{ github.workspace }}/recipes
+          cache-key: plan
+      - name: Plan k230d-zero
+        if: ${{ !cancelled() && steps.build.outcome == 'success' && steps.tools.outcome == 'success' }}
+        uses: ./
+        with:
+          gaia-bin: ${{ github.workspace }}/target/release/gaia
+          product: examples/products/k230d-zero/product.toml
+          command: plan
+          args: --recipes ${{ github.workspace }}/recipes
+          cache-key: plan
+      - name: Plan luckfox-aura-bench
+        if: ${{ !cancelled() && steps.build.outcome == 'success' && steps.tools.outcome == 'success' }}
+        uses: ./
+        with:
+          gaia-bin: ${{ github.workspace }}/target/release/gaia
+          product: examples/products/luckfox-aura-bench/product.toml
+          command: plan
+          args: --recipes ${{ github.workspace }}/recipes
+          cache-key: plan
+      - name: Plan rock-5c-demo
+        if: ${{ !cancelled() && steps.build.outcome == 'success' && steps.tools.outcome == 'success' }}
+        uses: ./
+        with:
+          gaia-bin: ${{ github.workspace }}/target/release/gaia
+          product: examples/products/rock-5c-demo/product.toml
+          command: plan
+          args: --recipes ${{ github.workspace }}/recipes
+          cache-key: plan
+      - name: Plan zero-3e-demo
+        if: ${{ !cancelled() && steps.build.outcome == 'success' && steps.tools.outcome == 'success' }}
+        uses: ./
+        with:
+          gaia-bin: ${{ github.workspace }}/target/release/gaia
+          product: examples/products/zero-3e-demo/product.toml
+          command: plan
+          args: --recipes ${{ github.workspace }}/recipes
+          cache-key: plan
+      # The products with a gaia.lock must be the ones planned below, each
+      # in a step of its own: a product added without its step fails here
+      # instead of going unplanned.
+      - name: Check the products planned
+        if: ${{ !cancelled() }}
         run: |
           set -euo pipefail
-          planned=()
+          found=()
           for product in $(find examples/products -name product.toml | sort); do
             if [[ -f "$(dirname "$product")/gaia.lock" ]]; then
-              planned+=("$product")
+              found+=("$product")
             else
               echo "::warning file=$product::no gaia.lock next to this product; it is not planned until gaia lock writes one"
             fi
           done
-          printf '%s\n' "${planned[@]}" | jq -R -s -c 'split("\n") | map(select(length > 0))' > products.json
-          echo "products=$(cat products.json)" >> "$GITHUB_OUTPUT"
-
-  # gaia, built once in the shipped release profile from the committed
-  # Cargo.lock, beside the listing; every plan job takes this binary.
-  gaia:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v5
-      # rust-toolchain.toml selects the toolchain.
-      - uses: dtolnay/rust-toolchain@stable
-      - uses: Swatinem/rust-cache@v2
-      - run: cargo build --release --locked -p gaia --bin gaia
-      - uses: actions/upload-artifact@v4
-        with:
-          name: gaia
-          path: target/release/gaia
-          retention-days: 1
-          if-no-files-found: error
-
-  plan:
-    needs: [list, gaia]
-    if: needs.list.outputs.products != '[]'
-    runs-on: ubuntu-latest
-    strategy:
-      fail-fast: false
-      matrix:
-        product: ${{ fromJSON(needs.list.outputs.products) }}
-    steps:
-      - uses: actions/checkout@v5
-      # A plan runs no tool, but a step's tool input must resolve to a path.
-      # Microsoft's package repository, which the runner image lists and
-      # nothing here installs from, is dropped first: when it refuses (403
-      # Forbidden) apt-get update fails the job.
-      - name: Install the tools the recipes name
-        run: |
-          sudo rm -f $(grep -l packages.microsoft.com /etc/apt/sources.list.d/* 2>/dev/null)
-          sudo apt-get -o Acquire::Retries=5 update -q
-          sudo apt-get -o Acquire::Retries=5 install -y -q --no-install-recommends erofs-utils cryptsetup-bin bubblewrap
-      - uses: actions/download-artifact@v4
-        with:
-          name: gaia
-          path: ${{ runner.temp }}/gaia
-      - name: Plan ${{ matrix.product }}
-        uses: ./
-        with:
-          gaia-bin: ${{ runner.temp }}/gaia/gaia
-          product: ${{ matrix.product }}
-          command: plan
-          args: --recipes ${{ github.workspace }}/recipes
-          cache-key: plan
+          planned="examples/products/k230d-ai-cam/product.toml examples/products/k230d-zero/product.toml examples/products/luckfox-aura-bench/product.toml examples/products/rock-5c-demo/product.toml examples/products/zero-3e-demo/product.toml"
+          if [[ "${found[*]}" != "$planned" ]]; then
+            echo "::error::the products with a gaia.lock are not the ones this workflow plans (give each a Plan step): found ${found[*]}, planned $planned"
+            exit 1
+          fi
