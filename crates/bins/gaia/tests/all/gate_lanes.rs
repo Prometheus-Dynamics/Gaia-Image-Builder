@@ -29,6 +29,30 @@ fn git(dir: &Path, args: &[&str]) {
 
 #[test]
 fn the_gate_tests_what_a_change_can_reach_and_nothing_a_passed_tree_holds() {
+    // Kept under the script and what it runs: python3, git and cargo (for
+    // `cargo metadata`); CI runs it every time (see gaia-verdict).
+    let Some(_pass) = gaia_verdict::Verdict::new(
+        "gate_lanes::plan",
+        env!("CARGO_MANIFEST_DIR"),
+        &[
+            (
+                "python3",
+                gaia_verdict::identity(Path::new("python3"), &["--version"]),
+            ),
+            (
+                "git",
+                gaia_verdict::identity(Path::new("git"), &["--version"]),
+            ),
+            (
+                "cargo",
+                gaia_verdict::identity(Path::new("cargo"), &["--version"]),
+            ),
+        ],
+        &["scripts/gate-lanes.py"],
+    )
+    .begin() else {
+        return;
+    };
     let dir = tempfile::tempdir().expect("tempdir");
     let repo = dir.path().join("repo");
     let records = dir.path().join("records");

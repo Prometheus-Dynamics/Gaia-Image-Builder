@@ -105,7 +105,7 @@ fn a_disk_is_the_boards_partitions_then_the_fanned_in_ones() {
     let Some((python, debugfs, sfdisk)) = tools() else {
         return;
     };
-    // Kept under this test binary, the gaia binary it runs, the fixture,
+    // Kept under this test binary, the gaia binary it runs (by its code), the fixture,
     // and the tools the build runs (CI runs it every time; see gaia-verdict).
     let Some(_pass) = gaia_verdict::Verdict::new(
         "disk::fan-in",
@@ -121,8 +121,9 @@ fn a_disk_is_the_boards_partitions_then_the_fanned_in_ones() {
             ("debugfs", gaia_verdict::identity(Path::new(&debugfs), &["-V"])),
             ("sfdisk", gaia_verdict::identity(Path::new(&sfdisk), &["--version"])),
             ("bwrap", gaia_verdict::identity(Path::new("/usr/bin/bwrap"), &["--version"])),
+            ("gaia", gaia_verdict::code_hash(Path::new(env!("CARGO_BIN_EXE_gaia")))),
         ],
-        &[env!("CARGO_BIN_EXE_gaia"), "crates/bins/gaia/tests/fixtures/disk"],
+        &["crates/bins/gaia/tests/fixtures/disk"],
     )
     .begin()
     else {

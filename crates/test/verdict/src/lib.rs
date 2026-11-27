@@ -9,12 +9,14 @@
 //! last assertion. CI never reuses: it runs every case on every push.
 //!
 //! The key is the hash of:
-//! - **the test binary**, its own bytes. They hold the case's recipe, the
-//!   pins it is compiled with (a toolchain release, an image digest), every
-//!   line of Gaia it links (the node, the store, the sandbox, the step kit),
-//!   the external crates, and the compiler. A change anywhere in that code
-//!   relinks the binary and moves the key; a change to a crate it does not
-//!   link leaves the binary as it was.
+//! - **the test binary's code**: the sections it loads ([`code_hash`]).
+//!   They hold the case's recipe, the pins it is compiled with (a toolchain
+//!   release, an image digest), every line of Gaia it runs (the node, the
+//!   store, the sandbox, the step kit), the external crates, and what the
+//!   compiler made of them. A change to code the binary runs moves the key;
+//!   a change the linker leaves out (a function nothing calls) moves only
+//!   the symbols and debug information, which are not loaded, and not the
+//!   key. A crate the binary does not link cannot move it either.
 //! - **the host toolchains** the case runs, by identity: each tool's
 //!   resolved path and what it says its version is.
 //! - **the gate's files** the case runs under ([`GATE_FILES`]), and any file
@@ -24,7 +26,7 @@
 //! - **pins** given as text, as tools are: an image digest, a release.
 //! - **the case's name.**
 //!
-//! A binary built again from the same code may differ in its bytes; that
+//! A binary built again from the same code may differ in its code; that
 //! only runs the case again. Nothing that can change what the case does is
 //! left out of the key: what is not in the binary is a tool or a file.
 //!
@@ -115,7 +117,7 @@ impl Verdict {
             hasher.update((bytes.len() as u64).to_le_bytes());
             hasher.update(bytes);
         };
-        part("verdict v1", b"");
+        part("verdict v2", b"");
         part("case", case.as_bytes());
         part("binary", binary_hash(&place.exe).as_bytes());
         let mut tools: Vec<_> = tools.to_vec();
@@ -264,7 +266,7 @@ pub fn identity(program: &Path, args: &[&str]) -> String {
     }
 }
 
-/// [`content_hash`] of a test binary, once per process for each version of
+/// [`code_hash`] of a test binary, once per process for each version of
 /// the file: every keyed case in one binary hashes the same tens of
 /// megabytes. The file's device, inode, size and change time name the
 /// version; a file written again gets a new change time and is hashed again.
@@ -276,7 +278,7 @@ fn binary_hash(path: &Path) -> String {
     type Version = (PathBuf, u64, u64, u64, i64, i64);
     static HASHES: OnceLock<Mutex<HashMap<Version, String>>> = OnceLock::new();
     let Ok(meta) = std::fs::metadata(path) else {
-        return content_hash(path);
+        return code_hash(path);
     };
     let version = (
         path.to_path_buf(),
@@ -290,9 +292,82 @@ fn binary_hash(path: &Path) -> String {
     if let Some(hash) = hashes.lock().expect("hashes").get(&version) {
         return hash.clone();
     }
-    let hash = content_hash(path);
+    let hash = code_hash(path);
     hashes.lock().expect("hashes").insert(version, hash.clone());
     hash
+}
+
+/// The hash of what an executable loads: for a 64-bit little-endian ELF
+/// file, its entry point, its program headers, and each section it maps
+/// into memory, by name, address, flags and bytes (a section with no bytes
+/// in the file, by its size), the build id left out. Symbols, debug
+/// information and comments are not loaded, and are not in it. Any other
+/// file, and an ELF file that does not read whole (truncated, or with a
+/// header out of bounds), is hashed by its whole content instead: never by
+/// less than it holds.
+pub fn code_hash(path: &Path) -> String {
+    match std::fs::read(path).ok().and_then(|bytes| elf_code(&bytes)) {
+        Some(hash) => format!("elf code {hash}"),
+        None => format!("content {}", content_hash(path)),
+    }
+}
+
+fn elf_code(elf: &[u8]) -> Option<String> {
+    const SHF_ALLOC: u64 = 0x2;
+    const SHT_NOBITS: u32 = 8;
+    let bytes = |at: usize, len: usize| elf.get(at..at.checked_add(len)?);
+    let u16_at = |at: usize| bytes(at, 2).map(|b| u16::from_le_bytes([b[0], b[1]]) as usize);
+    let u32_at = |at: usize| bytes(at, 4).map(|b| u32::from_le_bytes(b.try_into().expect("4")));
+    let u64_at = |at: usize| bytes(at, 8).map(|b| u64::from_le_bytes(b.try_into().expect("8")));
+    let usize_at = |at: usize| u64_at(at).and_then(|v| usize::try_from(v).ok());
+    // 64-bit, little-endian, version 1.
+    if bytes(0, 7)? != b"\x7fELF\x02\x01\x01" {
+        return None;
+    }
+    let (entry, phoff, shoff) = (u64_at(0x18)?, usize_at(0x20)?, usize_at(0x28)?);
+    let (phentsize, phnum) = (u16_at(0x36)?, u16_at(0x38)?);
+    let (shentsize, shnum, shstrndx) = (u16_at(0x3a)?, u16_at(0x3c)?, u16_at(0x3e)?);
+    // Extended numbering (0 sections, or an index past the reserved range)
+    // is not read: the whole content stands instead.
+    if shentsize != 64 || shnum == 0 || shstrndx >= shnum || phentsize != 56 {
+        return None;
+    }
+    let mut hasher = Sha256::new();
+    hasher.update(entry.to_le_bytes());
+    hasher.update(bytes(phoff, phentsize.checked_mul(phnum)?)?);
+    let header = |index: usize| bytes(shoff.checked_add(index.checked_mul(64)?)?, 64);
+    let names = header(shstrndx)?;
+    let names = bytes(
+        usize::try_from(u64::from_le_bytes(names[24..32].try_into().ok()?)).ok()?,
+        usize::try_from(u64::from_le_bytes(names[32..40].try_into().ok()?)).ok()?,
+    )?;
+    for index in 0..shnum {
+        let at = shoff.checked_add(index.checked_mul(64)?)?;
+        header(index)?;
+        let (name, kind, flags) = (u32_at(at)? as usize, u32_at(at + 4)?, u64_at(at + 8)?);
+        let (addr, offset, size) = (u64_at(at + 16)?, usize_at(at + 24)?, usize_at(at + 32)?);
+        let name = names.get(name..)?;
+        let name = &name[..name.iter().position(|&b| b == 0)?];
+        if flags & SHF_ALLOC == 0 || name == b".note.gnu.build-id" {
+            continue;
+        }
+        let content = if kind == SHT_NOBITS {
+            &[][..]
+        } else {
+            bytes(offset, size)?
+        };
+        for field in [
+            name,
+            &flags.to_le_bytes(),
+            &addr.to_le_bytes(),
+            &(size as u64).to_le_bytes(),
+            content,
+        ] {
+            hasher.update((field.len() as u64).to_le_bytes());
+            hasher.update(field);
+        }
+    }
+    Some(hex(&hasher.finalize()))
 }
 
 /// sha256 of a file's bytes, or of a directory's sorted entries (name, kind,

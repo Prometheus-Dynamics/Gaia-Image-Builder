@@ -2,7 +2,7 @@
 //! reads; a verdict is reused only after a pass, and never where reuse is
 //! off.
 
-use gaia_verdict::{GATE_FILES, Place, Verdict, identity};
+use gaia_verdict::{GATE_FILES, Place, Verdict, code_hash, identity};
 use std::path::Path;
 
 fn write(path: &Path, text: &str) {
@@ -191,4 +191,124 @@ fn a_binary_rewritten_in_the_same_process_is_hashed_again() {
         write(&place.exe, "binary 2ne\n");
         assert_ne!(key(&place, "t"), first, "round {round}: other bytes");
     }
+}
+
+/// `objcopy` with `args`, from `from` to `to`.
+fn objcopy(args: &[&str], from: &Path, to: &Path) {
+    let out = std::process::Command::new("objcopy")
+        .args(args)
+        .arg(from)
+        .arg(to)
+        .output()
+        .expect("objcopy (binutils) runs");
+    assert!(out.status.success(), "objcopy {args:?}: {out:?}");
+}
+
+#[test]
+fn the_code_hash_moves_with_what_is_loaded_and_only_with_that() {
+    // This test's own binary: a real executable, with debug information.
+    let dir = tempfile::tempdir().expect("tempdir");
+    let exe = dir.path().join("exe");
+    std::fs::write(
+        &exe,
+        std::fs::read(std::env::current_exe().expect("exe")).expect("read"),
+    )
+    .expect("write");
+    let first = code_hash(&exe);
+    assert!(first.starts_with("elf code "), "{first}");
+
+    // Stripped of symbols and debug information, with a section added that
+    // is not loaded: the same code.
+    let note = dir.path().join("note");
+    write(&note, "not loaded\n");
+    let stripped = dir.path().join("stripped");
+    let note_arg = format!(".planted={}", note.display());
+    objcopy(
+        &["--strip-all", "--add-section", &note_arg],
+        &exe,
+        &stripped,
+    );
+    assert_ne!(
+        std::fs::read(&stripped).expect("read"),
+        std::fs::read(&exe).expect("read"),
+        "the bytes differ"
+    );
+    assert_eq!(code_hash(&stripped), first, "what is loaded did not change");
+
+    // The same section, loaded: other code.
+    let loaded = dir.path().join("loaded");
+    objcopy(
+        &[
+            "--add-section",
+            &note_arg,
+            "--set-section-flags",
+            ".planted=alloc,load,contents,readonly",
+        ],
+        &exe,
+        &loaded,
+    );
+    assert_ne!(code_hash(&loaded), first, "a loaded section moves it");
+
+    // One byte of the read-only data, at the same size: other code.
+    let rodata = dir.path().join("rodata");
+    objcopy(
+        &["--dump-section", &format!(".rodata={}", rodata.display())],
+        &exe,
+        &dir.path().join("unused"),
+    );
+    let mut data = std::fs::read(&rodata).expect("read");
+    let last = data.len() - 1;
+    data[last] ^= 0xff;
+    std::fs::write(&rodata, &data).expect("write");
+    let changed = dir.path().join("changed");
+    objcopy(
+        &["--update-section", &format!(".rodata={}", rodata.display())],
+        &exe,
+        &changed,
+    );
+    assert_ne!(code_hash(&changed), first, "a changed constant moves it");
+}
+
+#[test]
+fn an_elf_file_that_does_not_read_whole_is_hashed_by_all_its_bytes() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let bytes = std::fs::read(std::env::current_exe().expect("exe")).expect("read");
+    // The header alone, the header and program headers, and all but the
+    // last byte (the section headers are at the end): none reads whole.
+    for keep in [40, 4096, bytes.len() - 1] {
+        let cut = dir.path().join(format!("cut-{keep}"));
+        std::fs::write(&cut, &bytes[..keep]).expect("write");
+        let hash = code_hash(&cut);
+        assert!(hash.starts_with("content "), "{keep} bytes: {hash}");
+        // By every byte: one changed byte moves it.
+        let mut other = bytes[..keep].to_vec();
+        other[keep / 2] ^= 0xff;
+        std::fs::write(&cut, &other).expect("write");
+        assert_ne!(code_hash(&cut), hash, "{keep} bytes: a changed byte");
+    }
+    // Whole, but a loaded section's bytes are said to be past the end.
+    let mut past = bytes.clone();
+    let word = |b: &[u8], at: usize| u64::from_le_bytes(b[at..at + 8].try_into().expect("8"));
+    let shoff = word(&bytes, 0x28) as usize;
+    let shnum = u16::from_le_bytes([bytes[0x3c], bytes[0x3d]]) as usize;
+    let section = (0..shnum)
+        .map(|i| shoff + i * 64)
+        .find(|&at| {
+            let kind = u32::from_le_bytes(bytes[at + 4..at + 8].try_into().expect("4"));
+            word(&bytes, at + 8) & 0x2 != 0 && kind != 8 && word(&bytes, at + 32) > 0
+        })
+        .expect("a loaded section with bytes");
+    past[section + 24..section + 32].copy_from_slice(&(bytes.len() as u64).to_le_bytes());
+    let cut = dir.path().join("past");
+    std::fs::write(&cut, &past).expect("write");
+    assert!(
+        code_hash(&cut).starts_with("content "),
+        "{}",
+        code_hash(&cut)
+    );
+
+    // Not ELF at all: its content.
+    let text = dir.path().join("text");
+    write(&text, "#!/bin/sh\n");
+    assert!(code_hash(&text).starts_with("content "));
 }
