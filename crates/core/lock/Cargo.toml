@@ -7,6 +7,11 @@ license.workspace = true
 rust-version.workspace = true
 repository.workspace = true
 
+[lib]
+# No unit tests: its cases are in tests/. Building an empty unit-test
+# binary on every change costs the gate a link (gaia tests/all/lib_tests.rs).
+test = false
+
 [dependencies]
 gaia-store = { path = "../store" }
 serde = { version = "1", features = ["derive"] }

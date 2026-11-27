@@ -8,6 +8,11 @@ rust-version.workspace = true
 repository.workspace = true
 publish = false
 
+[lib]
+# No unit tests: its cases are in tests/. Building an empty unit-test
+# binary on every change costs the gate a link (gaia tests/all/lib_tests.rs).
+test = false
+
 [dependencies]
 base64 = "=0.22.1"
 blake2 = "=0.10.6"

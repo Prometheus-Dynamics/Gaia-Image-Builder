@@ -11,6 +11,8 @@ publish = false
 [lib]
 name = "gaia_lock_cmd"
 path = "src/lib.rs"
+# Its unit test moved to tests/ (gaia tests/all/lib_tests.rs).
+test = false
 
 [[bin]]
 name = "gaia-lock"

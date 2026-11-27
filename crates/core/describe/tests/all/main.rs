@@ -8,4 +8,5 @@ mod fragments;
 mod inputs;
 mod patches;
 mod rust_source;
+mod sources;
 mod subdir;

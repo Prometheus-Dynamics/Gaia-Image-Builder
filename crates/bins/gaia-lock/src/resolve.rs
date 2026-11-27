@@ -299,24 +299,3 @@ fn token(curl: &Path, challenge: &str, repository: &str, scratch: &Path) -> Resu
         .map(str::to_string)
         .ok_or_else(|| "no token in the answer".into())
 }
-
-#[cfg(test)]
-mod relative_tests {
-    use super::relative;
-    use std::path::Path;
-
-    #[test]
-    fn under_beside_and_the_same() {
-        let base = Path::new("/w/devices/products/p");
-        for (path, expected) in [
-            ("/w/devices/products/p/files", "files"),
-            ("/w/devices/products/p/a/b", "a/b"),
-            ("/w/devices/components/c/files", "../../components/c/files"),
-            ("/w/devices/products/p", "."),
-            ("/w/devices/products/p/x/../y", "y"),
-            ("/elsewhere/tree", "../../../../elsewhere/tree"),
-        ] {
-            assert_eq!(relative(Path::new(path), base), expected, "{path}");
-        }
-    }
-}

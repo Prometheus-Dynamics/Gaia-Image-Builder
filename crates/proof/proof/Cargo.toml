@@ -8,6 +8,11 @@ rust-version.workspace = true
 repository.workspace = true
 publish = false
 
+[lib]
+# No unit tests: its cases are in tests/. Building an empty unit-test
+# binary on every change costs the gate a link (gaia tests/all/lib_tests.rs).
+test = false
+
 [dependencies]
 daedalus = { workspace = true }
 daedalus-cpu = { git = "https://github.com/Prometheus-Dynamics/Daedalus.git", rev = "b3916178f255ab9f55d230dff1395c08b3bca2c9" }

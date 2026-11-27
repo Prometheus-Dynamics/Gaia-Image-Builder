@@ -8,6 +8,7 @@ mod gate_lanes;
 mod gate_steps;
 mod gate_target;
 mod input;
+mod lib_tests;
 mod os;
 mod qemu_board_sysfs;
 mod qemu_riscv64;

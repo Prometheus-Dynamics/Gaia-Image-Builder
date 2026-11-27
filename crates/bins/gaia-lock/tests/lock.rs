@@ -483,3 +483,23 @@ fn check_asks_for_nothing_and_says_what_is_missing() {
     assert_eq!(code, 1);
     assert!(message.contains("not in the lock: c.extra"), "{message}");
 }
+
+/// A path as the lock writes it: relative to the product's directory.
+#[test]
+fn relative_paths_under_beside_and_the_same() {
+    let base = std::path::Path::new("/w/devices/products/p");
+    for (path, expected) in [
+        ("/w/devices/products/p/files", "files"),
+        ("/w/devices/products/p/a/b", "a/b"),
+        ("/w/devices/components/c/files", "../../components/c/files"),
+        ("/w/devices/products/p", "."),
+        ("/w/devices/products/p/x/../y", "y"),
+        ("/elsewhere/tree", "../../../../elsewhere/tree"),
+    ] {
+        assert_eq!(
+            gaia_lock_cmd::relative(std::path::Path::new(path), base),
+            expected,
+            "{path}"
+        );
+    }
+}

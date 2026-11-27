@@ -2,4 +2,5 @@
 //! its own under tests/.
 
 mod a2;
+mod masking;
 mod report;
