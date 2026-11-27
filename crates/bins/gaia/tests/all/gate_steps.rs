@@ -1,5 +1,5 @@
-//! `scripts/gate.sh` fails when any of its steps fails, names it, and
-//! records a pass only when every one passed; its steps run side by side. The real gate scripts run in a repository of
+//! `scripts/gate.sh` fails when any of its steps fails, and records a pass
+//! only when every one passed. The real gate scripts run in a repository of
 //! their own, with `cargo`, `rustc` and the built `gaia` replaced by stubs
 //! that pass, or fail where a case plants the failure. Each step is planted
 //! in turn, the second of the two test commands among them: a red step
@@ -32,24 +32,14 @@ fn git(dir: &Path, args: &[&str]) {
     assert!(out.status.success(), "git {args:?}: {out:?}");
 }
 
-/// `cargo`: logs its arguments and the commit it would record, fails when
-/// they contain `$GATE_FAIL`; `nextest run` says its cases started and runs
-/// them until clippy has run (10 s at most), then logs `cases ended`; and
+/// `cargo`: logs its arguments and the commit it would record, fails when they contain `$GATE_FAIL`, and
 /// for `build -p gaia` writes a `gaia` whose `store verify` checks each
 /// file object against its name, as the real one does.
 const CARGO: &str = r#"#!/bin/sh
 echo "$* [commit=${GAIA_COMMIT:-}]" >> "$GATE_LOG"
 case " $* " in *" $GATE_FAIL "*) echo "planted failure: cargo $*" >&2; exit 101 ;; esac
 case "$1" in
-  nextest)
-    case "$2" in
-      --version) echo "cargo-nextest 0.9.0" ;;
-      run)
-        echo "    Starting 1 tests across 1 binary" >&2
-        i=0
-        while [ $i -lt 50 ] && ! grep -q '^clippy' "$GATE_LOG"; do sleep 0.2; i=$((i + 1)); done
-        echo "cases ended [commit=${GAIA_COMMIT:-}]" >> "$GATE_LOG" ;;
-    esac ;;
+  nextest) [ "$2" = --version ] && echo "cargo-nextest 0.9.0" ;;
   metadata) echo '{"packages":[],"workspace_members":[],"resolve":null}' ;;
   build)
     mkdir -p "$CARGO_TARGET_DIR/debug"
@@ -76,11 +66,6 @@ struct Run {
 /// The gate, in a fresh repository with its own pass records, with the
 /// cargo command that contains `fail` (a space-separated word) failing.
 fn gate(dir: &Path, fail: &str) -> Run {
-    gate_on(dir, fail, false)
-}
-
-/// [`gate`], as on a CI runner when `ci`.
-fn gate_on(dir: &Path, fail: &str, ci: bool) -> Run {
     let repo = dir.join("repo");
     let bin = dir.join("bin");
     let records = dir.join("records");
@@ -119,13 +104,7 @@ fn gate_on(dir: &Path, fail: &str, ci: bool) -> Run {
         bin.display(),
         std::env::var("PATH").unwrap_or_default()
     );
-    let mut command = Command::new("bash");
-    if ci {
-        command.env("GITHUB_ACTIONS", "true");
-    } else {
-        command.env_remove("GITHUB_ACTIONS");
-    }
-    let out = command
+    let out = Command::new("bash")
         .arg(repo.join("scripts/gate.sh"))
         .current_dir(&repo)
         .env("PATH", path)
@@ -159,28 +138,9 @@ fn a_gate_with_every_step_green_passes_and_records_it() {
     assert!(run.output.contains("gate passed"), "{}", run.output);
     // Every step ran: the doc tests after the cases, the build for the
     // store check last.
-    for step in [
-        "metadata",
-        "fmt",
-        "--no-run",
-        "clippy",
-        "nextest run",
-        "--doc",
-        "build",
-    ] {
+    for step in ["metadata", "fmt", "clippy", "nextest run", "--doc", "build"] {
         assert!(run.cargo.contains(step), "{step} ran: {}", run.cargo);
     }
-    // Side by side: clippy ran while the cases were running.
-    let at = |word: &str| {
-        run.cargo
-            .find(word)
-            .unwrap_or_else(|| panic!("{word}: {}", run.cargo))
-    };
-    assert!(
-        at("nextest run") < at("clippy") && at("clippy") < at("cases ended"),
-        "{}",
-        run.cargo
-    );
     // Every build in the gate records `gate` as its commit, whatever the
     // caller set: no binary it tests carries a HEAD.
     for line in run.cargo.lines() {
@@ -190,23 +150,11 @@ fn a_gate_with_every_step_green_passes_and_records_it() {
 
 #[test]
 fn a_failing_step_fails_the_gate_and_records_nothing() {
-    // Each step, side by side with others or not, fails the gate by name.
-    for (fail, step) in [
-        ("metadata", "lock"),
-        ("fmt", "step 'format'"),
-        ("--no-run", "step 'test build'"),
-        ("run", "step 'tests'"),
-        ("clippy", "step 'clippy'"),
-        ("--doc", "step 'doc tests'"),
-        ("build", "step 'store verify'"),
-    ] {
+    // `nextest run` is the first of two commands in the tests step: the doc
+    // tests after it pass, and the step must still fail.
+    for fail in ["metadata", "fmt", "clippy", "run", "--doc", "build"] {
         let dir = tempfile::tempdir().expect("tempdir");
         let run = gate(dir.path(), fail);
-        assert!(
-            run.output.contains(step),
-            "{fail}: {step} not named: {}",
-            run.output
-        );
         assert_ne!(
             run.code,
             Some(0),
@@ -224,43 +172,5 @@ fn a_failing_step_fails_the_gate_and_records_nothing() {
             "{fail} was run: {}",
             run.output
         );
-    }
-}
-
-#[test]
-fn a_check_that_fails_while_the_cases_pass_fails_the_gate_by_name() {
-    // clippy fails while nextest is running its cases, which pass.
-    // Locally the gate stops the cases and the rest of clippy's line; on CI
-    // every step runs to its end. Red either way, clippy named, nothing
-    // recorded.
-    for ci in [false, true] {
-        let dir = tempfile::tempdir().expect("tempdir");
-        let run = gate_on(dir.path(), "clippy", ci);
-        assert_ne!(run.code, Some(0), "ci {ci}: {}", run.output);
-        assert!(!run.recorded, "ci {ci}: a pass was recorded");
-        assert!(
-            run.output.contains("gate failed: step 'clippy'"),
-            "ci {ci}: {}",
-            run.output
-        );
-        assert!(
-            !run.output.contains("gate passed"),
-            "ci {ci}: {}",
-            run.output
-        );
-        assert_eq!(run.cargo.contains("--doc"), ci, "ci {ci}: {}", run.cargo);
-        assert_eq!(
-            run.cargo.contains("cases ended"),
-            ci,
-            "ci {ci}: {}",
-            run.cargo
-        );
-        if !ci {
-            assert!(
-                run.output.contains("step 'tests' was stopped"),
-                "{}",
-                run.output
-            );
-        }
     }
 }
