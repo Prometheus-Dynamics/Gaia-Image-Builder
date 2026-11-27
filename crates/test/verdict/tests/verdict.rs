@@ -267,6 +267,30 @@ fn the_code_hash_moves_with_what_is_loaded_and_only_with_that() {
         &changed,
     );
     assert_ne!(code_hash(&changed), first, "a changed constant moves it");
+
+    // One byte of the unwind table, at the same size: the same code. One
+    // byte of the instructions: other code.
+    for (section, moves) in [(".eh_frame", false), (".text", true)] {
+        let bytes = dir.path().join(section);
+        let arg = format!("{section}={}", bytes.display());
+        objcopy(&["--dump-section", &arg], &exe, &dir.path().join("unused"));
+        let mut data = std::fs::read(&bytes).expect("read");
+        let middle = data.len() / 2;
+        data[middle] ^= 0xff;
+        std::fs::write(&bytes, &data).expect("write");
+        let changed = dir.path().join(format!("changed{section}"));
+        objcopy(&["--update-section", &arg], &exe, &changed);
+        assert_eq!(code_hash(&changed) != first, moves, "{section}");
+    }
+
+    // A segment's permissions (the first program header's flags, its
+    // execute bit turned over): other code.
+    let mut bytes = std::fs::read(&exe).expect("read");
+    let phoff = u64::from_le_bytes(bytes[0x20..0x28].try_into().expect("8")) as usize;
+    bytes[phoff + 4] ^= 0x1;
+    let flags = dir.path().join("flags");
+    std::fs::write(&flags, &bytes).expect("write");
+    assert_ne!(code_hash(&flags), first, "a segment's flags move it");
 }
 
 #[test]
@@ -311,4 +335,64 @@ fn an_elf_file_that_does_not_read_whole_is_hashed_by_all_its_bytes() {
     let text = dir.path().join("text");
     write(&text, "#!/bin/sh\n");
     assert!(code_hash(&text).starts_with("content "));
+}
+
+/// Builds `dir`'s workspace with cargo, quietly, into its own target, and
+/// gives the code hash of its `app` binary.
+fn built(dir: &Path) -> String {
+    let cargo = std::env::var_os("CARGO").unwrap_or_else(|| "cargo".into());
+    let out = std::process::Command::new(cargo)
+        .args(["build", "-q", "--offline"])
+        .current_dir(dir)
+        .env("CARGO_TARGET_DIR", dir.join("target"))
+        .env_remove("RUSTFLAGS")
+        .output()
+        .expect("cargo runs");
+    assert!(out.status.success(), "cargo build: {out:?}");
+    code_hash(&dir.join("target/debug/app"))
+}
+
+#[test]
+fn on_a_real_build_an_unused_function_keeps_the_key_and_a_used_change_moves_it() {
+    // A library with code its binary runs, generic and panicking among it,
+    // and the binary that links it: built by cargo as the gate builds.
+    let dir = tempfile::tempdir().expect("tempdir");
+    let root = dir.path();
+    write(
+        &root.join("Cargo.toml"),
+        "[workspace]\nmembers = [\"lib\", \"app\"]\nresolver = \"2\"\n",
+    );
+    write(
+        &root.join("lib/Cargo.toml"),
+        "[package]\nname = \"lib\"\nversion = \"0.1.0\"\nedition = \"2021\"\n",
+    );
+    let lib = "pub fn open(root: impl Into<std::path::PathBuf>) -> std::path::PathBuf {\n    let root = root.into();\n    root.join(\"objects/file\")\n}\n\npub fn sum<T: Copy + std::ops::Add<Output = T>>(items: &[T], zero: T) -> T {\n    items.iter().fold(zero, |a, b| a + *b)\n}\n\npub fn checked(n: usize) -> usize {\n    assert!(n < 1000, \"too big: {n}\");\n    n * 2\n}\n";
+    write(&root.join("lib/src/lib.rs"), lib);
+    write(
+        &root.join("app/Cargo.toml"),
+        "[package]\nname = \"app\"\nversion = \"0.1.0\"\nedition = \"2021\"\n\n[dependencies]\nlib = { path = \"../lib\" }\n",
+    );
+    write(
+        &root.join("app/src/main.rs"),
+        "fn main() {\n    let n = std::env::args().count();\n    println!(\"{} {} {}\", lib::open(\"/s\").display(), lib::sum(&[n, 2], 0), lib::checked(n));\n}\n",
+    );
+    let first = built(root);
+    assert!(first.starts_with("elf code "), "{first}");
+
+    // An unused public function, at the end: the same loaded code.
+    write(
+        &root.join("lib/src/lib.rs"),
+        &format!("{lib}\npub fn nothing_calls_this() -> u32 {{\n    7\n}}\n"),
+    );
+    assert_eq!(built(root), first, "an unused function moved the key");
+
+    // A change to code the binary runs: other code.
+    write(
+        &root.join("lib/src/lib.rs"),
+        &lib.replace(
+            "    let root = root.into();\n",
+            "    let root: std::path::PathBuf = root.into();\n    std::hint::black_box(root.as_os_str().len());\n",
+        ),
+    );
+    assert_ne!(built(root), first, "a used change kept the key");
 }

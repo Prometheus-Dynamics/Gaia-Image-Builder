@@ -298,9 +298,11 @@ fn binary_hash(path: &Path) -> String {
 }
 
 /// The hash of what an executable loads: for a 64-bit little-endian ELF
-/// file, its entry point, its program headers, and each section it maps
+/// file, its entry point, its segments (by type, flags, addresses and
+/// alignment), and each section it maps
 /// into memory, by name, address, flags and bytes (a section with no bytes
-/// in the file, by its size), the build id left out. Symbols, debug
+/// in the file, by its size), the build id and the unwind tables
+/// ([`UNWIND_TABLES`]) left out. Symbols, debug
 /// information and comments are not loaded, and are not in it. Any other
 /// file, and an ELF file that does not read whole (truncated, or with a
 /// header out of bounds), is hashed by its whole content instead: never by
@@ -311,6 +313,26 @@ pub fn code_hash(path: &Path) -> String {
         None => format!("content {}", content_hash(path)),
     }
 }
+
+/// The unwind tables, left out of [`code_hash`]; every other loaded section
+/// is in it, `.gcc_except_table` (the landing pads) among them.
+///
+/// The argument: the compiler writes these tables from the code it emits,
+/// one entry for each function's instructions. A change to what a case runs
+/// changes `.text`, `.rodata` or the data, and those stay in the key; where
+/// they are byte for byte the same, the tables still move when the linker
+/// drops a function that nothing calls, as the entries around it shift.
+/// Measured with an unused `pub fn` added to gaia-store: the `gaia`
+/// executable and gaia-store's `store` test moved in `.eh_frame` (4 bytes
+/// shorter, all after it shifted) and `.eh_frame_hdr` only, so a case kept
+/// under `gaia` (disk::fan-in) ran again for nothing. gaia-store's `crash`
+/// test moved in `.text`, `.rodata`, `.rela.dyn`, `.rela.plt`, `.dynamic`
+/// and `.got.plt` as well: its key moves, and its case runs again.
+///
+/// The one known risk: a change that alters only how a panic unwinds, with
+/// no byte of code or data moving. No such change is known to come out of
+/// rustc; a reader who finds one should put these tables back in.
+pub const UNWIND_TABLES: &[&[u8]] = &[b".eh_frame", b".eh_frame_hdr"];
 
 fn elf_code(elf: &[u8]) -> Option<String> {
     const SHF_ALLOC: u64 = 0x2;
@@ -334,7 +356,18 @@ fn elf_code(elf: &[u8]) -> Option<String> {
     }
     let mut hasher = Sha256::new();
     hasher.update(entry.to_le_bytes());
-    hasher.update(bytes(phoff, phentsize.checked_mul(phnum)?)?);
+    // Each segment by its type, flags, addresses and alignment. Its offset
+    // and sizes in the file and in memory are left out: they follow from
+    // the sections in it, which are in the hash by address and bytes, and
+    // the unwind tables' length moves them (the read-only segment, by the 4
+    // bytes `.eh_frame` lost in the measurement at [`UNWIND_TABLES`]).
+    for index in 0..phnum {
+        let at = phoff.checked_add(index.checked_mul(phentsize)?)?;
+        let header = bytes(at, 56)?;
+        hasher.update(&header[0..8]);
+        hasher.update(&header[16..32]);
+        hasher.update(&header[48..56]);
+    }
     let header = |index: usize| bytes(shoff.checked_add(index.checked_mul(64)?)?, 64);
     let names = header(shstrndx)?;
     let names = bytes(
@@ -348,7 +381,8 @@ fn elf_code(elf: &[u8]) -> Option<String> {
         let (addr, offset, size) = (u64_at(at + 16)?, usize_at(at + 24)?, usize_at(at + 32)?);
         let name = names.get(name..)?;
         let name = &name[..name.iter().position(|&b| b == 0)?];
-        if flags & SHF_ALLOC == 0 || name == b".note.gnu.build-id" {
+        if flags & SHF_ALLOC == 0 || name == b".note.gnu.build-id" || UNWIND_TABLES.contains(&name)
+        {
             continue;
         }
         let content = if kind == SHT_NOBITS {
