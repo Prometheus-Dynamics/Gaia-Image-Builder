@@ -71,13 +71,13 @@ runs:
         store="${STORE/#\~/$HOME}"
         echo "store=$(realpath -m "$store")" >> "$GITHUB_OUTPUT"
         # The binary cache key: the ref asked for, or the content of this
-        # action's own copy. `cargo install` below resolves the dependencies
-        # again and does not read the repository's Cargo.lock, so the
-        # manifests and sources stand for the build.
+        # action's own copy. `cargo install --locked` below builds exactly
+        # the committed Cargo.lock, with the flags of scripts/shipped-flags.sh,
+        # so those stand for the build with the manifests and sources.
         if [[ -n "$GAIA_REF" ]]; then
-          key="ref-$GAIA_REF"
+          key="ref-locked-remapped-$GAIA_REF"
         else
-          key="src-$(cd "$ACTION_PATH" && find Cargo.toml rust-toolchain.toml crates -type f -print0 | sort -z | xargs -0 sha256sum | sha256sum | cut -c1-16)"
+          key="src-$(cd "$ACTION_PATH" && find Cargo.toml Cargo.lock rust-toolchain.toml scripts/shipped-flags.sh crates -type f -print0 | sort -z | xargs -0 sha256sum | sha256sum | cut -c1-16)"
         fi
         echo "gaia-key=$key" >> "$GITHUB_OUTPUT"
 
@@ -107,10 +107,14 @@ runs:
         GAIA_REF: ${{ inputs.gaia-ref }}
       run: |
         set -euo pipefail
+        # The committed Cargo.lock, never a fresh resolve (--locked), and no
+        # path of the runner's cargo home in the binary (shipped-flags.sh).
+        CARGO_ENCODED_RUSTFLAGS=$("$ACTION_PATH/scripts/shipped-flags.sh")
+        export CARGO_ENCODED_RUSTFLAGS
         if [[ -n "$GAIA_REF" ]]; then
-          cargo install --git https://github.com/Prometheus-Dynamics/Gaia-Image-Builder --rev "$GAIA_REF" gaia
+          cargo install --locked --git https://github.com/Prometheus-Dynamics/Gaia-Image-Builder --rev "$GAIA_REF" gaia
         else
-          (cd "$ACTION_PATH" && rustup show active-toolchain >/dev/null && cargo install --path crates/bins/gaia)
+          (cd "$ACTION_PATH" && rustup show active-toolchain >/dev/null && cargo install --locked --path crates/bins/gaia)
         fi
 
     - name: Restore the content store

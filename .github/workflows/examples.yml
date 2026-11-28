@@ -89,9 +89,20 @@ jobs:
           others=$(rustup toolchain list | awk '{print $1}' | grep -v "^$pin-" || true)
           [ -z "$others" ] || { echo "::error::toolchains beside the pin $pin: $others"; exit 1; }
       - uses: Swatinem/rust-cache@v2
+      # Built as shipped: the release profile, the committed Cargo.lock and
+      # scripts/shipped-flags.sh, then checked to hold no path of the cargo
+      # home (scripts/shipped-paths-check.sh compares builds from two homes).
       - id: build
         name: Build gaia
-        run: cargo build --release --locked -p gaia --bin gaia
+        run: |
+          CARGO_ENCODED_RUSTFLAGS=$(scripts/shipped-flags.sh)
+          export CARGO_ENCODED_RUSTFLAGS
+          cargo build --release --locked -p gaia --bin gaia
+          home=${CARGO_HOME:-$HOME/.cargo}
+          if grep -c -F -- "$home" target/release/gaia; then
+            echo "::error::the release gaia holds paths of the cargo home $home"
+            exit 1
+          fi
       - id: tools
         name: Wait for the tools
         timeout-minutes: 5

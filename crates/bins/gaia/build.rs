@@ -13,8 +13,17 @@ fn main() {
     let manifest = std::env::var_os("CARGO_MANIFEST_DIR")
         .map(PathBuf::from)
         .unwrap_or_else(|| PathBuf::from("."));
-    watch_git_files(&manifest);
-    let commit = commit(&manifest, std::env::var("GAIA_COMMIT").ok());
+    let given = std::env::var("GAIA_COMMIT").ok();
+    if given.as_deref().is_some_and(|value| !value.is_empty()) {
+        // The commit is given, so the git files do not change it: watched,
+        // every commit and index write ran this script again and rebuilt
+        // gaia with the same result (the gate gives `gate`). A change of
+        // GAIA_COMMIT, set or unset, still runs it again.
+        println!("cargo:rerun-if-changed=build.rs");
+    } else {
+        watch_git_files(&manifest);
+    }
+    let commit = commit(&manifest, given);
     println!("cargo:rustc-env=GAIA_COMMIT={commit}");
 }
 
