@@ -25,6 +25,18 @@ export GAIA_COMMIT=gate
 # script for why).
 scripts/gate-target.sh
 
+# With GAIA_GATE_CARGO_HOME naming a cargo home of the gate's own, it is
+# filled from the committed lock files first (the only step online), then
+# every lane runs offline in it: none downloads, and none waits on another
+# program's lock on ~/.cargo's package cache. Unset (CI, developers), cargo
+# keeps the caller's CARGO_HOME. The name is not passed on: a gate the
+# cases run (tests/all/gate_steps.rs) fetches nothing.
+if [ -n "${GAIA_GATE_CARGO_HOME:-}" ]; then
+  scripts/gate-home.sh "$GAIA_GATE_CARGO_HOME"
+  export CARGO_HOME="$GAIA_GATE_CARGO_HOME" CARGO_NET_OFFLINE=true
+fi
+unset GAIA_GATE_CARGO_HOME
+
 step() {
   local label="$1" start rc=0
   shift

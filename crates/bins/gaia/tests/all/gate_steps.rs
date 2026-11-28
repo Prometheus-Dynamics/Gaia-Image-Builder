@@ -90,6 +90,7 @@ fn gate_on(dir: &Path, fail: &str, ci: bool) -> Run {
     let log = dir.join("cargo.log");
     for name in [
         "gate.sh",
+        "gate-home.sh",
         "gate-lanes.py",
         "gate-target.sh",
         "nice.sh",
@@ -128,6 +129,8 @@ fn gate_on(dir: &Path, fail: &str, ci: bool) -> Run {
     } else {
         command.env_remove("GITHUB_ACTIONS");
     }
+    // The gate under test fetches no cargo home, whatever the caller's.
+    command.env_remove("GAIA_GATE_CARGO_HOME");
     let out = command
         .arg(repo.join("scripts/gate.sh"))
         .current_dir(&repo)
